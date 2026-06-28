@@ -1,0 +1,7 @@
+/* Sild webfonts — loaded from Google Fonts CDN.
+   Schibsted Grotesk: the Nordic display + UI workhorse (brand name "Sild" is Estonian).
+   JetBrains Mono: code, API keys, tokens, technical surfaces.
+   NOTE: substituted from Google Fonts since Sild has no proprietary typeface yet.
+   Swap these @import lines for local @font-face if/when custom fonts are licensed. */
+
+@import url('https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');

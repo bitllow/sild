@@ -65,10 +65,27 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 	}
 
 	n.OnConnecting(func(ctx context.Context, e centrifuge.ConnectEvent) (centrifuge.ConnectReply, error) {
-		claims, err := km.Verify(ctx, e.Token)
+		claims, err := km.VerifyRealtime(ctx, e.Token)
 		if err != nil {
 			return centrifuge.ConnectReply{}, centrifuge.ErrorUnauthorized
 		}
+
+		// Agent (inbox) connection: subscribe to every conversation that
+		// currently carries an assignment — both the conv channel and the
+		// agents-only internal channel (§5.1/§5.6) — plus the tenant agents
+		// channel for new queue items. Resolved live from the queue, not from
+		// membership (agents aren't conversation members).
+		if claims.Typ == "agent" {
+			subs, err := agentSubscriptions(ctx, st, claims.Tid, claims.Subject)
+			if err != nil {
+				return centrifuge.ConnectReply{}, centrifuge.ErrorUnauthorized
+			}
+			return centrifuge.ConnectReply{
+				Credentials:   &centrifuge.Credentials{UserID: claims.Subject},
+				Subscriptions: subs,
+			}, nil
+		}
+
 		// Server-side subscriptions: own user channel + every active conversation.
 		// User tokens are never subscribed to conv:<id>:internal, so internal
 		// notes physically cannot reach a client (§5.6).
@@ -95,6 +112,30 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 	})
 
 	return &Node{Node: n, cfg: cfg.Realtime}, nil
+}
+
+// agentSubscriptions computes the server-side channel set for an inbox agent
+// connection (§5.2): the agent's user channel, the tenant agents channel (new
+// queue items), and conv:<id> + conv:<id>:internal for every conversation that
+// currently carries an assignment. The agent must be a real admin in the tenant.
+func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID string) (map[string]centrifuge.SubscribeOptions, error) {
+	if _, err := st.Admins().Get(ctx, tenantID, adminID); err != nil {
+		return nil, err
+	}
+	subs := map[string]centrifuge.SubscribeOptions{
+		UserChannel(adminID):    {},
+		AgentsChannel(tenantID): {},
+	}
+	assignments, err := st.Assignments().ListQueue(ctx, tenantID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	for i := range assignments {
+		cid := assignments[i].ConversationID
+		subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
+		subs[ConvInternalChannel(cid)] = centrifuge.SubscribeOptions{}
+	}
+	return subs, nil
 }
 
 // Handler returns the HTTP mux serving WS (and SSE for the web widget) (§5).

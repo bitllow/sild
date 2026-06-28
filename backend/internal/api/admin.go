@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
 	"github.com/bitllow/sild/backend/internal/httpx"
@@ -102,6 +103,19 @@ func (h *Handler) adminLogout(c *gin.Context) {
 	}
 	c.SetCookie(middleware.AdminCookieName, "", -1, "/", "", h.cfg.Env == "production", true)
 	c.Status(http.StatusNoContent)
+}
+
+// realtimeToken mints a short-lived agent JWT the inbox uses to open its
+// egress-only realtime connection (§5). The session cookie can't ride a
+// cross-origin WebSocket, so the browser swaps it for this token over REST.
+func (h *Handler) realtimeToken(c *gin.Context) {
+	p := middleware.Get(c)
+	tok, exp, err := h.km.MintAgent(c.Request.Context(), p.AdminID, p.TenantID, time.Hour)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": tok, "expires_at": exp})
 }
 
 // ── Inbox (§4.3) ────────────────────────────────────────────────────────────
@@ -264,6 +278,53 @@ func (h *Handler) listDeliveries(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, ds)
+}
+
+func (h *Handler) listTeam(c *gin.Context) {
+	admins, err := h.svc.ListAdmins(c.Request.Context(), apiutil.Tenant(c))
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(admins))
+	for i := range admins {
+		a := &admins[i]
+		out = append(out, map[string]any{
+			"id": a.ID, "email": a.Email, "platform_role": a.PlatformRole,
+			"has_password": a.PasswordHash != nil, "created_at": a.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) updateWebhook(c *gin.Context) {
+	var req struct {
+		Active *bool `json:"active"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Active == nil {
+		httpx.BadRequest(c, "active is required")
+		return
+	}
+	if err := h.svc.SetWebhookActive(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), *req.Active); err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) updateAgent(c *gin.Context) {
+	var req struct {
+		PlatformRole models.PlatformRole `json:"platform_role"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid body")
+		return
+	}
+	if err := h.svc.SetAdminRole(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), req.PlatformRole); err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) inviteAgent(c *gin.Context) {

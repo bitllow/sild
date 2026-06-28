@@ -84,6 +84,10 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	}
 	conv.Members = members
 	conv.Assignment = assignment
+	// surface host-created support requests in the inbox queue live (§8)
+	if assignment != nil {
+		s.emit(ctx, realtime.Target{Tenant: tenantID}, realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
+	}
 	return conv, nil
 }
 

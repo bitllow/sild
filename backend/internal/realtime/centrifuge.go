@@ -55,5 +55,8 @@ func channelsFor(t Target) []string {
 	for _, u := range t.Users {
 		channels = append(channels, UserChannel(u))
 	}
+	if t.Tenant != "" {
+		channels = append(channels, AgentsChannel(t.Tenant))
+	}
 	return channels
 }

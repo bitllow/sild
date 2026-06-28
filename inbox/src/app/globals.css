@@ -1,0 +1,36 @@
+/* Sild design tokens (verbatim from the design system) */
+@import "../styles/tokens/fonts.css";
+@import "../styles/tokens/colors.css";
+@import "../styles/tokens/typography.css";
+@import "../styles/tokens/spacing.css";
+@import "../styles/tokens/radius.css";
+@import "../styles/tokens/shadows.css";
+@import "../styles/tokens/motion.css";
+@import "../styles/tokens/base.css";
+/* Sild component styles */
+@import "../styles/components.css";
+
+/* ---- App-level globals (from the source surface shell) ---- */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: var(--font-sans);
+  background: var(--surface-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, p { margin: 0; }
+
+@keyframes sild-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--slate-200);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--slate-300);
+  background-clip: content-box;
+}

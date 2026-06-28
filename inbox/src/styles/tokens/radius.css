@@ -1,0 +1,16 @@
+/* ============================================================
+   SILD RADIUS
+   Friendly-but-precise. Pills for chat bubbles & status chips.
+   ============================================================ */
+
+:root {
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;     /* inputs, small buttons */
+  --radius-lg: 12px;    /* cards, panels */
+  --radius-xl: 16px;    /* widget panel, large cards */
+  --radius-2xl: 20px;
+  --radius-3xl: 28px;
+  --radius-bubble: 18px; /* chat message bubble */
+  --radius-full: 9999px; /* avatars, pills, status dots */
+}

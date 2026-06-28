@@ -83,6 +83,7 @@ func (h *Handler) Mount(e *gin.Engine) {
 
 	// Admin session (inbox), §4.3.
 	admin := v1.Group("/admin", h.mw.Admin())
+	admin.GET("/realtime/token", h.realtimeToken)
 	admin.GET("/assignments", h.listAssignments)
 	admin.POST("/support-requests", h.adminOpenSupportRequest)
 	admin.POST("/assignments/:id/claim", h.claimAssignment)
@@ -96,8 +97,11 @@ func (h *Handler) Mount(e *gin.Engine) {
 	priv.DELETE("/api-keys/:id", h.revokeAPIKey)
 	priv.POST("/webhooks", h.createWebhook)
 	priv.GET("/webhooks", h.listWebhooks)
+	priv.PATCH("/webhooks/:id", h.updateWebhook)
 	priv.DELETE("/webhooks/:id", h.deleteWebhook)
 	priv.GET("/webhooks/:id/deliveries", h.listDeliveries)
+	priv.GET("/team", h.listTeam)
 	priv.POST("/team", h.inviteAgent)
+	priv.PATCH("/team/:id", h.updateAgent)
 	priv.POST("/team/:id/password", h.setAgentPassword)
 }

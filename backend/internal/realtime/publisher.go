@@ -22,6 +22,12 @@ func UserChannel(userID string) string         { return "user:" + userID }
 func ConvChannel(convID string) string         { return "conv:" + convID }
 func ConvInternalChannel(convID string) string { return "conv:" + convID + ":internal" }
 
+// AgentsChannel carries tenant-wide queue events to every connected agent
+// (inbox). Agents subscribe to it on connect so a brand-new support request
+// surfaces in the queue immediately (§8). Only agent connections are ever
+// subscribed here — end-user clients are not.
+func AgentsChannel(tenantID string) string { return "agents:" + tenantID }
+
 // Envelope is the wire format pushed to clients (§5.3).
 type Envelope struct {
 	Type           string `json:"type"`
@@ -35,6 +41,7 @@ type Target struct {
 	Conversation string   // conv:<id> (or conv:<id>:internal when Internal)
 	Internal     bool     // route to the agents-only internal channel (§5.6)
 	Users        []string // also push to user:<id> channels
+	Tenant       string   // also push to agents:<tenant> (queue-wide agent fan-out)
 }
 
 // Publisher pushes envelopes to the broker. REST handlers call it AFTER the

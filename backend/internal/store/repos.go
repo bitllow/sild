@@ -41,6 +41,7 @@ type AdminRepo interface {
 	FindByEmail(ctx context.Context, email string) ([]models.AdminUser, error)
 	List(ctx context.Context, tenantID string) ([]models.AdminUser, error)
 	SetPassword(ctx context.Context, tenantID, id, passwordHash string) error
+	SetRole(ctx context.Context, tenantID, id string, role models.PlatformRole) error
 	CreateSession(ctx context.Context, s *models.AdminSession) error
 	GetSession(ctx context.Context, id string) (*models.AdminSession, error)
 	DeleteSession(ctx context.Context, id string) error
@@ -117,6 +118,7 @@ type PushTokenRepo interface {
 type WebhookRepo interface {
 	Create(ctx context.Context, e *models.WebhookEndpoint) error
 	List(ctx context.Context, tenantID string) ([]models.WebhookEndpoint, error)
+	SetActive(ctx context.Context, tenantID, id string, active bool) error
 	Delete(ctx context.Context, tenantID, id string) error
 	ListForEvent(ctx context.Context, tenantID, event string) ([]models.WebhookEndpoint, error)
 	LogDelivery(ctx context.Context, d *models.WebhookDelivery) error

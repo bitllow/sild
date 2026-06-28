@@ -51,8 +51,8 @@ func (s *Service) OpenSupportRequest(ctx context.Context, tenantID, clientUserID
 	}
 	conv.Members = []models.ConversationMember{member}
 	conv.Assignment = assignment
-	// notify the client's user channel that they have a new conversation
-	s.emit(ctx, realtime.Target{Users: []string{clientUserID}},
+	// notify the client's user channel + the tenant agents channel (new queue item)
+	s.emit(ctx, realtime.Target{Users: []string{clientUserID}, Tenant: tenantID},
 		realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
 	return conv, assignment, nil
 }
@@ -67,7 +67,7 @@ func (s *Service) AddAssignment(ctx context.Context, tenantID, convID string) (*
 		return nil, err
 	}
 	_ = s.fireWebhook(ctx, tenantID, convID, "assignment.created", views.Assignment(a))
-	s.emit(ctx, realtime.Target{Conversation: convID}, realtime.EventAssignmentUpdated, convID, views.Assignment(a))
+	s.emit(ctx, realtime.Target{Conversation: convID, Tenant: tenantID}, realtime.EventAssignmentUpdated, convID, views.Assignment(a))
 	return a, nil
 }
 

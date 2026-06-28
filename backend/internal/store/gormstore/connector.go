@@ -22,6 +22,18 @@ func (r *webhookRepo) List(ctx context.Context, tenantID string) ([]models.Webho
 	return es, err
 }
 
+func (r *webhookRepo) SetActive(ctx context.Context, tenantID, id string, active bool) error {
+	res := r.db.WithContext(ctx).Model(&models.WebhookEndpoint{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).Update("active", active)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (r *webhookRepo) Delete(ctx context.Context, tenantID, id string) error {
 	res := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&models.WebhookEndpoint{})
 	if res.Error != nil {

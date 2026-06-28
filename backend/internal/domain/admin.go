@@ -69,6 +69,16 @@ func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, passw
 	return mapStoreErr(s.store.Admins().SetPassword(ctx, tenantID, adminID, hash))
 }
 
+// SetAdminRole updates an admin's platform role (Settings → Team, §7).
+func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole) error {
+	switch role {
+	case models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent:
+	default:
+		return invalid("invalid platform role")
+	}
+	return mapStoreErr(s.store.Admins().SetRole(ctx, tenantID, adminID, role))
+}
+
 // Logout revokes the session behind a raw cookie value.
 func (s *Service) Logout(ctx context.Context, raw string) error {
 	return s.store.Admins().DeleteSession(ctx, auth.HashSessionToken(raw))
@@ -87,6 +97,11 @@ func (s *Service) InviteAgent(ctx context.Context, tenantID, email string, role 
 		return nil, err
 	}
 	return a, nil
+}
+
+// ListAdmins returns the tenant's admin users (Settings → Team, §8).
+func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]models.AdminUser, error) {
+	return s.store.Admins().List(ctx, tenantID)
 }
 
 // CreateAPIKey mints a tenant API key; the secret is returned exactly once (§4.3).
@@ -138,6 +153,11 @@ func (s *Service) ListWebhooks(ctx context.Context, tenantID string) ([]models.W
 
 func (s *Service) DeleteWebhook(ctx context.Context, tenantID, id string) error {
 	return mapStoreErr(s.store.Webhooks().Delete(ctx, tenantID, id))
+}
+
+// SetWebhookActive enables/disables delivery for an endpoint (§6.1).
+func (s *Service) SetWebhookActive(ctx context.Context, tenantID, id string, active bool) error {
+	return mapStoreErr(s.store.Webhooks().SetActive(ctx, tenantID, id, active))
 }
 
 func (s *Service) ListDeliveries(ctx context.Context, tenantID, endpointID string) ([]models.WebhookDelivery, error) {

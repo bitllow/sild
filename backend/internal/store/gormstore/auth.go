@@ -82,6 +82,19 @@ func (r *adminRepo) SetPassword(ctx context.Context, tenantID, id, passwordHash 
 	return nil
 }
 
+func (r *adminRepo) SetRole(ctx context.Context, tenantID, id string, role models.PlatformRole) error {
+	res := r.db.WithContext(ctx).Model(&models.AdminUser{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Update("platform_role", role)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (r *adminRepo) CreateSession(ctx context.Context, s *models.AdminSession) error {
 	return r.db.WithContext(ctx).Create(s).Error
 }
