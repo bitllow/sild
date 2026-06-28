@@ -1,0 +1,23 @@
+# Binaries
+backend/bin/
+*.exe
+
+# Local SQLite databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Env
+.env
+.env.local
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
