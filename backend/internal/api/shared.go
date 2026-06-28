@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -20,6 +21,17 @@ func (h *Handler) getConversation(c *gin.Context) {
 		return
 	}
 	conv, members, assignment, err := h.svc.GetConversation(c.Request.Context(), apiutil.Tenant(c), convID)
+	if errors.Is(err, domain.ErrNotFound) {
+		// §12 read fallback: hot rows gone → read from the archive sink.
+		if view, archived, aerr := h.svc.ArchivedConversation(c.Request.Context(), apiutil.Tenant(c), convID); archived {
+			if aerr != nil {
+				apiutil.Fail(c, aerr)
+				return
+			}
+			c.JSON(http.StatusOK, view)
+			return
+		}
+	}
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
@@ -105,6 +117,17 @@ func (h *Handler) listMessages(c *gin.Context) {
 	}
 	includeInternal := apiutil.IsAgent(c)
 	urlFn := h.attachmentURL(c)
+
+	// §12 read fallback: if the conversation has been archived, read from the
+	// sink (hot rows are gone). Rare — the inbox only touches open conversations.
+	if msgs, archived, err := h.svc.ArchivedMessages(c.Request.Context(), apiutil.Tenant(c), convID, includeInternal); archived {
+		if err != nil {
+			apiutil.Fail(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"messages": msgs, "has_more": false})
+		return
+	}
 
 	if after := c.Query("after"); after != "" {
 		msgs, err := h.svc.ListMessagesAfter(c.Request.Context(), apiutil.Tenant(c), convID, after, includeInternal)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/mail"
@@ -16,22 +17,23 @@ import (
 
 // Service is the use-case aggregate. dig provides it to the handlers.
 type Service struct {
-	store  store.Store
-	pub    realtime.Publisher
-	keys   *auth.KeyManager
+	store    store.Store
+	pub      realtime.Publisher
+	keys     *auth.KeyManager
 	bucket   storage.Bucket
 	mailer   mail.Mailer
 	verifier mail.SignatureVerifier
+	sink     archive.Sink // cold-storage read fallback (§12)
 	cfg      *config.Config
 	now      func() time.Time
 }
 
 // New constructs the domain service.
-func New(st store.Store, pub realtime.Publisher, km *auth.KeyManager, bucket storage.Bucket, mailer mail.Mailer, cfg *config.Config) *Service {
+func New(st store.Store, pub realtime.Publisher, km *auth.KeyManager, bucket storage.Bucket, mailer mail.Mailer, sink archive.Sink, cfg *config.Config) *Service {
 	if mailer == nil {
 		mailer = mail.NoopMailer{}
 	}
-	return &Service{store: st, pub: pub, keys: km, bucket: bucket, mailer: mailer, verifier: mail.HMACVerifier{}, cfg: cfg, now: time.Now}
+	return &Service{store: st, pub: pub, keys: km, bucket: bucket, mailer: mailer, verifier: mail.HMACVerifier{}, sink: sink, cfg: cfg, now: time.Now}
 }
 
 // SetClock overrides the service clock (tests).

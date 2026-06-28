@@ -20,12 +20,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	c, err := di.New()
+	c, err := di.New() // server.New is already registered here
 	if err != nil {
 		log.Fatalf("di: %v", err)
-	}
-	if err := di.Provide(c, server.New); err != nil {
-		log.Fatalf("di provide: %v", err)
 	}
 
 	err = c.Invoke(func(cfg *config.Config, db *gorm.DB, km *auth.KeyManager, srv *server.Server) error {

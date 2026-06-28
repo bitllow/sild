@@ -69,6 +69,19 @@ func (r *adminRepo) List(ctx context.Context, tenantID string) ([]models.AdminUs
 	return as, err
 }
 
+func (r *adminRepo) SetPassword(ctx context.Context, tenantID, id, passwordHash string) error {
+	res := r.db.WithContext(ctx).Model(&models.AdminUser{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Update("password_hash", passwordHash)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (r *adminRepo) CreateSession(ctx context.Context, s *models.AdminSession) error {
 	return r.db.WithContext(ctx).Create(s).Error
 }

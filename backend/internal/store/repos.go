@@ -40,6 +40,7 @@ type AdminRepo interface {
 	Get(ctx context.Context, tenantID, id string) (*models.AdminUser, error)
 	FindByEmail(ctx context.Context, email string) ([]models.AdminUser, error)
 	List(ctx context.Context, tenantID string) ([]models.AdminUser, error)
+	SetPassword(ctx context.Context, tenantID, id, passwordHash string) error
 	CreateSession(ctx context.Context, s *models.AdminSession) error
 	GetSession(ctx context.Context, id string) (*models.AdminSession, error)
 	DeleteSession(ctx context.Context, id string) error

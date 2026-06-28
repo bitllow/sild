@@ -1,9 +1,13 @@
 BIN := bin
 BINARIES := sild-api sild-ws sild-worker sild-migrate
 
-.PHONY: build $(BINARIES) run-api run-ws run-worker migrate test test-pg tidy fmt vet docker clean
+.PHONY: build $(BINARIES) dev run-api run-ws run-worker migrate test test-pg tidy fmt vet docker clean
 
 build: $(BINARIES)
+
+# All-in-one: REST + WS + worker in one process (SQLite, in-memory broker).
+# Zero infra, no external tools. Seeds a dev tenant + admin + API key on first run.
+dev: ; go run ./cmd/sild-dev
 
 $(BINARIES):
 	go build -o $(BIN)/$@ ./cmd/$@

@@ -38,6 +38,13 @@ func (h *Handler) Mount(e *gin.Engine) {
 	// Email inbound (§6.2): provider posts here, signature is the gate.
 	v1.POST("/email/inbound", h.emailInbound)
 
+	// Local storage backend serves attachment bytes here (§11). GCS/S3 use
+	// direct-to-bucket signed URLs and don't mount these.
+	if h.cfg.Storage.Backend == "local" || h.cfg.Storage.Backend == "" {
+		v1.PUT("/uploads/local/*objectKey", h.localUploadPut)
+		v1.GET("/uploads/local/*objectKey", h.localUploadGet)
+	}
+
 	// Shared paths (API key | user JWT | admin), §4.1/§4.2 same URLs.
 	any := v1.Group("", h.mw.Any())
 	any.GET("/conversations/:id", h.getConversation)
@@ -68,6 +75,7 @@ func (h *Handler) Mount(e *gin.Engine) {
 	adminAuth := v1.Group("/admin/auth")
 	adminAuth.GET("/google", h.adminGoogleLogin)
 	adminAuth.GET("/google/callback", h.adminGoogleCallback)
+	adminAuth.POST("/password", h.adminPasswordLogin) // email/password login
 	if h.authn.IsStub() && h.cfg.Env != "production" {
 		adminAuth.GET("/google/dev", h.adminDevLogin)
 	}
@@ -91,4 +99,5 @@ func (h *Handler) Mount(e *gin.Engine) {
 	priv.DELETE("/webhooks/:id", h.deleteWebhook)
 	priv.GET("/webhooks/:id/deliveries", h.listDeliveries)
 	priv.POST("/team", h.inviteAgent)
+	priv.POST("/team/:id/password", h.setAgentPassword)
 }

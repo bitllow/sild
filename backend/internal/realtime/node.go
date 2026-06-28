@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
@@ -15,7 +16,28 @@ import (
 // membership — the client declares nothing (§5.2).
 type Node struct {
 	*centrifuge.Node
-	cfg config.Realtime
+	cfg     config.Realtime
+	runOnce sync.Once
+	runErr  error
+}
+
+// Run starts the node's broker connection. Idempotent — safe to call from both
+// the realtime publisher provider and the serving binary (they share one node).
+func (n *Node) Run() error {
+	n.runOnce.Do(func() { n.runErr = n.Node.Run() })
+	return n.runErr
+}
+
+// WSHandler / SSEHandler expose the transport handlers so the all-in-one dev
+// binary can mount them on its existing HTTP server.
+func (n *Node) WSHandler() http.Handler {
+	return centrifuge.NewWebsocketHandler(n.Node, centrifuge.WebsocketConfig{
+		CheckOrigin: func(*http.Request) bool { return true },
+	})
+}
+
+func (n *Node) SSEHandler() http.Handler {
+	return centrifuge.NewSSEHandler(n.Node, centrifuge.SSEConfig{})
 }
 
 // NewNode builds and configures the node (broker per config, connect handler).
@@ -78,10 +100,8 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 // Handler returns the HTTP mux serving WS (and SSE for the web widget) (§5).
 func (n *Node) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/v1/ws", centrifuge.NewWebsocketHandler(n.Node, centrifuge.WebsocketConfig{
-		CheckOrigin: func(*http.Request) bool { return true },
-	}))
-	mux.Handle("/v1/ws/sse", centrifuge.NewSSEHandler(n.Node, centrifuge.SSEConfig{}))
+	mux.Handle("/v1/ws", n.WSHandler())
+	mux.Handle("/v1/ws/sse", n.SSEHandler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))

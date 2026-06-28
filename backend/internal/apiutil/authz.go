@@ -47,21 +47,46 @@ func CallerParticipant(c *gin.Context) store.Participant {
 	}
 }
 
-// AuthorizeConversation ensures the caller may access a conversation. For user
-// principals this is the membership check (§4.2, §7); agents/keys have tenant
-// access. Writes a 403 and returns false on denial.
+// AuthorizeConversation ensures the caller may access a conversation (§4.2, §7).
+// Scope by principal:
+//   - API key:        tenant-wide (server backend)
+//   - owner/admin:    tenant-wide (all conversations)
+//   - agent:          support inbox only — conversation must carry an assignment
+//                     (or be an archived, formerly-support conversation)
+//   - user:           must be an (active or archived) member
+//
+// Writes a 403/401 and returns false on denial.
 func AuthorizeConversation(c *gin.Context, svc *domain.Service, convID string) bool {
 	p := middleware.Get(c)
 	if p == nil {
 		httpx.Unauthorized(c, "authentication required")
 		return false
 	}
-	if p.Kind == middleware.KindUser {
-		ok, err := svc.IsMember(c.Request.Context(), p.TenantID, convID, p.Subject)
-		if err != nil || !ok {
-			httpx.Forbidden(c, "not a member of this conversation")
-			return false
+	ctx, t := c.Request.Context(), p.TenantID
+
+	switch p.Kind {
+	case middleware.KindAPIKey:
+		return true
+
+	case middleware.KindAdmin:
+		if p.Role == models.PlatformOwner || p.Role == models.PlatformAdmin {
+			return true
 		}
+		// agent: limited to support conversations (§7).
+		if svc.HasAssignment(ctx, t, convID) || svc.IsArchived(ctx, t, convID) {
+			return true
+		}
+		httpx.Forbidden(c, "agents may only access support conversations")
+		return false
+
+	default: // user JWT
+		if ok, err := svc.IsMember(ctx, t, convID, p.Subject); err == nil && ok {
+			return true
+		}
+		if svc.IsArchivedMember(ctx, t, convID, p.Subject) {
+			return true
+		}
+		httpx.Forbidden(c, "not a member of this conversation")
+		return false
 	}
-	return true
 }

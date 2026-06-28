@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 
+	"github.com/bitllow/sild/backend/internal/config"
 	"gorm.io/gorm"
 )
 
@@ -13,6 +14,6 @@ import (
 type postgresBackend struct{ db *gorm.DB }
 
 func (b *postgresBackend) Search(ctx context.Context, tenantID string, q Query) (Results, error) {
-	filtered := buildFilters(b.db.WithContext(ctx), tenantID, q, "ILIKE")
-	return collectHits(ctx, b.db, filtered, q, "ILIKE")
+	filtered := buildFilters(b.db.WithContext(ctx), tenantID, q, config.Postgres)
+	return collectHits(ctx, b.db, filtered, q, config.Postgres)
 }

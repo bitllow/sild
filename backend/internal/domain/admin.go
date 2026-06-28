@@ -20,7 +20,12 @@ func (s *Service) CreateSession(ctx context.Context, email string) (raw string, 
 	if len(admins) == 0 {
 		return "", time.Time{}, ErrForbidden // not an admin in any tenant
 	}
-	admin := admins[0]
+	return s.mintSession(ctx, &admins[0])
+}
+
+// mintSession creates a server-side session for an admin and returns the raw
+// cookie value.
+func (s *Service) mintSession(ctx context.Context, admin *models.AdminUser) (string, time.Time, error) {
 	tok, err := auth.NewSessionToken()
 	if err != nil {
 		return "", time.Time{}, err
@@ -33,6 +38,35 @@ func (s *Service) CreateSession(ctx context.Context, email string) (raw string, 
 		return "", time.Time{}, err
 	}
 	return tok.Raw, exp, nil
+}
+
+// CreateSessionWithPassword authenticates an admin by email + password (§2.4
+// alternative to Google OIDC) and mints a session. Checks the password against
+// every admin with that email (emails may repeat across tenants).
+func (s *Service) CreateSessionWithPassword(ctx context.Context, email, password string) (raw string, expires time.Time, err error) {
+	admins, err := s.store.Admins().FindByEmail(ctx, email)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	for i := range admins {
+		a := &admins[i]
+		if a.PasswordHash != nil && auth.CheckPassword(*a.PasswordHash, password) {
+			return s.mintSession(ctx, a)
+		}
+	}
+	return "", time.Time{}, ErrForbidden // no matching credential
+}
+
+// SetAdminPassword sets/updates an admin's password (Settings → Team).
+func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, password string) error {
+	if len(password) < 8 {
+		return invalid("password must be at least 8 characters")
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	return mapStoreErr(s.store.Admins().SetPassword(ctx, tenantID, adminID, hash))
 }
 
 // Logout revokes the session behind a raw cookie value.

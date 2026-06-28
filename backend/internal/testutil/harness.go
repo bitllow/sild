@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/api"
+	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/domain"
@@ -143,7 +144,11 @@ func NewWithConfig(t *testing.T, cfg *config.Config) *Harness {
 		t.Fatalf("ensure key: %v", err)
 	}
 	mailer := &CaptureMailer{}
-	svc := domain.New(st, pub, km, bucket, mailer, cfg)
+	sink, err := archive.New(cfg)
+	if err != nil {
+		t.Fatalf("archive sink: %v", err)
+	}
+	svc := domain.New(st, pub, km, bucket, mailer, sink, cfg)
 	searchSvc := domain.NewSearch(st, search.New(db))
 	authn := auth.NewAdminAuthenticator(cfg) // dev stub (no Google configured)
 	mw := middleware.NewAuth(st, km)

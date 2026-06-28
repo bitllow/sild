@@ -57,3 +57,30 @@ func TestAdminSearch(t *testing.T) {
 		}
 	}
 }
+
+// §4.3: generic meta.<key> must work via live-JSON even for a key that is NOT in
+// the tenant's searchable_metadata_keys (so it isn't in member_search_text).
+func TestAdminSearchLiveJSONFallback(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant("phone") // only "phone" is indexed; "city" is not
+	ctx := context.Background()
+
+	if _, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
+		Members: []domain.MemberInput{{
+			UserID: "u_driver", ConvRole: models.RoleDriver,
+			Metadata: json.RawMessage(`{"phone":"+3725512345","city":"Tallinn"}`),
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// "city" is not materialized into member_search_text, but the live-JSON
+	// fallback finds it.
+	res, err := h.Search.Search(ctx, tenant.ID, "meta.city:tallinn", "", "", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Conversations) == 0 {
+		t.Fatal("expected live-JSON fallback to match an unindexed metadata key")
+	}
+}

@@ -61,6 +61,41 @@ func (h *Handler) startSession(c *gin.Context, email string) {
 	c.JSON(http.StatusOK, gin.H{"status": "authenticated", "expires_at": exp})
 }
 
+// adminPasswordLogin: POST /v1/admin/auth/password (§2.4 email/password method).
+func (h *Handler) adminPasswordLogin(c *gin.Context) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Email == "" || req.Password == "" {
+		httpx.BadRequest(c, "email and password are required")
+		return
+	}
+	raw, exp, err := h.svc.CreateSessionWithPassword(c.Request.Context(), req.Email, req.Password)
+	if err != nil {
+		httpx.Unauthorized(c, "invalid credentials")
+		return
+	}
+	c.SetCookie(middleware.AdminCookieName, raw, h.cfg.Auth.AdminSessionTTLHours*3600, "/", "", h.cfg.Env == "production", true)
+	c.JSON(http.StatusOK, gin.H{"status": "authenticated", "expires_at": exp})
+}
+
+// setAgentPassword: POST /v1/admin/team/:id/password (owner/admin set a password).
+func (h *Handler) setAgentPassword(c *gin.Context) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, "invalid body")
+		return
+	}
+	if err := h.svc.SetAdminPassword(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), req.Password); err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) adminLogout(c *gin.Context) {
 	if raw, err := c.Cookie(middleware.AdminCookieName); err == nil {
 		_ = h.svc.Logout(c.Request.Context(), raw)

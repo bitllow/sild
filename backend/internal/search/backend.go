@@ -28,10 +28,9 @@ type Backend interface {
 
 // New selects the backend for the active dialect. dig provides the result.
 func New(db *gorm.DB) Backend {
-	switch gormstore.Dialect(db) {
-	case config.Postgres:
+	dialect := gormstore.Dialect(db)
+	if dialect == config.Postgres {
 		return &postgresBackend{db: db}
-	default:
-		return &portableBackend{db: db}
 	}
+	return &portableBackend{db: db, dialect: dialect} // mysql | sqlite
 }

@@ -37,6 +37,9 @@ type AdminUser struct {
 	TenantID     string       `gorm:"size:40;not null;uniqueIndex:idx_admin_tenant_email"`
 	Email        string       `gorm:"size:320;not null;uniqueIndex:idx_admin_tenant_email"`
 	PlatformRole PlatformRole `gorm:"size:16;not null"`
+	// PasswordHash is set when the admin uses email/password login (§2.4
+	// alternative to Google OIDC); nil for OIDC-only admins.
+	PasswordHash *string `gorm:"size:255"`
 	CreatedAt    time.Time
 }
 
