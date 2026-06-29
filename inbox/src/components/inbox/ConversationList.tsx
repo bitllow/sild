@@ -16,6 +16,15 @@ export const ConversationList = observer(function ConversationList() {
   const rows = store.listConvs;
   const searchActive = store.searchResults !== null;
 
+  // Scroll-loading: fetch the next page as the list nears the bottom (§4.3).
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (searchActive) return;
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
+      void store.loadMore();
+    }
+  };
+
   return (
     <div
       style={{
@@ -98,7 +107,10 @@ export const ConversationList = observer(function ConversationList() {
           </button>
         </div>
       </div>
-      <div style={{ flex: 1, overflowY: "auto", borderTop: "1px solid var(--border-subtle)" }}>
+      <div
+        onScroll={onScroll}
+        style={{ flex: 1, overflowY: "auto", borderTop: "1px solid var(--border-subtle)" }}
+      >
         {rows.map((c) => (
           <ConversationRow
             key={c.id}
@@ -121,6 +133,11 @@ export const ConversationList = observer(function ConversationList() {
                 ? "Searching…"
                 : `No matches for "${store.searchQuery}".`
               : "No conversations in this view. New support requests land here the moment they're assigned."}
+          </div>
+        )}
+        {!searchActive && store.loadingMore && (
+          <div style={{ padding: "14px 24px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 12 }}>
+            Loading more…
           </div>
         )}
       </div>

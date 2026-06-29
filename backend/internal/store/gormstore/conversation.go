@@ -36,6 +36,12 @@ func (r *conversationRepo) UpdateStatus(ctx context.Context, tenantID, id string
 	return nil
 }
 
+func (r *conversationRepo) TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error {
+	return r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where("tenant_id = ? AND id = ?", tenantID, convID).
+		Updates(map[string]any{"last_message_at": at, "last_message_preview": preview}).Error
+}
+
 func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error) {
 	var cs []models.Conversation
 	err := r.db.WithContext(ctx).
@@ -171,17 +177,126 @@ func (r *assignmentRepo) Update(ctx context.Context, a *models.Assignment) error
 	return r.db.WithContext(ctx).Save(a).Error
 }
 
-func (r *assignmentRepo) ListQueue(ctx context.Context, tenantID string, status *models.AssignmentStatus, assigneeActorID *string) ([]models.Assignment, error) {
-	q := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID)
-	if status != nil {
-		q = q.Where("status = ?", *status)
+func (r *assignmentRepo) ConversationIDs(ctx context.Context, tenantID string) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&models.Assignment{}).
+		Where("tenant_id = ?", tenantID).
+		Distinct().Pluck("conversation_id", &ids).Error
+	return ids, err
+}
+
+// convLastActivity mirrors the COALESCE used for ordering: the denormalized last
+// message time, or the creation time when there are no messages yet.
+func convLastActivity(c models.Conversation) time.Time {
+	if c.LastMessageAt != nil {
+		return *c.LastMessageAt
 	}
-	if assigneeActorID != nil {
-		q = q.Where("assignee_actor_id = ?", *assigneeActorID)
+	return c.CreatedAt
+}
+
+func (r *assignmentRepo) ListQueue(ctx context.Context, tenantID string, p store.QueueParams) (store.QueuePage, error) {
+	// Sort/keyset on the conversation's last activity (denormalized, COALESCE to
+	// creation time when there are no messages yet). We ORDER BY / filter on the
+	// expression but don't SELECT it — the computed column loses its type on
+	// SQLite — and recompute LastActivity in Go from the loaded conversation.
+	const laExpr = "COALESCE(c.last_message_at, c.created_at)"
+	sortExpr := laExpr
+	if p.Sort == store.QueueSortCreated {
+		sortExpr = "a.created_at"
 	}
-	var as []models.Assignment
-	err := q.Order("created_at").Find(&as).Error
-	return as, err
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	dir, cmp := "ASC", ">"
+	if p.Desc {
+		dir, cmp = "DESC", "<"
+	}
+
+	q := r.db.WithContext(ctx).Table("assignments AS a").
+		Select("a.*").
+		Joins("JOIN conversations c ON c.id = a.conversation_id").
+		Where("a.tenant_id = ?", tenantID).
+		// One row per conversation: a conversation can carry several assignments
+		// (AddAssignment), but the queue is per-conversation. Keep only the latest
+		// assignment (its current state) — the representative — before status
+		// filtering and keyset pagination, so a conversation never duplicates rows,
+		// pagination slots, or React keys. The subquery scans ALL of the
+		// conversation's assignments (no status filter) so the representative is the
+		// true latest; the status/assignee filters below then apply to it.
+		Where(`NOT EXISTS (SELECT 1 FROM assignments a2
+			WHERE a2.conversation_id = a.conversation_id
+			  AND (a2.created_at > a.created_at OR (a2.created_at = a.created_at AND a2.id > a.id)))`)
+	if p.Status != nil {
+		q = q.Where("a.status = ?", *p.Status)
+	}
+	if p.Assignee != nil {
+		q = q.Where("a.assignee_actor_id = ?", *p.Assignee)
+	}
+	if p.Cursor != nil {
+		// keyset: rows strictly after the cursor in (sort, id) order.
+		q = q.Where(sortExpr+" "+cmp+" ? OR ("+sortExpr+" = ? AND a.id "+cmp+" ?)",
+			p.Cursor.Value, p.Cursor.Value, p.Cursor.ID)
+	}
+	var rows []models.Assignment
+	if err := q.Order(sortExpr + " " + dir).Order("a.id " + dir).
+		Limit(limit + 1).Scan(&rows).Error; err != nil {
+		return store.QueuePage{}, err
+	}
+
+	page := store.QueuePage{}
+	if len(rows) > limit {
+		page.HasMore = true
+		rows = rows[:limit]
+	}
+	if len(rows) == 0 {
+		return page, nil
+	}
+
+	// Batch-load the page's conversations + active members (no message history).
+	ids := make([]string, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].ConversationID
+	}
+	var convs []models.Conversation
+	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids).
+		Find(&convs).Error; err != nil {
+		return store.QueuePage{}, err
+	}
+	convByID := make(map[string]models.Conversation, len(convs))
+	for _, c := range convs {
+		convByID[c.ID] = c
+	}
+	var members []models.ConversationMember
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND conversation_id IN ? AND left_at IS NULL", tenantID, ids).
+		Find(&members).Error; err != nil {
+		return store.QueuePage{}, err
+	}
+	membersByConv := make(map[string][]models.ConversationMember)
+	for _, m := range members {
+		membersByConv[m.ConversationID] = append(membersByConv[m.ConversationID], m)
+	}
+
+	page.Items = make([]store.QueueItem, 0, len(rows))
+	for i := range rows {
+		conv := convByID[rows[i].ConversationID]
+		page.Items = append(page.Items, store.QueueItem{
+			Assignment:   rows[i],
+			Conversation: conv,
+			Members:      membersByConv[rows[i].ConversationID],
+			LastActivity: convLastActivity(conv),
+		})
+	}
+	if page.HasMore {
+		last := page.Items[len(page.Items)-1]
+		val := last.LastActivity
+		if p.Sort == store.QueueSortCreated {
+			val = last.Assignment.CreatedAt
+		}
+		page.NextCursor = &store.QueueCursor{Value: val, ID: last.Assignment.ID}
+	}
+	return page, nil
 }
 
 type receiptRepo struct{ db *gorm.DB }

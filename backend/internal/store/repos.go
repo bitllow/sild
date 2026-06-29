@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
@@ -60,6 +61,9 @@ type ConversationRepo interface {
 	UpdateStatus(ctx context.Context, tenantID, id string, status models.ConversationStatus) error
 	ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error)
 	ListArchivable(ctx context.Context, tenantID string, idleBeforeMsgID string, limit int) ([]models.Conversation, error)
+	// TouchLastMessage updates the denormalized last-activity timestamp + preview
+	// used by the inbox queue ordering (see models.Conversation).
+	TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error
 }
 
 type MemberRepo interface {
@@ -79,7 +83,54 @@ type AssignmentRepo interface {
 	Get(ctx context.Context, tenantID, id string) (*models.Assignment, error)
 	GetByConversation(ctx context.Context, tenantID, convID string) (*models.Assignment, error)
 	Update(ctx context.Context, a *models.Assignment) error
-	ListQueue(ctx context.Context, tenantID string, status *models.AssignmentStatus, assigneeActorID *string) ([]models.Assignment, error)
+	// ListQueue returns one cursor-paginated, sorted page of inbox assignments
+	// enriched with each conversation + its active members + last activity, so a
+	// queue page renders from a single query (§4.3).
+	ListQueue(ctx context.Context, tenantID string, p QueueParams) (QueuePage, error)
+	// ConversationIDs returns every conversation in the tenant that currently
+	// carries an assignment (unpaginated) — used to compute an agent's realtime
+	// channel subscription set (§5.2).
+	ConversationIDs(ctx context.Context, tenantID string) ([]string, error)
+}
+
+// QueueSort selects the ordering key for the inbox queue.
+type QueueSort string
+
+const (
+	QueueSortLastActivity QueueSort = "last_activity" // newest message first (default)
+	QueueSortCreated      QueueSort = "created"        // assignment creation time
+)
+
+// QueueCursor is the keyset position: the sort value + assignment id tiebreaker
+// of the last row returned. Stable under inserts (no offset drift).
+type QueueCursor struct {
+	Value time.Time
+	ID    string
+}
+
+// QueueParams are the filters + pagination for ListQueue.
+type QueueParams struct {
+	Status   *models.AssignmentStatus
+	Assignee *string
+	Sort     QueueSort
+	Desc     bool
+	Limit    int
+	Cursor   *QueueCursor // nil for the first page
+}
+
+// QueueItem is one enriched queue row.
+type QueueItem struct {
+	Assignment   models.Assignment
+	Conversation models.Conversation
+	Members      []models.ConversationMember
+	LastActivity time.Time
+}
+
+// QueuePage is one page of the queue with the cursor for the next page.
+type QueuePage struct {
+	Items      []QueueItem
+	NextCursor *QueueCursor
+	HasMore    bool
 }
 
 // MessagePage is a page of history with a has-more flag.

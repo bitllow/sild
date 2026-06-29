@@ -6,9 +6,9 @@ import type {
   ApiTeamMember,
   ApiWebhook,
 } from "@/api/admin";
-import type { ApiMessagesPage } from "@/api/admin";
+import type { ApiMessagesPage, ApiQueueItem } from "@/api/admin";
 import type { ApiAssignment } from "@/api/admin";
-import type { Conversation, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
+import type { Channel, Conversation, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
 
 export function clockTime(iso: string): string {
   const d = new Date(iso);
@@ -107,6 +107,28 @@ function deriveStatus(conv: ApiConversation, a?: ApiAssignment): UiStatus {
   return (a?.status as UiStatus) || "queued";
 }
 
+// conversationShell derives the row fields shared by the queue list and the full
+// fetch (identity, name, channel, status, members). Each builder fills in the
+// parts that differ: history, preview, and last-activity timestamp.
+function conversationShell(conv: ApiConversation, a?: ApiAssignment) {
+  const client = conv.members.find((m) => m.conv_role === "client") || conv.members[0];
+  const name = client ? memberDisplayName(client) : conv.reference || "Conversation";
+  const channel = conv.members.some((m) => m.member_kind === "email") ? "email" : "app";
+  return {
+    id: conv.id,
+    name,
+    presence: null,
+    channel: channel as Channel,
+    reference: conv.reference || conv.id,
+    status: deriveStatus(conv, a),
+    convClosed: conv.status === "closed",
+    assignmentId: a?.id,
+    assignmentStatus: a?.status as UiStatus | undefined,
+    unread: 0,
+    members: conv.members.map(mapMember),
+  };
+}
+
 export function buildConversation(
   conv: ApiConversation,
   page: ApiMessagesPage,
@@ -116,30 +138,31 @@ export function buildConversation(
   const msgs = [...page.messages]
     .sort((x, y) => x.created_at.localeCompare(y.created_at))
     .map((m) => mapMessage(m, conv));
-
-  const client = conv.members.find((m) => m.conv_role === "client") || conv.members[0];
-  const name = client ? memberDisplayName(client) : conv.reference || "Conversation";
-  const channel = conv.members.some((m) => m.member_kind === "email") ? "email" : "app";
   const last = msgs.filter((m) => !m.system).slice(-1)[0] || msgs.slice(-1)[0];
   const preview = conv.status === "closed" ? "Conversation closed" : last?.body || "";
   const lastTs = page.messages.length ? page.messages[page.messages.length - 1].created_at : conv.created_at;
 
   return {
-    id: conv.id,
-    name,
-    presence: null,
-    channel,
-    reference: conv.reference || conv.id,
-    status: deriveStatus(conv, a),
-    convClosed: conv.status === "closed",
-    assignmentId: a?.id,
-    assignmentStatus: a?.status as UiStatus | undefined,
-    unread: 0,
+    ...conversationShell(conv, a),
     time: relativeTime(lastTs),
     lastActivity: lastTs,
     preview,
-    members: conv.members.map(mapMember),
     messages: msgs,
+  };
+}
+
+/** Build a queue row from the paginated list endpoint: members + last-message
+ *  preview + last activity, but NO history (messages load on open). */
+export function buildQueueRow(item: ApiQueueItem): Conversation {
+  const conv = item.conversation;
+  const lastTs = conv.last_activity;
+  const preview = conv.status === "closed" ? "Conversation closed" : conv.last_message?.body || "";
+  return {
+    ...conversationShell(conv, item.assignment),
+    time: relativeTime(lastTs),
+    lastActivity: lastTs,
+    preview,
+    messages: [],
   };
 }
 

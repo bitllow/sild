@@ -126,12 +126,11 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 		UserChannel(adminID):    {},
 		AgentsChannel(tenantID): {},
 	}
-	assignments, err := st.Assignments().ListQueue(ctx, tenantID, nil, nil)
+	cids, err := st.Assignments().ConversationIDs(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	for i := range assignments {
-		cid := assignments[i].ConversationID
+	for _, cid := range cids {
 		subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
 		subs[ConvInternalChannel(cid)] = centrifuge.SubscribeOptions{}
 	}

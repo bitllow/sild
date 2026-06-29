@@ -59,6 +59,36 @@ export interface ApiMessagesPage {
   has_more?: boolean;
 }
 
+// One inbox queue row: the conversation (members + last message preview + last
+// activity) WITHOUT history — opening it fetches the thread lazily (§4.3).
+export interface ApiQueueConversation extends ApiConversation {
+  last_activity: string;
+  last_message?: { body: string; created_at: string | null };
+}
+
+export interface ApiQueueItem {
+  assignment: ApiAssignment;
+  conversation: ApiQueueConversation;
+}
+
+export interface ApiQueuePage {
+  items: ApiQueueItem[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+export type QueueSort = "last_activity" | "created";
+export type QueueOrder = "asc" | "desc";
+
+export interface QueueParams {
+  status?: ApiAssignmentStatus;
+  assignee?: string;
+  sort?: QueueSort;
+  order?: QueueOrder;
+  limit?: number;
+  cursor?: string | null;
+}
+
 export interface ApiKeyRecord {
   id: string;
   label: string;
@@ -103,13 +133,17 @@ export const adminApi = {
   logout: () => api.post<void>("/admin/auth/logout"),
   googleLoginUrl: () => "/v1/admin/auth/google",
 
-  // ── Inbox queue ───────────────────────────────────────────────────────
-  listAssignments: (params?: { status?: ApiAssignmentStatus; assignee?: string }) => {
+  // ── Inbox queue (cursor-paginated, sorted) ────────────────────────────
+  listAssignments: (params?: QueueParams) => {
     const q = new URLSearchParams();
     if (params?.status) q.set("status", params.status);
     if (params?.assignee) q.set("assignee", params.assignee);
+    if (params?.sort) q.set("sort", params.sort);
+    if (params?.order) q.set("order", params.order);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.cursor) q.set("cursor", params.cursor);
     const qs = q.toString();
-    return api.get<ApiAssignment[]>(`/admin/assignments${qs ? `?${qs}` : ""}`);
+    return api.get<ApiQueuePage>(`/admin/assignments${qs ? `?${qs}` : ""}`);
   },
   getConversation: (id: string) => api.get<ApiConversation>(`/conversations/${id}`),
   listMessages: (id: string) => api.get<ApiMessagesPage>(`/conversations/${id}/messages?limit=100`),

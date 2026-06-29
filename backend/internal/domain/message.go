@@ -74,6 +74,8 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		return nil, err
 	}
 
+	_ = applyMessageActivity(ctx, s.store, msg)
+
 	data := views.Message(msg, s.attachmentURLFunc())
 	if in.Visibility == models.VisibilityInternal {
 		// internal notes go ONLY to the agents-only channel (§5.6) — never
@@ -85,6 +87,29 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}
 	return msg, nil
+}
+
+// applyMessageActivity maintains the denormalized last-activity (timestamp +
+// preview) the inbox queue sorts and renders on. It's the single definition every
+// message-ingress path calls right after creating a message — SendMessage and the
+// inbound-email paths — so no ingress can leave the queue ordering stale. Mirrors
+// the UI preview rule: participant-visible, non-system. `st` may be a transaction.
+func applyMessageActivity(ctx context.Context, st store.Store, msg *models.Message) error {
+	if msg.Visibility != models.VisibilityParticipants || msg.SenderKind == models.SenderSystem {
+		return nil
+	}
+	return st.Conversations().TouchLastMessage(ctx, msg.TenantID, msg.ConversationID, msg.CreatedAt, previewText(msg.Body))
+}
+
+// previewText trims a message body to a short, single-line snippet for the inbox
+// queue row (the column is sized at 512; we keep it well under that).
+func previewText(body string) string {
+	const max = 280
+	r := []rune(body)
+	if len(r) > max {
+		return string(r[:max])
+	}
+	return string(r)
 }
 
 // resolveAttachments validates each object_key against a completed upload owned

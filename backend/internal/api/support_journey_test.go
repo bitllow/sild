@@ -47,14 +47,16 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 	// ── agent side: log in, SEE the request queued in the inbox ──
 	cookie := loginAs(t, h, "agent@test")
 
-	var queue []map[string]any
+	var queue struct {
+		Items []map[string]any `json:"items"`
+	}
 	w = h.Request("GET", "/v1/admin/assignments?status=queued").Cookie("sild_admin", cookie).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("inbox: %d %s", w.Code, w.Body)
 	}
 	testutil.DecodeJSON(t, w, &queue)
-	if !containsAssignment(queue, assignmentID) {
-		t.Fatalf("agent should see the queued assignment %s, got %+v", assignmentID, queue)
+	if !containsAssignment(queue.Items, assignmentID) {
+		t.Fatalf("agent should see the queued assignment %s, got %+v", assignmentID, queue.Items)
 	}
 
 	// agent can read the incoming question
@@ -83,9 +85,9 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 
 	// it should no longer appear in the queued list
 	w = h.Request("GET", "/v1/admin/assignments?status=queued").Cookie("sild_admin", cookie).Do()
-	queue = nil
+	queue.Items = nil
 	testutil.DecodeJSON(t, w, &queue)
-	if containsAssignment(queue, assignmentID) {
+	if containsAssignment(queue.Items, assignmentID) {
 		t.Fatal("claimed assignment must leave the queued list")
 	}
 
@@ -128,8 +130,8 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 }
 
 func containsAssignment(list []map[string]any, id string) bool {
-	for _, a := range list {
-		if a["id"] == id {
+	for _, it := range list {
+		if a, ok := it["assignment"].(map[string]any); ok && a["id"] == id {
 			return true
 		}
 	}

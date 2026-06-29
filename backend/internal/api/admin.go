@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/apiutil"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
 	"github.com/gin-gonic/gin"
@@ -121,28 +123,76 @@ func (h *Handler) realtimeToken(c *gin.Context) {
 // ── Inbox (§4.3) ────────────────────────────────────────────────────────────
 
 func (h *Handler) listAssignments(c *gin.Context) {
-	var status *models.AssignmentStatus
+	p := store.QueueParams{Sort: store.QueueSortLastActivity, Desc: true, Limit: 30}
 	if s := c.Query("status"); s != "" {
 		v := models.AssignmentStatus(s)
-		status = &v
+		p.Status = &v
 	}
-	var assignee *string
 	if a := c.Query("assignee"); a != "" {
 		if a == "me" {
 			a = middleware.Get(c).AdminID
 		}
-		assignee = &a
+		p.Assignee = &a
 	}
-	as, err := h.svc.ListQueue(c.Request.Context(), apiutil.Tenant(c), status, assignee)
+	if c.Query("sort") == string(store.QueueSortCreated) {
+		p.Sort = store.QueueSortCreated
+	}
+	if c.Query("order") == "asc" {
+		p.Desc = false
+	}
+	p.Limit = atoiDefault(c.Query("limit"), p.Limit) // store clamps to [1,100]
+	if cur := c.Query("cursor"); cur != "" {
+		cc, err := decodeQueueCursor(cur)
+		if err != nil {
+			httpx.BadRequest(c, "invalid cursor")
+			return
+		}
+		p.Cursor = cc
+	}
+
+	page, err := h.svc.ListQueue(c.Request.Context(), apiutil.Tenant(c), p)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	out := make([]map[string]any, 0, len(as))
-	for i := range as {
-		out = append(out, views.Assignment(&as[i]))
+	items := make([]map[string]any, 0, len(page.Items))
+	for i := range page.Items {
+		items = append(items, views.QueueRow(&page.Items[i]))
 	}
-	c.JSON(http.StatusOK, out)
+	c.JSON(http.StatusOK, gin.H{
+		"items":       items,
+		"next_cursor": encodeQueueCursor(page.NextCursor),
+		"has_more":    page.HasMore,
+	})
+}
+
+// queueCursorDTO is the wire form of a keyset cursor, base64(JSON).
+type queueCursorDTO struct {
+	V time.Time `json:"v"`
+	ID string   `json:"id"`
+}
+
+func encodeQueueCursor(c *store.QueueCursor) any {
+	if c == nil {
+		return nil
+	}
+	b, err := json.Marshal(queueCursorDTO{V: c.Value, ID: c.ID})
+	if err != nil {
+		return nil
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func decodeQueueCursor(s string) (*store.QueueCursor, error) {
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return nil, err
+	}
+	var dto queueCursorDTO
+	if err := json.Unmarshal(b, &dto); err != nil {
+		return nil, err
+	}
+	return &store.QueueCursor{Value: dto.V, ID: dto.ID}, nil
 }
 
 func (h *Handler) adminOpenSupportRequest(c *gin.Context) {

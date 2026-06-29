@@ -71,9 +71,9 @@ func (s *Service) AddAssignment(ctx context.Context, tenantID, convID string) (*
 	return a, nil
 }
 
-// ListQueue returns inbox assignments (§4.3).
-func (s *Service) ListQueue(ctx context.Context, tenantID string, status *models.AssignmentStatus, assignee *string) ([]models.Assignment, error) {
-	return s.store.Assignments().ListQueue(ctx, tenantID, status, assignee)
+// ListQueue returns one cursor-paginated, sorted page of inbox assignments (§4.3).
+func (s *Service) ListQueue(ctx context.Context, tenantID string, p store.QueueParams) (store.QueuePage, error) {
+	return s.store.Assignments().ListQueue(ctx, tenantID, p)
 }
 
 // ClaimAssignment assigns a queued assignment to the calling agent (§4.3).

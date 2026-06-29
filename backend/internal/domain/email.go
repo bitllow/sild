@@ -70,6 +70,7 @@ func (s *Service) appendInbound(ctx context.Context, tenantID string, thread *mo
 	if err := s.store.Messages().Create(ctx, msg); err != nil {
 		return nil, err
 	}
+	_ = applyMessageActivity(ctx, s.store, msg)
 	thread.LastAddress = from
 	thread.LastMessageID = msg.ID
 	_ = s.store.Email().Update(ctx, thread)
@@ -114,7 +115,10 @@ func (s *Service) createFromInbound(ctx context.Context, tenantID string, in mai
 			Channel: models.ChannelEmail, ExternalUserID: &from, Body: in.TextBody, CreatedAt: s.now(),
 			Attachments: inboundAttachments(tenantID, in.Attachments),
 		}
-		return tx.Messages().Create(ctx, msg)
+		if err := tx.Messages().Create(ctx, msg); err != nil {
+			return err
+		}
+		return applyMessageActivity(ctx, tx, msg)
 	})
 	if err != nil {
 		return nil, err

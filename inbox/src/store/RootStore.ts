@@ -1,10 +1,11 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import type { Centrifuge } from "centrifuge";
-import { adminApi, type ApiAssignment, type ApiMessage } from "@/api/admin";
+import { adminApi, type ApiAssignmentStatus, type ApiMessage, type QueueParams } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
 import {
   buildConversation,
+  buildQueueRow,
   mapApiKey,
   mapRealtimeMessage,
   mapTeamMember,
@@ -20,8 +21,12 @@ import type {
   SessionState,
   SettingsTab,
   TeamMember,
+  UiStatus,
   Webhook,
 } from "./types";
+
+// Queue page size for the inbox list + scroll-loading (§4.3).
+const PAGE_SIZE = 30;
 
 export class RootStore {
   // --- session ---
@@ -41,7 +46,14 @@ export class RootStore {
   composer = "";
   internal = false;
   loadingConvs = false;
+  // pagination (cursor-based, scroll-loading)
+  nextCursor: string | null = null;
+  hasMore = false;
+  loadingMore = false;
   convError: string | null = null;
+  // Generation token: bumped on every fresh queue load (filter change / reload)
+  // so a slow in-flight request for a previous filter can't overwrite newer state.
+  private queueSeq = 0;
   sending = false;
   actionBusy = false;
 
@@ -132,36 +144,87 @@ export class RootStore {
   };
 
   // ─────────────────────────── inbox load ───────────────────────────
+  // Map the active filter to server-side query params. Filtering + sorting +
+  // pagination all happen on the backend (§4.3); the list endpoint returns the
+  // last message per row, not history.
+  private get queueParams(): QueueParams {
+    const base: QueueParams = { sort: "last_activity", order: "desc", limit: PAGE_SIZE };
+    switch (this.filter) {
+      case "unassigned":
+        return { ...base, status: "queued" };
+      case "closed":
+        return { ...base, status: "closed" };
+      case "you":
+        // "You" = conversations I'm actively handling: assigned (not queued, not
+        // closed) and assigned to me. Closing keeps assignee_actor_id set, so we
+        // must constrain on status too or closed ones leak into this view.
+        return { ...base, status: "assigned", assignee: "me" };
+      default:
+        return base;
+    }
+  }
+
+  // Load (or reload) the first page for the current filter. Bumps queueSeq so any
+  // earlier in-flight load/loadMore/syncQueue for a previous filter is discarded.
   loadConversations = async () => {
+    const seq = ++this.queueSeq;
     runInAction(() => {
       this.loadingConvs = true;
       this.convError = null;
     });
-    const assignments = await adminApi.listAssignments();
-    // one assignment per conversation (keep the first seen)
-    const seen = new Set<string>();
-    const unique: ApiAssignment[] = [];
-    for (const a of assignments) {
-      if (seen.has(a.conversation_id)) continue;
-      seen.add(a.conversation_id);
-      unique.push(a);
-    }
-    const built = await Promise.all(
-      unique.map(async (a) => {
-        const [conv, page] = await Promise.all([
-          adminApi.getConversation(a.conversation_id),
-          adminApi.listMessages(a.conversation_id),
-        ]);
-        return buildConversation(conv, page, a);
-      })
-    );
-    runInAction(() => {
-      this.convs = built;
-      this.loadingConvs = false;
-      if (!this.activeId || !built.some((c) => c.id === this.activeId)) {
-        this.activeId = built[0]?.id ?? null;
+    try {
+      const page = await adminApi.listAssignments(this.queueParams);
+      if (seq !== this.queueSeq) return; // a newer load superseded this one
+      const built = page.items.map(buildQueueRow);
+      runInAction(() => {
+        this.convs = built;
+        this.nextCursor = page.next_cursor;
+        this.hasMore = page.has_more;
+        if (!this.activeId || !built.some((c) => c.id === this.activeId)) {
+          this.activeId = built[0]?.id ?? null;
+        }
+      });
+      // Queue rows carry no history (messages: []); load the auto-selected
+      // conversation's thread now rather than waiting for the websocket — REST
+      // works even when realtime doesn't.
+      if (this.activeId) await this.refreshActiveMessages();
+    } finally {
+      if (seq === this.queueSeq) {
+        runInAction(() => {
+          this.loadingConvs = false;
+        });
       }
+    }
+  };
+
+  // Append the next page (scroll-loading). No-op while a load is in flight, when
+  // exhausted, or while a search is active (search results aren't paginated here).
+  loadMore = async () => {
+    if (this.loadingMore || !this.hasMore || !this.nextCursor || this.searchResults !== null) return;
+    const seq = this.queueSeq; // page belongs to the current filter generation
+    runInAction(() => {
+      this.loadingMore = true;
     });
+    try {
+      const page = await adminApi.listAssignments({ ...this.queueParams, cursor: this.nextCursor });
+      if (seq !== this.queueSeq) return; // filter changed mid-flight — drop this page
+      runInAction(() => {
+        const have = new Set(this.convs.map((c) => c.id));
+        for (const it of page.items) {
+          if (!have.has(it.conversation.id)) this.convs.push(buildQueueRow(it));
+        }
+        this.nextCursor = page.next_cursor;
+        this.hasMore = page.has_more;
+      });
+    } catch {
+      /* transient; user can scroll again to retry */
+    } finally {
+      if (seq === this.queueSeq) {
+        runInAction(() => {
+          this.loadingMore = false;
+        });
+      }
+    }
   };
 
   private refreshActiveMessages = async () => {
@@ -240,11 +303,41 @@ export class RootStore {
   // Reload the queue; if the conversation set changed, resubscribe realtime so a
   // brand-new support request gets its live conv channel (§5.2 — agents aren't
   // members, so new conversations need a fresh server-side subscription set).
+  // Merge the first page into the loaded list on a tenant-wide queue change —
+  // updating existing rows in place and prepending genuinely new ones — WITHOUT
+  // dropping already scroll-loaded pages or resetting the cursor. If a new
+  // conversation appears, resubscribe so its realtime channel is covered (§5.2).
   private syncQueue = async () => {
-    const before = this.convs.map((c) => c.id).sort().join(",");
-    await this.loadConversations().catch(() => {});
-    const after = this.convs.map((c) => c.id).sort().join(",");
-    if (before !== after) this.reconnectRealtime();
+    const seq = this.queueSeq; // merge belongs to the current filter generation
+    try {
+      const page = await adminApi.listAssignments(this.queueParams);
+      if (seq !== this.queueSeq) return; // filter changed mid-flight — drop the merge
+      runInAction(() => {
+        const byId = new Map(this.convs.map((c) => [c.id, c]));
+        let added = false;
+        for (const it of page.items) {
+          const existing = byId.get(it.conversation.id);
+          const fresh = buildQueueRow(it);
+          if (existing) {
+            // refresh lightweight row fields; keep any loaded history + members
+            existing.preview = fresh.preview;
+            existing.time = fresh.time;
+            existing.lastActivity = fresh.lastActivity;
+            existing.status = fresh.status;
+            existing.assignmentId = fresh.assignmentId;
+            existing.assignmentStatus = fresh.assignmentStatus;
+            existing.convClosed = fresh.convClosed;
+          } else {
+            this.convs.push(fresh);
+            added = true;
+          }
+        }
+        if (!this.activeId && this.convs.length) this.activeId = this.convs[0].id;
+        if (added) this.reconnectRealtime();
+      });
+    } catch {
+      /* transient; the next event or the safety reconcile retries */
+    }
   };
 
   private handleEvent = (channel: string, env: RealtimeEnvelope) => {
@@ -353,26 +446,34 @@ export class RootStore {
     void this.refreshActiveMessages();
   };
   setFilter = (f: InboxFilter) => {
+    if (this.filter === f) return;
     this.filter = f;
+    // filter is applied server-side → reset pagination and reload page 1.
+    this.nextCursor = null;
+    this.hasMore = false;
+    void this.loadConversations();
   };
   newRequest = () => {
-    this.filter = "unassigned";
+    this.setFilter("unassigned");
   };
   togglePanel = () => {
     this.panelOpen = !this.panelOpen;
   };
 
   get filteredConvs(): Conversation[] {
+    // The server already scopes the list to the filter; this client filter only
+    // mirrors status-based views so realtime transitions (e.g. a claimed request
+    // leaving "Unassigned") drop out immediately without a refetch.
+    const wantStatus: UiStatus | null =
+      this.filter === "unassigned"
+        ? "queued"
+        : this.filter === "closed"
+          ? "closed"
+          : this.filter === "you"
+            ? "assigned"
+            : null;
     return this.convs
-      .filter((c) =>
-        this.filter === "all"
-          ? true
-          : this.filter === "unassigned"
-            ? c.status === "queued"
-            : this.filter === "closed"
-              ? c.status === "closed"
-              : c.status !== "closed"
-      )
+      .filter((c) => !wantStatus || c.status === wantStatus)
       // Default ordering: most recently active first. filter() already returned a
       // fresh array, so sorting in place doesn't touch the observable source.
       .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));

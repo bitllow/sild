@@ -18,6 +18,14 @@ type Conversation struct {
 	Status    ConversationStatus `gorm:"size:16;not null;default:'open';index:idx_conv_tenant_status,priority:2"`
 	CreatedAt time.Time
 
+	// Denormalized last participant-visible activity, maintained on each message
+	// (domain.SendMessage → TouchLastMessage). Lets the inbox queue sort/keyset on
+	// an indexed column and render a row preview WITHOUT touching the messages
+	// table (the list fetches only the last message). NULL until the first message
+	// — queries COALESCE to CreatedAt.
+	LastMessageAt      *time.Time `gorm:"index:idx_conv_last_activity"`
+	LastMessagePreview string     `gorm:"size:512"`
+
 	Members    []ConversationMember `gorm:"constraint:OnDelete:CASCADE"`
 	Assignment *Assignment          `gorm:"-"` // loaded explicitly when needed
 }

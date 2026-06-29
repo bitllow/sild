@@ -6,6 +6,7 @@ package views
 import (
 	"encoding/json"
 
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
@@ -96,6 +97,24 @@ func Assignment(a *models.Assignment) map[string]any {
 		out["closed_at"] = a.ClosedAt
 	}
 	return out
+}
+
+// QueueRow renders one inbox queue row: the assignment + its conversation
+// (members + last message preview + last activity), but NO message history —
+// the client fetches that lazily when the conversation is opened (§4.3).
+func QueueRow(it *store.QueueItem) map[string]any {
+	conv := Conversation(&it.Conversation, it.Members, nil)
+	conv["last_activity"] = it.LastActivity
+	if it.Conversation.LastMessagePreview != "" {
+		conv["last_message"] = map[string]any{
+			"body":       it.Conversation.LastMessagePreview,
+			"created_at": it.Conversation.LastMessageAt,
+		}
+	}
+	return map[string]any{
+		"assignment":   Assignment(&it.Assignment),
+		"conversation": conv,
+	}
 }
 
 // Conversation renders the full conversation (§4.1 fetch, §4.2 GET).
