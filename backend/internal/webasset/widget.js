@@ -116,4 +116,16 @@
 
 .note { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 8px 16px; }
 .banner { margin: 0 0 4px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 12px; border-radius: var(--radius-md); padding: 8px 10px; text-align: center; }
+
+/* Phones: the floating 380px card wastes space and crowds the edges, so the
+   panel spans the viewport, stopping just above the launcher \u2014 which stays
+   visible as the close control (the Home view has no in-panel close button). */
+@media (max-width: 480px) {
+  .launcher { right: 16px; bottom: 16px; width: 56px; height: 56px; }
+  .panel {
+    left: 10px; right: 10px; top: 10px; bottom: 84px;
+    width: auto; height: auto; max-width: none; max-height: none;
+    transform-origin: bottom center;
+  }
+}
 `;var ss=(()=>{try{let i=document.currentScript;return i!=null&&i.src?new URL(i.src).origin:""}catch{return""}})(),yt=!1;function is(){if(yt||typeof document=="undefined")return;yt=!0;let i=document.createElement("link");i.rel="stylesheet",i.href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap",document.head.appendChild(i)}var ze=class extends HTMLElement{connectedCallback(){let e=this.config,t=this.attachShadow({mode:"open"}),s=document.createElement("style");s.textContent=vt,t.appendChild(s);let n=document.createElement("div");t.appendChild(n),this.client=new _e(e),et(g(bt,{client:this.client,config:e}),n)}disconnectedCallback(){var e;(e=this.client)==null||e.destroy()}};function ns(){customElements.get("sild-widget")||customElements.define("sild-widget",ze)}var rs={init(i){if(!i||typeof i.tokenProvider!="function")throw new Error("Sild.init: a tokenProvider function is required");is(),ns();let e=document.createElement("sild-widget");return e.config={...i,baseUrl:i.baseUrl||ss},document.body.appendChild(e),{destroy:()=>e.remove()}}};window.Sild=rs;})();

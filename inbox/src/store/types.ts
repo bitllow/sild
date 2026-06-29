@@ -36,6 +36,9 @@ export interface Conversation {
   assignmentStatus?: UiStatus;
   unread: number;
   time: string;
+  /** ISO timestamp of the last activity (newest message, or creation time if no
+   *  messages). Sortable — drives the default desc-by-activity ordering. */
+  lastActivity: string;
   preview: string;
   members: Member[];
   messages: Message[];

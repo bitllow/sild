@@ -136,6 +136,7 @@ export function buildConversation(
     assignmentStatus: a?.status as UiStatus | undefined,
     unread: 0,
     time: relativeTime(lastTs),
+    lastActivity: lastTs,
     preview,
     members: conv.members.map(mapMember),
     messages: msgs,

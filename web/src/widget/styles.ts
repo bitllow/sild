@@ -113,4 +113,16 @@ export const css = `
 
 .note { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 8px 16px; }
 .banner { margin: 0 0 4px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 12px; border-radius: var(--radius-md); padding: 8px 10px; text-align: center; }
+
+/* Phones: the floating 380px card wastes space and crowds the edges, so the
+   panel spans the viewport, stopping just above the launcher — which stays
+   visible as the close control (the Home view has no in-panel close button). */
+@media (max-width: 480px) {
+  .launcher { right: 16px; bottom: 16px; width: 56px; height: 56px; }
+  .panel {
+    left: 10px; right: 10px; top: 10px; bottom: 84px;
+    width: auto; height: auto; max-width: none; max-height: none;
+    transform-origin: bottom center;
+  }
+}
 `;

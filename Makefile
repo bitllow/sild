@@ -8,9 +8,19 @@ build: web-build backend-build
 
 test: backend-test
 
-# Web drop-in (Phase 3). Needs Node 18+. Copies the bundle into the backend's
-# embed dir (see web/build.mjs) so `go build` picks it up.
-web-build: ; cd web && npm install && npm run build
+# Web drop-in (Phase 3). esbuild needs the Node pinned in web/.nvmrc (the system
+# default node is often too old), so source nvm and `nvm install` it first. Copies
+# the bundle into the backend's embed dir (see web/build.mjs) so `go build` picks
+# it up. NVM_REQUIRED=0 skips nvm if your shell already has a new enough node.
+NVM_DIR ?= $(HOME)/.nvm
+
+web-build:
+	@if [ "$(NVM_REQUIRED)" != "0" ]; then \
+	  [ -s "$(NVM_DIR)/nvm.sh" ] || { echo "nvm not found at $(NVM_DIR) — install nvm, or run 'make web-build NVM_REQUIRED=0' to use the system node"; exit 1; }; \
+	fi
+	cd web && \
+	if [ "$(NVM_REQUIRED)" != "0" ]; then . "$(NVM_DIR)/nvm.sh" && nvm install; fi && \
+	npm install && npm run build
 
 backend-build: ; $(MAKE) -C backend build
 backend-test:  ; $(MAKE) -C backend test

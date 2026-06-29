@@ -286,6 +286,7 @@ export class RootStore {
       if (!msg.internal && !msg.system) {
         conv.preview = msg.body;
         conv.time = relativeTime(m.created_at);
+        conv.lastActivity = m.created_at; // bumps it to the top of the desc-sorted list
         if (cid !== this.activeId && msg.dir === "in") conv.unread += 1;
       }
     });
@@ -362,15 +363,19 @@ export class RootStore {
   };
 
   get filteredConvs(): Conversation[] {
-    return this.convs.filter((c) =>
-      this.filter === "all"
-        ? true
-        : this.filter === "unassigned"
-          ? c.status === "queued"
-          : this.filter === "closed"
-            ? c.status === "closed"
-            : c.status !== "closed"
-    );
+    return this.convs
+      .filter((c) =>
+        this.filter === "all"
+          ? true
+          : this.filter === "unassigned"
+            ? c.status === "queued"
+            : this.filter === "closed"
+              ? c.status === "closed"
+              : c.status !== "closed"
+      )
+      // Default ordering: most recently active first. filter() already returned a
+      // fresh array, so sorting in place doesn't touch the observable source.
+      .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
   }
 
   get active(): Conversation | null {

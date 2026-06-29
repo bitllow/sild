@@ -18,6 +18,15 @@
       h1 { font-size: 42px; line-height: 1.1; letter-spacing: -.03em; margin: 14px 0 0; }
       p { font-size: 17px; line-height: 1.6; color: var(--slate-600); margin: 18px 0 0; }
       .hint { font-size: 14px; color: var(--slate-400); margin-top: 32px; }
+
+      @media (max-width: 640px) {
+        header { height: 56px; padding: 0 18px; gap: 0; }
+        nav { display: none; }
+        main { padding: 44px 20px 100px; }
+        h1 { font-size: 30px; }
+        p { font-size: 16px; }
+        .hint { margin-top: 24px; }
+      }
     </style>
   </head>
   <body>
@@ -35,8 +44,11 @@
       <p class="hint">Still stuck? Chat with us using the button in the corner. →</p>
     </main>
 
-    <!-- Sild drop-in: self-contained, shadow-DOM isolated (§9) -->
-    <script src="http://localhost:8080/widget.js"></script>
+    <!-- Sild drop-in: self-contained, shadow-DOM isolated (§9).
+         URLs are origin-relative so the demo works from any host — localhost or
+         a LAN IP / phone — without rebuilding. The real host page would point
+         baseUrl at the Sild deployment. -->
+    <script src="/widget.js"></script>
     <script>
       // The host backend mints a user JWT via its API key. For this demo the dev
       // server stands in for that endpoint; a stable guest id persists the thread
@@ -47,9 +59,9 @@
         localStorage.setItem("sild_guest", guestId);
       }
       Sild.init({
-        baseUrl: "http://localhost:8080",
+        baseUrl: window.location.origin,
         tokenProvider: function () {
-          return fetch("http://localhost:8080/v1/dev/widget-token?user_id=" + guestId)
+          return fetch("/v1/dev/widget-token?user_id=" + guestId)
             .then(function (r) { return r.json(); })
             .then(function (d) { return d.token; });
         },
