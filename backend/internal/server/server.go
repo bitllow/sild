@@ -9,6 +9,7 @@ import (
 
 	"github.com/bitllow/sild/backend/internal/api"
 	"github.com/bitllow/sild/backend/internal/config"
+	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/gin-gonic/gin"
 )
@@ -27,6 +28,7 @@ func New(cfg *config.Config, st store.Store, h *api.Handler) *Server {
 	}
 	e := gin.New()
 	e.Use(gin.Recovery())
+	e.Use(middleware.CORS()) // before routes so all registrations inherit it
 
 	s := &Server{cfg: cfg, store: st, engine: e}
 	s.registerHealth()

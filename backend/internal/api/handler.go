@@ -4,12 +4,15 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store/models"
+	"github.com/bitllow/sild/backend/internal/webasset"
 	"github.com/gin-gonic/gin"
 )
 
@@ -32,6 +35,14 @@ func New(svc *domain.Service, search *domain.SearchService, mw *middleware.Auth,
 // Mount attaches every route to the engine.
 func (h *Handler) Mount(e *gin.Engine) {
 	e.GET("/.well-known/jwks.json", h.jwks)
+
+	// Web drop-in bundle (§9), embedded at build time so the binary is
+	// self-contained. CORS is already applied engine-wide, so customer sites can
+	// load it cross-origin; front it with a CDN in production.
+	e.GET("/widget.js", func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=300")
+		c.Data(http.StatusOK, "application/javascript; charset=utf-8", webasset.Widget)
+	})
 
 	v1 := e.Group("/v1")
 

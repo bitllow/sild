@@ -19,7 +19,10 @@ services:
       POSTGRES_USER: sild
       POSTGRES_PASSWORD: sild
       POSTGRES_DB: sild
-    ports: ["5432:5432"]
+    # Host port 5433 to avoid clashing with a local Postgres on 5432; the
+    # in-cluster services still reach it at postgres:5432. `make dev` (local go
+    # run) connects via the published port — see DEV_DB_DSN in the root Makefile.
+    ports: ["5433:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sild"]
@@ -29,7 +32,10 @@ services:
 
   redis:
     image: redis:7
-    ports: ["6379:6379"]
+    # Host port 6380 to avoid clashing with other local redis instances; the
+    # in-cluster services still reach it at redis:6379. `make dev` (local go run)
+    # connects via the published port — see DEV_REDIS_URL in the root Makefile.
+    ports: ["6380:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s

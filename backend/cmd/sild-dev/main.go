@@ -26,6 +26,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/gormstore"
 	"github.com/bitllow/sild/backend/internal/store/models"
+	"github.com/bitllow/sild/backend/internal/webasset"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -57,6 +58,34 @@ func main() {
 		srv.Engine().GET("/v1/ws", gin.WrapH(node.WSHandler()))
 		srv.Engine().GET("/v1/ws/sse", gin.WrapH(node.SSEHandler()))
 
+		// Phase 3 drop-in: /widget.js is mounted from the embedded bundle in
+		// handler.Mount (so sild-api serves it too). Here we add the dev-only
+		// faux host page, also embedded.
+		srv.Engine().GET("/sild-demo", func(c *gin.Context) {
+			c.Data(200, "text/html; charset=utf-8", webasset.Demo)
+		})
+
+		// Dev-only token mint standing in for the host backend's tokenProvider
+		// endpoint: mints a user JWT for a (guest) id in the dev tenant. Never
+		// exposes the API key. Production hosts mint via POST /v1/tokens.
+		srv.Engine().GET("/v1/dev/widget-token", func(c *gin.Context) {
+			uid := c.Query("user_id")
+			if uid == "" {
+				uid = "guest_demo"
+			}
+			ids, err := st.Tenants().AllIDs(c.Request.Context())
+			if err != nil || len(ids) == 0 {
+				c.JSON(500, gin.H{"error": "no tenant"})
+				return
+			}
+			tok, exp, err := km.Mint(c.Request.Context(), uid, ids[0], time.Hour)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, gin.H{"token": tok, "expires_at": exp})
+		})
+
 		devSeed(ctx, st, svc)
 
 		// Background webhook relay (in-process worker).
@@ -73,7 +102,7 @@ func main() {
 			}
 		}()
 
-		log.Printf("sild-dev: REST+WS on %s (sqlite, in-memory broker) — Ctrl-C to stop", cfg.HTTPAddr)
+		log.Printf("sild-dev: REST+WS on %s (db=%s, broker=%s) — Ctrl-C to stop", cfg.HTTPAddr, cfg.DB.Driver, cfg.Realtime.Broker)
 		return srv.Run(ctx)
 	})
 	if err != nil {
