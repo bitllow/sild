@@ -75,9 +75,12 @@ export interface ApiQueuePage {
   items: ApiQueueItem[];
   next_cursor: string | null;
   has_more: boolean;
+  // Count of open conversations in the tenant — the inbox open badge (§8).
+  open_count: number;
 }
 
-export type QueueSort = "last_activity" | "created";
+// last_activity (default), created = date started, waiting_since = queued-since.
+export type QueueSort = "last_activity" | "created" | "waiting_since";
 export type QueueOrder = "asc" | "desc";
 
 export interface QueueParams {
@@ -126,6 +129,24 @@ export interface ApiTeamMember {
   created_at: string;
 }
 
+export interface ApiEmailChannel {
+  channel: "email";
+  forwarding_address: string;
+  inbound_domain: string;
+  verified: boolean;
+  auto_reply: boolean;
+  spam_filter: boolean;
+  from_name: string;
+  from_address: string;
+}
+
+export interface EmailChannelPatch {
+  auto_reply?: boolean;
+  spam_filter?: boolean;
+  from_name?: string;
+  from_address?: string;
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 export const adminApi = {
   loginPassword: (email: string, password: string) =>
@@ -171,4 +192,9 @@ export const adminApi = {
   listTeam: () => api.get<ApiTeamMember[]>("/admin/team"),
   setTeamRole: (id: string, role: ApiPlatformRole) =>
     api.patch<void>(`/admin/team/${id}`, { platform_role: role }),
+
+  // ── Settings: channels (§6.2) ─────────────────────────────────────────
+  getEmailChannel: () => api.get<ApiEmailChannel>("/admin/channels/email"),
+  updateEmailChannel: (patch: EmailChannelPatch) =>
+    api.patch<ApiEmailChannel>("/admin/channels/email", patch as Record<string, unknown>),
 };

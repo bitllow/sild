@@ -1,12 +1,20 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import type { Centrifuge } from "centrifuge";
-import { adminApi, type ApiAssignmentStatus, type ApiMessage, type QueueParams } from "@/api/admin";
+import {
+  adminApi,
+  type ApiAssignmentStatus,
+  type ApiMessage,
+  type QueueOrder,
+  type QueueParams,
+  type QueueSort,
+} from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
 import {
   buildConversation,
   buildQueueRow,
   mapApiKey,
+  mapEmailChannel,
   mapRealtimeMessage,
   mapTeamMember,
   mapWebhook,
@@ -15,6 +23,7 @@ import {
 import type {
   ApiKey,
   Conversation,
+  EmailChannel,
   InboxFilter,
   InboxView,
   PlatformRole,
@@ -42,6 +51,12 @@ export class RootStore {
   convs: Conversation[] = [];
   activeId: string | null = null;
   filter: InboxFilter = "all";
+  // Sort the queue by last activity (default), date started, or waiting since,
+  // with an asc/desc toggle. Applied server-side (§4.3).
+  sortBy: QueueSort = "last_activity";
+  sortDir: QueueOrder = "desc";
+  // Open-conversation count for the inbox header badge (§8).
+  openCount = 0;
   panelOpen = true;
   composer = "";
   internal = false;
@@ -68,6 +83,8 @@ export class RootStore {
   keys: ApiKey[] = [];
   webhooks: Webhook[] = [];
   team: TeamMember[] = [];
+  emailChannel: EmailChannel | null = null;
+  channelCopied = false;
   settingsLoaded = false;
   keyDialog = false;
   revealedKey: string | null = null;
@@ -148,7 +165,7 @@ export class RootStore {
   // pagination all happen on the backend (§4.3); the list endpoint returns the
   // last message per row, not history.
   private get queueParams(): QueueParams {
-    const base: QueueParams = { sort: "last_activity", order: "desc", limit: PAGE_SIZE };
+    const base: QueueParams = { sort: this.sortBy, order: this.sortDir, limit: PAGE_SIZE };
     switch (this.filter) {
       case "unassigned":
         return { ...base, status: "queued" };
@@ -180,6 +197,7 @@ export class RootStore {
         this.convs = built;
         this.nextCursor = page.next_cursor;
         this.hasMore = page.has_more;
+        this.openCount = page.open_count;
         if (!this.activeId || !built.some((c) => c.id === this.activeId)) {
           this.activeId = built[0]?.id ?? null;
         }
@@ -313,6 +331,7 @@ export class RootStore {
       const page = await adminApi.listAssignments(this.queueParams);
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop the merge
       runInAction(() => {
+        this.openCount = page.open_count;
         const byId = new Map(this.convs.map((c) => [c.id, c]));
         let added = false;
         for (const it of page.items) {
@@ -453,6 +472,21 @@ export class RootStore {
     this.hasMore = false;
     void this.loadConversations();
   };
+  setSort = (s: QueueSort) => {
+    if (this.sortBy === s) return;
+    this.sortBy = s;
+    this.reloadQueue();
+  };
+  toggleSortDir = () => {
+    this.sortDir = this.sortDir === "desc" ? "asc" : "desc";
+    this.reloadQueue();
+  };
+  // Sorting is applied server-side → reset pagination and reload page 1.
+  private reloadQueue = () => {
+    this.nextCursor = null;
+    this.hasMore = false;
+    void this.loadConversations();
+  };
   newRequest = () => {
     this.setFilter("unassigned");
   };
@@ -472,11 +506,17 @@ export class RootStore {
           : this.filter === "you"
             ? "assigned"
             : null;
-    return this.convs
-      .filter((c) => !wantStatus || c.status === wantStatus)
-      // Default ordering: most recently active first. filter() already returned a
-      // fresh array, so sorting in place doesn't touch the observable source.
-      .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+    const rows = this.convs.filter((c) => !wantStatus || c.status === wantStatus);
+    // Re-sort by the active key (carried per row) so realtime arrivals and
+    // last-activity bumps land in the right place without a refetch — matching
+    // the server's ordering for whichever sort is active.
+    const key = (c: Conversation) =>
+      this.sortBy === "created" ? c.dateStarted : this.sortBy === "waiting_since" ? c.waitingSince : c.lastActivity;
+    rows.sort((a, b) => {
+      const asc = key(a).localeCompare(key(b));
+      return this.sortDir === "desc" ? -asc : asc; // desc = newest first (default)
+    });
+    return rows;
   }
 
   get active(): Conversation | null {
@@ -630,21 +670,57 @@ export class RootStore {
   // ─────────────────────────── settings ───────────────────────────
   loadSettings = async () => {
     try {
-      const [keys, webhooks, team] = await Promise.all([
+      const [keys, webhooks, team, email] = await Promise.all([
         adminApi.listApiKeys(),
         adminApi.listWebhooks(),
         adminApi.listTeam(),
+        adminApi.getEmailChannel(),
       ]);
       runInAction(() => {
         this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
         this.webhooks = webhooks.map(mapWebhook);
         this.team = team.map(mapTeamMember);
+        this.emailChannel = mapEmailChannel(email);
         this.settingsLoaded = true;
       });
     } catch {
       runInAction(() => {
         this.settingsLoaded = true;
       });
+    }
+  };
+
+  // ─────────────────────────── settings: channels (§6.2) ───────────────────
+  copyForwardingAddress = () => {
+    if (!this.emailChannel) return;
+    try {
+      void navigator.clipboard.writeText(this.emailChannel.forwardingAddress);
+      runInAction(() => {
+        this.channelCopied = true;
+      });
+      setTimeout(() => runInAction(() => {
+        this.channelCopied = false;
+      }), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+  toggleAutoReply = (v: boolean) => this.patchChannel({ autoReply: v }, { auto_reply: v });
+  toggleSpamFilter = (v: boolean) => this.patchChannel({ spamFilter: v }, { spam_filter: v });
+
+  // Optimistically apply a toggle, rolling back if the PATCH fails.
+  private patchChannel = async (
+    local: Partial<EmailChannel>,
+    patch: { auto_reply?: boolean; spam_filter?: boolean }
+  ) => {
+    const ch = this.emailChannel;
+    if (!ch) return;
+    const prev = { ...ch };
+    runInAction(() => Object.assign(ch, local));
+    try {
+      await adminApi.updateEmailChannel(patch);
+    } catch {
+      runInAction(() => Object.assign(ch, prev));
     }
   };
 

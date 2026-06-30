@@ -6,6 +6,7 @@ require (
 	github.com/caarlos0/env/v11 v11.2.2
 	github.com/centrifugal/centrifuge v0.38.0
 	github.com/coreos/go-oidc/v3 v3.11.0
+	github.com/emersion/go-smtp v0.24.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
@@ -31,6 +32,7 @@ require (
 	github.com/cloudwego/iasm v0.2.0 // indirect
 	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gammazero/deque v0.2.1 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect

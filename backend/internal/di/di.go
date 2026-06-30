@@ -70,9 +70,15 @@ func provideRealtimePublisher(node *realtime.Node) (realtime.Publisher, error) {
 	return realtime.NewCentrifugePublisher(node.Node), nil
 }
 
-// provideMailer supplies the outbound email transport. NoopMailer until a
-// provider (SendGrid/Postmark/Mailgun) is configured.
-func provideMailer() mail.Mailer { return mail.NoopMailer{} }
+// provideMailer supplies the outbound email transport (§6.2). A real SMTP relay
+// when SILD_SMTP_RELAY_ADDR is set; NoopMailer otherwise so zero-config dev
+// keeps working.
+func provideMailer(cfg *config.Config) mail.Mailer {
+	if cfg.Email.RelayAddr == "" {
+		return mail.NoopMailer{}
+	}
+	return mail.NewSMTPMailer(cfg.Email.RelayAddr, cfg.Email.RelayUser, cfg.Email.RelayPass, cfg.Email.From)
+}
 
 // providePushNotifier supplies the push transport. NoopNotifier until FCM/APNs
 // are configured.

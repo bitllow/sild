@@ -79,5 +79,19 @@ services:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
 
+  # Email forwarding ingestion daemon (§6.2). MX records for the inbound domain
+  # point here; orgs forward their support mailbox to <token>@inbound.sild.local
+  # and each message becomes a conversation. :2525 in dev (no privileged port).
+  mail:
+    build: ./backend
+    command: ["/usr/local/bin/sild-mail"]
+    environment:
+      <<: *backend-env
+      SILD_SMTP_ADDR: ":2525"
+      SILD_EMAIL_INBOUND_DOMAIN: "inbound.sild.local"
+    ports: ["2525:2525"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
 volumes:
   pgdata:

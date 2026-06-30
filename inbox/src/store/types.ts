@@ -36,9 +36,13 @@ export interface Conversation {
   assignmentStatus?: UiStatus;
   unread: number;
   time: string;
-  /** ISO timestamp of the last activity (newest message, or creation time if no
-   *  messages). Sortable — drives the default desc-by-activity ordering. */
+  /** ISO timestamps for the three inbox sort keys (all sortable strings):
+   *  lastActivity = newest message (or creation time); dateStarted = conversation
+   *  creation; waitingSince = current assignment/queue-entry time. Carried per row
+   *  so realtime arrivals re-sort client-side without a refetch. */
   lastActivity: string;
+  dateStarted: string;
+  waitingSince: string;
   preview: string;
   members: Member[];
   messages: Message[];
@@ -67,7 +71,18 @@ export interface TeamMember {
   role: PlatformRole;
 }
 
+/** The email support channel as the Channels settings render it (§6.2). */
+export interface EmailChannel {
+  forwardingAddress: string;
+  inboundDomain: string;
+  verified: boolean;
+  autoReply: boolean;
+  spamFilter: boolean;
+  fromName: string;
+  fromAddress: string;
+}
+
 export type InboxView = "inbox" | "settings";
-export type SettingsTab = "keys" | "webhooks" | "team";
+export type SettingsTab = "keys" | "webhooks" | "team" | "channels";
 export type InboxFilter = "you" | "unassigned" | "closed" | "all";
 export type SessionState = "loading" | "authed" | "anon";

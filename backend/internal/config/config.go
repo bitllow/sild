@@ -24,6 +24,27 @@ type Config struct {
 	Realtime Realtime
 	Storage  Storage
 	Archive  Archive
+	Email    Email
+}
+
+// Email configures the forwarding ingestion daemon (inbound) and the outbound
+// SMTP relay (§6.2). Each tenant gets a forwarding address
+// <inbound_token>@<InboundDomain>; orgs forward their support mailbox to it and
+// the sild-mail daemon catches and ingests every message.
+type Email struct {
+	// InboundDomain is the host part of every tenant's forwarding address.
+	InboundDomain string `env:"SILD_EMAIL_INBOUND_DOMAIN" envDefault:"inbound.sild.local"`
+	// SMTPListenAddr is where the sild-mail receiver daemon listens. Behind the
+	// MX in production (:25); a high port in dev so it needs no privileges.
+	SMTPListenAddr string `env:"SILD_SMTP_ADDR" envDefault:":2525"`
+
+	// Outbound relay (agent replies leave through it). When RelayAddr is empty
+	// the mailer is a no-op (zero-config dev keeps working).
+	RelayAddr string `env:"SILD_SMTP_RELAY_ADDR"`
+	RelayUser string `env:"SILD_SMTP_RELAY_USER"`
+	RelayPass string `env:"SILD_SMTP_RELAY_PASS"`
+	// From is the fallback envelope/From address when a tenant configures none.
+	From string `env:"SILD_SMTP_FROM" envDefault:"support@inbound.sild.local"`
 }
 
 // Auth holds token + session + admin-OIDC settings.

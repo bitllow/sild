@@ -1,5 +1,6 @@
 import type {
   ApiConversation,
+  ApiEmailChannel,
   ApiKeyRecord,
   ApiMember,
   ApiMessage,
@@ -8,7 +9,7 @@ import type {
 } from "@/api/admin";
 import type { ApiMessagesPage, ApiQueueItem } from "@/api/admin";
 import type { ApiAssignment } from "@/api/admin";
-import type { Channel, Conversation, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
+import type { Channel, Conversation, EmailChannel, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
 
 export function clockTime(iso: string): string {
   const d = new Date(iso);
@@ -125,6 +126,8 @@ function conversationShell(conv: ApiConversation, a?: ApiAssignment) {
     assignmentId: a?.id,
     assignmentStatus: a?.status as UiStatus | undefined,
     unread: 0,
+    dateStarted: conv.created_at,
+    waitingSince: a?.created_at ?? conv.created_at,
     members: conv.members.map(mapMember),
   };
 }
@@ -183,4 +186,16 @@ export function mapTeamMember(t: ApiTeamMember): TeamMember {
   const local = t.email.split("@")[0].replace(/[._-]+/g, " ");
   const name = local.replace(/\b\w/g, (c) => c.toUpperCase());
   return { id: t.id, name: name || t.email, email: t.email, role: t.platform_role };
+}
+
+export function mapEmailChannel(c: ApiEmailChannel): EmailChannel {
+  return {
+    forwardingAddress: c.forwarding_address,
+    inboundDomain: c.inbound_domain,
+    verified: c.verified,
+    autoReply: c.auto_reply,
+    spamFilter: c.spam_filter,
+    fromName: c.from_name,
+    fromAddress: c.from_address,
+  };
 }

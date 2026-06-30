@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,6 +50,16 @@ func (b *localBucket) SignPut(_ context.Context, objectKey, _ string, _ int64) (
 
 func (b *localBucket) SignGet(_ context.Context, objectKey string, _ time.Duration) (string, error) {
 	return b.publicURL + "/v1/uploads/local/" + objectKey, nil
+}
+
+// Put writes bytes to the on-disk object store, under the same objects/ root the
+// local PUT/GET routes use (so a server-side write is readable via SignGet).
+func (b *localBucket) Put(_ context.Context, objectKey string, data []byte, _ string) error {
+	full := filepath.Join(b.dir, "objects", filepath.Clean("/"+objectKey))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(full, data, 0o644)
 }
 
 // LocalDir exposes the storage dir so the local PUT/GET route can read/write it.

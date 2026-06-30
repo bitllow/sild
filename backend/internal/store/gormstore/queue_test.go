@@ -39,11 +39,15 @@ func wipeTenant(t *testing.T, db *gorm.DB, tenant string) {
 	}
 }
 
-// seedRow is the test's source-of-truth for one queue row.
+// seedRow is the test's source-of-truth for one queue row. The three timestamps
+// are the three independent sort keys: last activity (last_message_at), date
+// started (conversation created_at), and waiting since (assignment created_at).
+// waiting may be zero for tests that don't exercise that sort.
 type seedRow struct {
 	i       int
 	lastAct time.Time
 	created time.Time
+	waiting time.Time
 }
 
 func (s seedRow) convID(tenant string) string   { return fmt.Sprintf("%s_c%d", tenant, s.i) }
@@ -55,14 +59,14 @@ func seedQueueRow(t *testing.T, st store.Store, tenant string, r seedRow) {
 	la := r.lastAct
 	conv := &models.Conversation{
 		ID: r.convID(tenant), TenantID: tenant, Status: models.ConversationOpen,
-		CreatedAt: la, LastMessageAt: &la, LastMessagePreview: "hi",
+		CreatedAt: r.created, LastMessageAt: &la, LastMessagePreview: "hi",
 	}
 	if err := st.Conversations().Create(ctx, conv); err != nil {
 		t.Fatalf("create conv: %v", err)
 	}
 	a := &models.Assignment{
 		ID: r.assignID(tenant), TenantID: tenant, ConversationID: r.convID(tenant),
-		Status: models.AssignmentQueued, CreatedAt: r.created,
+		Status: models.AssignmentQueued, CreatedAt: r.waiting,
 	}
 	if err := st.Assignments().Create(ctx, a); err != nil {
 		t.Fatalf("create assignment: %v", err)
@@ -95,10 +99,14 @@ func eqIDs(a, b []string) bool {
 func expectedOrder(tenant string, rows []seedRow, sortKey store.QueueSort, desc bool) []string {
 	rs := append([]seedRow(nil), rows...)
 	key := func(r seedRow) time.Time {
-		if sortKey == store.QueueSortCreated {
+		switch sortKey {
+		case store.QueueSortCreated:
 			return r.created
+		case store.QueueSortWaiting:
+			return r.waiting
+		default:
+			return r.lastAct
 		}
-		return r.lastAct
 	}
 	sort.SliceStable(rs, func(i, j int) bool {
 		ki, kj := key(rs[i]), key(rs[j])
@@ -133,19 +141,20 @@ func TestListQueueSortAndCursor(t *testing.T) {
 			base := time.Now().UTC().Truncate(time.Second)
 			at := func(min int) time.Time { return base.Add(time.Duration(min) * time.Minute) }
 
-			// 8 rows. The two sort keys deliberately disagree, and each key has one
-			// tie pair so the id tiebreaker is exercised in both sort modes:
-			//   last activity: distinct except rows 3 & 4 (tie)
-			//   created:       distinct except rows 6 & 7 (tie)
+			// 8 rows. The three sort keys deliberately disagree, and each key has a
+			// tie pair so the id tiebreaker is exercised in every sort mode:
+			//   last activity (last_message_at): distinct except rows 3 & 4
+			//   date started  (conv created_at): distinct except rows 6 & 7
+			//   waiting since  (asgn created_at): distinct except rows 6 & 7
 			rows := []seedRow{
-				{i: 0, lastAct: at(0), created: at(7)},
-				{i: 1, lastAct: at(1), created: at(6)},
-				{i: 2, lastAct: at(2), created: at(5)},
-				{i: 3, lastAct: at(3), created: at(4)},
-				{i: 4, lastAct: at(3), created: at(3)}, // last-activity tie with row 3
-				{i: 5, lastAct: at(5), created: at(2)},
-				{i: 6, lastAct: at(6), created: at(1)},
-				{i: 7, lastAct: at(7), created: at(1)}, // created tie with row 6
+				{i: 0, lastAct: at(0), created: at(17), waiting: at(20)},
+				{i: 1, lastAct: at(1), created: at(16), waiting: at(21)},
+				{i: 2, lastAct: at(2), created: at(15), waiting: at(22)},
+				{i: 3, lastAct: at(3), created: at(14), waiting: at(23)},
+				{i: 4, lastAct: at(3), created: at(13), waiting: at(24)}, // last-activity tie with row 3
+				{i: 5, lastAct: at(5), created: at(12), waiting: at(25)},
+				{i: 6, lastAct: at(6), created: at(11), waiting: at(26)},
+				{i: 7, lastAct: at(7), created: at(11), waiting: at(26)}, // created + waiting tie with row 6
 			}
 			for _, r := range rows {
 				seedQueueRow(t, st, tenant, r)
@@ -160,6 +169,8 @@ func TestListQueueSortAndCursor(t *testing.T) {
 				{"last_activity_asc", store.QueueSortLastActivity, false},
 				{"created_desc", store.QueueSortCreated, true},
 				{"created_asc", store.QueueSortCreated, false},
+				{"waiting_desc", store.QueueSortWaiting, true},
+				{"waiting_asc", store.QueueSortWaiting, false},
 			}
 
 			for _, m := range modes {

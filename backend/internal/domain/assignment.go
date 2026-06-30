@@ -76,6 +76,12 @@ func (s *Service) ListQueue(ctx context.Context, tenantID string, p store.QueueP
 	return s.store.Assignments().ListQueue(ctx, tenantID, p)
 }
 
+// CountOpenConversations returns the tenant's open-conversation count for the
+// inbox badge (§8).
+func (s *Service) CountOpenConversations(ctx context.Context, tenantID string) (int64, error) {
+	return s.store.Conversations().CountOpen(ctx, tenantID)
+}
+
 // ClaimAssignment assigns a queued assignment to the calling agent (§4.3).
 // State: queued → assigned.
 func (s *Service) ClaimAssignment(ctx context.Context, tenantID, assignmentID, agentActorID string) (*models.Assignment, error) {

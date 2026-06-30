@@ -42,6 +42,13 @@ func (r *conversationRepo) TouchLastMessage(ctx context.Context, tenantID, convI
 		Updates(map[string]any{"last_message_at": at, "last_message_preview": preview}).Error
 }
 
+func (r *conversationRepo) CountOpen(ctx context.Context, tenantID string) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where("tenant_id = ? AND status = ?", tenantID, models.ConversationOpen).Count(&n).Error
+	return n, err
+}
+
 func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error) {
 	var cs []models.Conversation
 	err := r.db.WithContext(ctx).
@@ -194,16 +201,26 @@ func convLastActivity(c models.Conversation) time.Time {
 	return c.CreatedAt
 }
 
-func (r *assignmentRepo) ListQueue(ctx context.Context, tenantID string, p store.QueueParams) (store.QueuePage, error) {
-	// Sort/keyset on the conversation's last activity (denormalized, COALESCE to
-	// creation time when there are no messages yet). We ORDER BY / filter on the
-	// expression but don't SELECT it — the computed column loses its type on
-	// SQLite — and recompute LastActivity in Go from the loaded conversation.
-	const laExpr = "COALESCE(c.last_message_at, c.created_at)"
-	sortExpr := laExpr
-	if p.Sort == store.QueueSortCreated {
-		sortExpr = "a.created_at"
+// queueSort is the single source of truth for an inbox sort mode: its SQL
+// ordering expression and the function that extracts the same value from a
+// loaded row for the keyset cursor. Adding a sort mode is one case here.
+func queueSort(s store.QueueSort) (expr string, value func(store.QueueItem) time.Time) {
+	switch s {
+	case store.QueueSortCreated: // date started: when the conversation began
+		return "c.created_at", func(it store.QueueItem) time.Time { return it.Conversation.CreatedAt }
+	case store.QueueSortWaiting: // waiting since: when the current assignment was queued
+		return "a.created_at", func(it store.QueueItem) time.Time { return it.Assignment.CreatedAt }
+	default: // last activity (default)
+		return "COALESCE(c.last_message_at, c.created_at)", func(it store.QueueItem) time.Time { return it.LastActivity }
 	}
+}
+
+func (r *assignmentRepo) ListQueue(ctx context.Context, tenantID string, p store.QueueParams) (store.QueuePage, error) {
+	// One source of truth for each sort mode: the SQL ordering expression and the
+	// matching value extractor for the keyset cursor (see queueSort). We ORDER BY /
+	// filter on the expression but don't SELECT it — the computed column loses its
+	// type on SQLite — and recompute the value in Go from the loaded row.
+	sortExpr, sortValue := queueSort(p.Sort)
 	limit := p.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 30
@@ -290,11 +307,7 @@ func (r *assignmentRepo) ListQueue(ctx context.Context, tenantID string, p store
 	}
 	if page.HasMore {
 		last := page.Items[len(page.Items)-1]
-		val := last.LastActivity
-		if p.Sort == store.QueueSortCreated {
-			val = last.Assignment.CreatedAt
-		}
-		page.NextCursor = &store.QueueCursor{Value: val, ID: last.Assignment.ID}
+		page.NextCursor = &store.QueueCursor{Value: sortValue(last), ID: last.Assignment.ID}
 	}
 	return page, nil
 }

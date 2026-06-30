@@ -21,6 +21,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/connector/webhook"
 	"github.com/bitllow/sild/backend/internal/di"
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/mail"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/server"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -86,7 +87,15 @@ func main() {
 			c.JSON(200, gin.H{"token": tok, "expires_at": exp})
 		})
 
-		devSeed(ctx, st, svc)
+		devSeed(ctx, st, svc, cfg)
+
+		// Email forwarding ingestion daemon, in-process so `make dev` exercises
+		// the full loop (forwarded mail → conversation) without a separate binary.
+		go func() {
+			if err := mail.Serve(ctx, cfg.Email.SMTPListenAddr, svc.ForwardedMailHandler()); err != nil {
+				log.Printf("sild-dev: smtp receiver: %v", err)
+			}
+		}()
 
 		// Background webhook relay (in-process worker).
 		go func() {
@@ -112,9 +121,14 @@ func main() {
 
 // devSeed creates a ready-to-use tenant + owner admin + API key on first run so
 // you can log into the inbox (email/password) and call the API immediately.
-func devSeed(ctx context.Context, st store.Store, svc *domain.Service) {
+func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *config.Config) {
 	ids, err := st.Tenants().AllIDs(ctx)
 	if err != nil || len(ids) > 0 {
+		if len(ids) > 0 {
+			if ch, err := svc.GetEmailChannel(ctx, ids[0]); err == nil {
+				log.Printf("sild-dev: forward email to %s (SMTP %s) to open a conversation", ch.ForwardingAddress, cfg.Email.SMTPListenAddr)
+			}
+		}
 		return // already seeded
 	}
 	t := &models.Tenant{Name: "Dev Tenant", MaxAttachmentBytes: 10 << 20}
@@ -134,11 +148,16 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service) {
 		return
 	}
 	devSeedConversations(ctx, svc, t.ID, admin.ID)
+	fwd := ""
+	if ch, err := svc.GetEmailChannel(ctx, t.ID); err == nil {
+		fwd = ch.ForwardingAddress
+	}
 	log.Printf("┌─ dev seed ────────────────────────────────────────────")
 	log.Printf("│ tenant_id : %s", t.ID)
 	log.Printf("│ admin     : admin@sild.local / password123  (POST /v1/admin/auth/password)")
 	log.Printf("│ api key   : %s", key)
 	log.Printf("│ inbox     : 5 sample support requests seeded")
+	log.Printf("│ email in  : forward to %s (SMTP %s)", fwd, cfg.Email.SMTPListenAddr)
 	log.Printf("└───────────────────────────────────────────────────────")
 }
 

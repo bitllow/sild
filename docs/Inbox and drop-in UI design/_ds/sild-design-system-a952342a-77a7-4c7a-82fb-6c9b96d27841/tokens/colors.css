@@ -1,0 +1,111 @@
+/* ============================================================
+   SILD COLOR SYSTEM
+   Base ramps (raw values) → semantic aliases (use these in UI).
+   Vibe: cool Nordic slate ink + a confident "signal blue" that
+   bridges parties, with a warm coral accent used sparingly.
+   ============================================================ */
+
+:root {
+  /* ---------- Brand / Signal Blue ---------- */
+  --blue-50:  #EEF3FF;
+  --blue-100: #DCE6FF;
+  --blue-200: #BAC8FF;
+  --blue-300: #8FA8FF;
+  --blue-400: #6285FF;
+  --blue-500: #2563FD;   /* primary */
+  --blue-600: #1A4FE0;   /* hover */
+  --blue-700: #2440B8;
+  --blue-800: #1F3690;
+  --blue-900: #1B2E70;
+
+  /* ---------- Neutral / Slate Ink ---------- */
+  --white:    #FFFFFF;
+  --slate-25:  #FBFCFD;
+  --slate-50:  #F6F8FA;
+  --slate-100: #EDF0F4;
+  --slate-200: #DDE3EA;
+  --slate-300: #C4CCD6;
+  --slate-400: #98A2B3;
+  --slate-500: #6B7585;
+  --slate-600: #4B5563;
+  --slate-700: #353C49;
+  --slate-800: #232934;
+  --slate-900: #14181F;
+
+  /* ---------- Warm Accent / Coral ---------- */
+  --coral-50:  #FFF1EC;
+  --coral-100: #FFE0D4;
+  --coral-300: #FFA982;
+  --coral-500: #FF7A45;   /* accent */
+  --coral-600: #ED6230;
+
+  /* ---------- Semantic palettes ---------- */
+  --green-50:  #E7F8EF;
+  --green-500: #18A957;   /* success / online presence */
+  --green-600: #128046;
+
+  --amber-50:  #FEF6E7;
+  --amber-500: #F5A524;   /* warning / queued */
+  --amber-600: #D9881A;
+
+  --red-50:    #FEECEC;
+  --red-500:   #E5484D;   /* danger / destructive */
+  --red-600:   #C93A3F;
+
+  /* ============================================================
+     SEMANTIC ALIASES — reference these in components
+     ============================================================ */
+
+  /* Surfaces */
+  --surface-page:        var(--slate-50);
+  --surface-card:        var(--white);
+  --surface-sunken:      var(--slate-100);
+  --surface-raised:      var(--white);
+  --surface-inverse:     var(--slate-900);
+  --surface-hover:       var(--slate-50);
+  --surface-active:      var(--slate-100);
+  --surface-selected:    var(--blue-50);
+  --surface-overlay:     rgba(20, 24, 31, 0.55);
+
+  /* Text */
+  --text-primary:    var(--slate-900);
+  --text-secondary:  var(--slate-600);
+  --text-tertiary:   var(--slate-500);
+  --text-disabled:   var(--slate-400);
+  --text-inverse:    var(--white);
+  --text-link:       var(--blue-600);
+  --text-brand:      var(--blue-600);
+
+  /* Borders */
+  --border-subtle:   var(--slate-100);
+  --border-default:  var(--slate-200);
+  --border-strong:   var(--slate-300);
+  --border-focus:    var(--blue-500);
+  --border-inverse:  var(--slate-700);
+
+  /* Brand / interactive */
+  --brand:           var(--blue-500);
+  --brand-hover:     var(--blue-600);
+  --brand-active:    var(--blue-700);
+  --brand-subtle:    var(--blue-50);
+  --brand-on:        var(--white);
+  --accent:          var(--coral-500);
+  --accent-hover:    var(--coral-600);
+  --accent-subtle:   var(--coral-50);
+
+  /* Status */
+  --status-online:   var(--green-500);
+  --status-queued:   var(--amber-500);
+  --status-closed:   var(--slate-400);
+  --success:         var(--green-500);
+  --success-subtle:  var(--green-50);
+  --warning:         var(--amber-500);
+  --warning-subtle:  var(--amber-50);
+  --danger:          var(--red-500);
+  --danger-hover:    var(--red-600);
+  --danger-subtle:   var(--red-50);
+
+  /* Focus ring */
+  --ring: 0 0 0 3px rgba(37, 99, 253, 0.32);
+  --ring-danger: 0 0 0 3px rgba(229, 72, 77, 0.30);
+}

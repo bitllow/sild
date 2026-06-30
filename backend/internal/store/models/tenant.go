@@ -47,6 +47,22 @@ type TenantEmailConfig struct {
 	FromName      string `gorm:"size:255"`
 	FromAddress   string `gorm:"size:255"`
 
+	// InboundToken is the local part of this tenant's forwarding address
+	// (<token>@<config inbound domain>). Orgs forward their support mailbox to it
+	// and the sild-mail daemon resolves the tenant by this token (§6.2).
+	InboundToken string `gorm:"size:64;index"`
+	// Verified flips true the first time an email is ingested through the
+	// forwarding address — proof the org's forwarding is wired correctly.
+	Verified bool `gorm:"not null;default:false"`
+	// AutoReply sends an acknowledgement when inbound mail opens a conversation.
+	AutoReply bool `gorm:"not null;default:false"`
+	// SpamFilter drops autoresponder/bounce mail (out-of-office, mailer-daemon).
+	// The DB default keeps AutoMigrate safe when adding the column to existing
+	// non-empty tables, and defaults the filter on. SetEmailConfig writes the
+	// booleans explicitly so a disabled filter still persists (GORM otherwise
+	// omits a false value that matches a non-zero default).
+	SpamFilter bool `gorm:"not null;default:true"`
+
 	AllowedDomains []TenantEmailDomain `gorm:"foreignKey:TenantID;references:TenantID;constraint:OnDelete:CASCADE"`
 }
 

@@ -27,6 +27,9 @@ type TenantRepo interface {
 	GetEmailConfig(ctx context.Context, tenantID string) (*models.TenantEmailConfig, error)
 	SetEmailConfig(ctx context.Context, cfg *models.TenantEmailConfig) error
 	FindByInboundDomain(ctx context.Context, domain string) (*models.TenantEmailConfig, error)
+	// FindByInboundToken resolves a tenant by the local part of its forwarding
+	// address — the sild-mail daemon's lookup (§6.2).
+	FindByInboundToken(ctx context.Context, token string) (*models.TenantEmailConfig, error)
 }
 
 type APIKeyRepo interface {
@@ -64,6 +67,9 @@ type ConversationRepo interface {
 	// TouchLastMessage updates the denormalized last-activity timestamp + preview
 	// used by the inbox queue ordering (see models.Conversation).
 	TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error
+	// CountOpen returns the number of open conversations in the tenant — the
+	// inbox's open-conversation badge (§8).
+	CountOpen(ctx context.Context, tenantID string) (int64, error)
 }
 
 type MemberRepo interface {
@@ -98,7 +104,8 @@ type QueueSort string
 
 const (
 	QueueSortLastActivity QueueSort = "last_activity" // newest message first (default)
-	QueueSortCreated      QueueSort = "created"        // assignment creation time
+	QueueSortCreated      QueueSort = "created"       // conversation start (date started)
+	QueueSortWaiting      QueueSort = "waiting_since" // current assignment/queue entry time
 )
 
 // QueueCursor is the keyset position: the sort value + assignment id tiebreaker

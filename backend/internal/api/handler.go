@@ -111,6 +111,8 @@ func (h *Handler) Mount(e *gin.Engine) {
 	priv.PATCH("/webhooks/:id", h.updateWebhook)
 	priv.DELETE("/webhooks/:id", h.deleteWebhook)
 	priv.GET("/webhooks/:id/deliveries", h.listDeliveries)
+	priv.GET("/channels/email", h.getEmailChannel)
+	priv.PATCH("/channels/email", h.updateEmailChannel)
 	priv.GET("/team", h.listTeam)
 	priv.POST("/team", h.inviteAgent)
 	priv.PATCH("/team/:id", h.updateAgent)

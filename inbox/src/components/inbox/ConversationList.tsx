@@ -2,12 +2,26 @@
 
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Button, CloseIcon, ConversationRow, SearchIcon, StatusPill } from "@/components/ds";
+import { Button, CloseIcon, ConversationRow, SearchIcon, Select, StatusPill } from "@/components/ds";
+import type { QueueSort } from "@/api/admin";
 import { filterStyle } from "./styles";
 
 const PlusInline = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 5 }}>
     <path d="M5 12h14M12 5v14" />
+  </svg>
+);
+
+const SORT_OPTIONS: { value: QueueSort; label: string }[] = [
+  { value: "last_activity", label: "Last activity" },
+  { value: "created", label: "Date started" },
+  { value: "waiting_since", label: "Waiting since" },
+];
+
+// A single chevron that points down for descending, up for ascending.
+const SortDirIcon = ({ desc }: { desc: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: desc ? "none" : "rotate(180deg)" }}>
+    <path d="M12 5v14M19 12l-7 7-7-7" />
   </svg>
 );
 
@@ -38,7 +52,12 @@ export const ConversationList = observer(function ConversationList() {
     >
       <div style={{ padding: "16px 16px 12px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h2 style={{ fontSize: 18 }}>Inbox</h2>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <h2 style={{ fontSize: 18 }}>Inbox</h2>
+            <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+              {store.openCount} open
+            </span>
+          </div>
           <Button size="sm" onClick={store.newRequest}>
             <PlusInline />
             New request
@@ -104,6 +123,37 @@ export const ConversationList = observer(function ConversationList() {
           </button>
           <button onClick={() => store.setFilter("all")} style={filterStyle(store.filter === "all")}>
             All
+          </button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--text-tertiary)", flex: "none" }}>Sort</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Select
+              size="sm"
+              options={SORT_OPTIONS}
+              value={store.sortBy}
+              onChange={(e) => store.setSort(e.target.value as QueueSort)}
+            />
+          </div>
+          <button
+            onClick={store.toggleSortDir}
+            aria-label={store.sortDir === "desc" ? "Sort descending" : "Sort ascending"}
+            title={store.sortDir === "desc" ? "Newest first" : "Oldest first"}
+            style={{
+              width: 34,
+              height: 34,
+              flex: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1px solid var(--border-default)",
+              background: "var(--white)",
+              borderRadius: 8,
+              cursor: "pointer",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <SortDirIcon desc={store.sortDir === "desc"} />
           </button>
         </div>
       </div>

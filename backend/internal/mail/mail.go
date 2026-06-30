@@ -13,13 +13,18 @@ import (
 
 // InboundEmail is a normalized parsed inbound message (provider-agnostic).
 type InboundEmail struct {
-	Recipient   string // the address it was sent to (domain → tenant)
-	From        string // sender address
-	Subject     string
-	TextBody    string
+	Recipient string // the address it was sent to (local part → tenant)
+	From      string // sender address
+	Subject   string
+	TextBody  string
+	// Attachments already at a bucket object key (the provider-webhook path,
+	// where the provider stored the bytes).
 	Attachments []InboundAttachment
-	RawBody     []byte            // for signature verification
-	Headers     map[string]string // provider signature headers
+	// RawAttachments hold bytes in memory (the forwarding-daemon path); the
+	// domain layer uploads them to the bucket during ingestion.
+	RawAttachments []ParsedAttachment
+	RawBody        []byte            // for signature verification
+	Headers        map[string]string // parsed headers (signature + spam detection)
 }
 
 // InboundAttachment is a parsed attachment (bytes already at the bucket key).
@@ -28,6 +33,15 @@ type InboundAttachment struct {
 	MimeType  string
 	SizeBytes int64
 	Filename  string
+}
+
+// ParsedAttachment is an attachment extracted from a raw MIME message with its
+// bytes still in memory (the forwarding daemon parses these; the domain layer
+// uploads them to the bucket).
+type ParsedAttachment struct {
+	Filename string
+	MimeType string
+	Content  []byte
 }
 
 // OutboundEmail is a message leaving via email (§6.2).

@@ -49,14 +49,108 @@ func (s *Service) HandleInbound(ctx context.Context, in mail.InboundEmail) (*mod
 	} else if s.cfg.Env == "production" {
 		return nil, ErrForbidden
 	}
-	tenantID := cfg.TenantID
+	return s.ingestAndNotify(ctx, cfg, in)
+}
 
-	if m := threadTokenRe.FindStringSubmatch(in.Subject); m != nil {
-		if thread, err := s.store.Email().FindByToken(ctx, m[1]); err == nil && thread.TenantID == tenantID {
-			return s.appendInbound(ctx, tenantID, thread, in)
+// HandleForwarded ingests an email caught by the sild-mail forwarding daemon
+// (§6.2). The daemon is itself the trusted boundary (it sits behind the MX), so
+// there is no provider signature: the tenant is resolved by the forwarding
+// token in the recipient's local part. Autoresponders are dropped when the
+// tenant enables spam filtering, and the first successful ingest verifies the
+// tenant's forwarding setup.
+func (s *Service) HandleForwarded(ctx context.Context, in mail.InboundEmail) (*models.Message, error) {
+	token := forwardingToken(in.Recipient)
+	if token == "" {
+		return nil, invalid("invalid recipient")
+	}
+	cfg, err := s.store.Tenants().FindByInboundToken(ctx, token)
+	if err != nil {
+		return nil, ErrNotFound // unknown forwarding address — drop
+	}
+	if cfg.SpamFilter && looksLikeAutoresponder(in) {
+		return nil, nil // silently dropped; not an error
+	}
+	msg, err := s.ingestAndNotify(ctx, cfg, in)
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Verified {
+		cfg.Verified = true
+		_ = s.store.Tenants().SetEmailConfig(ctx, cfg)
+	}
+	return msg, nil
+}
+
+// ForwardedMailHandler returns the ingest handler the SMTP forwarding daemon
+// runs (cmd/sild-mail). It ingests each message and returns an error ONLY for
+// transient failures, so the daemon asks the MTA to retry instead of
+// acknowledging — otherwise a transient DB error would silently lose the mail.
+// Intentional drops (spam filtered) and permanent rejects (unknown forwarding
+// address, invalid recipient) are acknowledged so the sender isn't retried.
+func (s *Service) ForwardedMailHandler() mail.Handler {
+	return func(ctx context.Context, in mail.InboundEmail) error {
+		_, err := s.HandleForwarded(ctx, in)
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, ErrNotFound), errors.Is(err, ErrValidation), errors.Is(err, ErrForbidden):
+			return nil // permanent/intentional — don't make the MTA retry forever
+		default:
+			return err // transient — surface it so the daemon returns a 4xx
 		}
 	}
-	return s.createFromInbound(ctx, tenantID, in)
+}
+
+// ingestAndNotify resolves the thread and appends or creates, then fires the
+// auto-reply acknowledgement when a new conversation was opened (§6.2). Shared
+// by the provider webhook (HandleInbound) and the forwarding daemon.
+func (s *Service) ingestAndNotify(ctx context.Context, cfg *models.TenantEmailConfig, in mail.InboundEmail) (*models.Message, error) {
+	msg, created, err := s.ingest(ctx, cfg.TenantID, in)
+	if err != nil {
+		return nil, err
+	}
+	if created && cfg.AutoReply {
+		s.sendAutoReply(ctx, cfg, msg.ConversationID, in.From)
+	}
+	return msg, nil
+}
+
+// ingest resolves the thread token and appends to the existing conversation, or
+// creates a new one. The bool reports whether a new conversation was created.
+func (s *Service) ingest(ctx context.Context, tenantID string, in mail.InboundEmail) (*models.Message, bool, error) {
+	if len(in.RawAttachments) > 0 { // daemon path: upload in-memory bytes to the bucket
+		uploaded, err := s.uploadInboundAttachments(ctx, tenantID, in.RawAttachments)
+		if err != nil {
+			return nil, false, err // fail before creating the message so the MTA retries cleanly
+		}
+		in.Attachments = append(in.Attachments, uploaded...)
+	}
+	if m := threadTokenRe.FindStringSubmatch(in.Subject); m != nil {
+		if thread, err := s.store.Email().FindByToken(ctx, m[1]); err == nil && thread.TenantID == tenantID {
+			msg, err := s.appendInbound(ctx, tenantID, thread, in)
+			return msg, false, err
+		}
+	}
+	msg, err := s.createFromInbound(ctx, tenantID, in)
+	return msg, err == nil, err
+}
+
+// sendAutoReply emails the sender an acknowledgement carrying the thread token
+// so their reply threads back into the same conversation (§6.2).
+func (s *Service) sendAutoReply(ctx context.Context, cfg *models.TenantEmailConfig, convID, to string) {
+	if to == "" {
+		return
+	}
+	token := s.threadToken(ctx, cfg.TenantID, convID)
+	_ = s.mailer.Send(ctx, mail.OutboundEmail{
+		To:          to,
+		FromName:    cfg.FromName,
+		FromAddress: cfg.FromAddress,
+		Subject:     SubjectWithToken("Thanks for reaching out", token),
+		Body:        "Thanks — we received your message and a member of our team will reply shortly.",
+		ThreadToken: token,
+		ReplyTo:     replyTo(cfg, token),
+	})
 }
 
 func (s *Service) appendInbound(ctx context.Context, tenantID string, thread *models.EmailThread, in mail.InboundEmail) (*models.Message, error) {
@@ -176,6 +270,25 @@ func (s *Service) threadToken(ctx context.Context, tenantID, convID string) stri
 	return token
 }
 
+// uploadInboundAttachments writes the daemon's in-memory attachment bytes to the
+// bucket and returns the resulting object-key references. A failed upload errors
+// the whole ingest rather than silently dropping the attachment — the caller
+// surfaces it (transient → the MTA retries) instead of acknowledging a message
+// with the sender's file missing.
+func (s *Service) uploadInboundAttachments(ctx context.Context, tenantID string, raw []mail.ParsedAttachment) ([]mail.InboundAttachment, error) {
+	out := make([]mail.InboundAttachment, 0, len(raw))
+	for _, a := range raw {
+		key := s.bucket.NewObjectKey(tenantID, a.Filename)
+		if err := s.bucket.Put(ctx, key, a.Content, a.MimeType); err != nil {
+			return nil, err
+		}
+		out = append(out, mail.InboundAttachment{
+			ObjectKey: key, MimeType: a.MimeType, SizeBytes: int64(len(a.Content)), Filename: a.Filename,
+		})
+	}
+	return out, nil
+}
+
 func inboundAttachments(tenantID string, in []mail.InboundAttachment) []models.MessageAttachment {
 	out := make([]models.MessageAttachment, 0, len(in))
 	for _, a := range in {
@@ -193,6 +306,67 @@ func addressDomain(addr string) string {
 		return ""
 	}
 	return strings.ToLower(addr[at+1:])
+}
+
+// forwardingToken extracts the tenant's forwarding token from a recipient
+// address: the local part, lowercased, with any +subaddress stripped (tokens
+// are minted lowercase so they survive MTA case-folding). e.g.
+// "eml_01j9z3+anything@inbound.sild.io" → "eml_01j9z3".
+func forwardingToken(addr string) string {
+	at := strings.LastIndexByte(addr, '@')
+	if at <= 0 {
+		return ""
+	}
+	local := addr[:at]
+	if plus := strings.IndexByte(local, '+'); plus >= 0 {
+		local = local[:plus]
+	}
+	return strings.ToLower(local)
+}
+
+// looksLikeAutoresponder reports whether an inbound email is an out-of-office,
+// bounce, or other machine-generated reply that should be kept out of the queue
+// (§6.2 autoresponder spam filtering). It checks the standard auto-submission
+// headers and no-reply/daemon sender patterns.
+func looksLikeAutoresponder(in mail.InboundEmail) bool {
+	get := func(k string) string { return strings.ToLower(strings.TrimSpace(headerValue(in.Headers, k))) }
+	if v := get("Auto-Submitted"); v != "" && v != "no" {
+		return true // RFC 3834: auto-generated/auto-replied
+	}
+	switch get("Precedence") {
+	case "bulk", "auto_reply", "junk", "list":
+		return true
+	}
+	if get("X-Autoreply") != "" || get("X-Autorespond") != "" || get("X-Auto-Response-Suppress") != "" {
+		return true
+	}
+	// Match the sender's local part EXACTLY against reserved/no-reply mailboxes —
+	// a substring match would wrongly drop a human like "jane.noreply@x.com".
+	local := strings.ToLower(in.From)
+	if at := strings.IndexByte(local, '@'); at >= 0 {
+		local = local[:at]
+	}
+	switch local {
+	case "mailer-daemon", "postmaster", "no-reply", "noreply", "do-not-reply", "donotreply":
+		return true
+	}
+	return false
+}
+
+// headerValue does a case-insensitive lookup against the parsed header map.
+func headerValue(h map[string]string, key string) string {
+	if h == nil {
+		return ""
+	}
+	if v, ok := h[key]; ok {
+		return v
+	}
+	for k, v := range h {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
 }
 
 func domainAllowed(cfg *models.TenantEmailConfig, domain string) bool {

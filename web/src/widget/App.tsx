@@ -57,6 +57,12 @@ export function App({ client, config }: { client: SildClient; config: SildConfig
     <>
       {open && (
         <div class="panel" role="dialog" aria-label="Support chat">
+          {/* On mobile the panel is full-screen and the launcher is hidden, so an
+              in-panel close button is the only way out (and never covers the
+              composer). Hidden on desktop, where the launcher toggles closed. */}
+          <button class="mobile-close" aria-label="Close chat" onClick={() => setOpen(false)}>
+            <CloseIcon />
+          </button>
           {inThread ? (
             <Thread client={client} state={state} guestThreadOnly={guestThreadOnly} />
           ) : (

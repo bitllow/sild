@@ -134,8 +134,11 @@ func (h *Handler) listAssignments(c *gin.Context) {
 		}
 		p.Assignee = &a
 	}
-	if c.Query("sort") == string(store.QueueSortCreated) {
+	switch store.QueueSort(c.Query("sort")) {
+	case store.QueueSortCreated:
 		p.Sort = store.QueueSortCreated
+	case store.QueueSortWaiting:
+		p.Sort = store.QueueSortWaiting
 	}
 	if c.Query("order") == "asc" {
 		p.Desc = false
@@ -150,7 +153,17 @@ func (h *Handler) listAssignments(c *gin.Context) {
 		p.Cursor = cc
 	}
 
-	page, err := h.svc.ListQueue(c.Request.Context(), apiutil.Tenant(c), p)
+	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
+	// The open-conversation badge is independent of the page, so compute it
+	// concurrently with the queue query rather than adding a serial round-trip.
+	// Buffered so the goroutine never blocks if ListQueue errors out below.
+	openCh := make(chan int64, 1)
+	go func() {
+		n, _ := h.svc.CountOpenConversations(ctx, tenant)
+		openCh <- n
+	}()
+
+	page, err := h.svc.ListQueue(ctx, tenant, p)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
@@ -163,6 +176,7 @@ func (h *Handler) listAssignments(c *gin.Context) {
 		"items":       items,
 		"next_cursor": encodeQueueCursor(page.NextCursor),
 		"has_more":    page.HasMore,
+		"open_count":  <-openCh,
 	})
 }
 

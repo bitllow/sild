@@ -1,0 +1,15 @@
+<svg width="132" height="84" viewBox="0 0 132 84" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sild">
+  <g fill="currentColor">
+    <circle cx="33" cy="50" r="16"></circle>
+    <path d="M28 60 L42 60 L21 71 Z"></path>
+    <circle cx="66" cy="49" r="13"></circle>
+    <path d="M60 58 L72 58 L66 70 Z"></path>
+    <circle cx="99" cy="50" r="16"></circle>
+    <path d="M90 60 L104 60 L111 71 Z"></path>
+  </g>
+  <path d="M33 33 Q66 -9 99 33" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"></path>
+  <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round">
+    <path d="M50 50 H57"></path>
+    <path d="M75 49 H82"></path>
+  </g>
+</svg>

@@ -2,7 +2,7 @@
 
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Avatar, Button, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
+import { Avatar, Button, CopyIcon, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
 import type { PlatformRole } from "@/store/types";
 import { tabStyle } from "./styles";
 
@@ -44,6 +44,9 @@ export const Settings = observer(function Settings() {
           </button>
           <button onClick={() => store.setSettingsTab("team")} style={tabStyle(tab === "team")}>
             Team
+          </button>
+          <button onClick={() => store.setSettingsTab("channels")} style={tabStyle(tab === "channels")}>
+            Channels
           </button>
         </div>
       </div>
@@ -146,8 +149,137 @@ export const Settings = observer(function Settings() {
               ))}
             </div>
           )}
+
+          {tab === "channels" && <Channels />}
         </div>
       </div>
     </div>
+  );
+});
+
+const OTHER_CHANNELS: { name: string; desc: string }[] = [
+  { name: "WhatsApp", desc: "Reply to WhatsApp messages from the inbox." },
+  { name: "SMS", desc: "Turn inbound texts into conversations." },
+  { name: "Slack", desc: "Handle Slack messages alongside email." },
+];
+
+// ToggleRow is one labelled setting with a Switch on the right.
+function ToggleRow({
+  title,
+  desc,
+  checked,
+  onChange,
+}: {
+  title: string;
+  desc: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, borderBottom: rowBorder }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
+        <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>{desc}</div>
+      </div>
+      <Switch checked={checked} onChange={onChange} />
+    </div>
+  );
+}
+
+const Channels = observer(function Channels() {
+  const store = useStore();
+  const ch = store.emailChannel;
+
+  return (
+    <>
+      <div style={card}>
+        <div style={{ padding: "16px 18px", borderBottom: rowBorder, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Email</div>
+            <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
+              Set up forwarding from your support mailbox to the address below. Every email that arrives
+              becomes a conversation in this inbox.
+            </div>
+          </div>
+          <span
+            style={{
+              flex: "none",
+              fontSize: 12,
+              fontWeight: 600,
+              padding: "4px 10px",
+              borderRadius: 999,
+              whiteSpace: "nowrap",
+              background: ch?.verified ? "var(--success-subtle, #E6F4EA)" : "var(--warning-subtle, #FBF3E0)",
+              color: ch?.verified ? "var(--success, #137333)" : "var(--warning, #8A6100)",
+            }}
+          >
+            {ch?.verified ? "Verified" : "Awaiting first email"}
+          </span>
+        </div>
+
+        <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: ".04em" }}>
+            Forwarding address
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+            <code
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontFamily: "var(--font-mono)",
+                fontSize: 13,
+                color: "var(--text-primary)",
+                background: "var(--surface-sunken)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 8,
+                padding: "9px 12px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {ch?.forwardingAddress || "…"}
+            </code>
+            <Button size="sm" variant="secondary" onClick={store.copyForwardingAddress} disabled={!ch}>
+              <CopyIcon size={15} />
+              <span style={{ marginLeft: 5 }}>{store.channelCopied ? "Copied" : "Copy"}</span>
+            </Button>
+          </div>
+        </div>
+
+        <ToggleRow
+          title="Auto-reply to new emails"
+          desc="Send an acknowledgement with your expected response time."
+          checked={!!ch?.autoReply}
+          onChange={store.toggleAutoReply}
+        />
+        <ToggleRow
+          title="Mark autoresponder emails as spam"
+          desc="Keep out-of-office and no-reply bounces out of the queue."
+          checked={!!ch?.spamFilter}
+          onChange={store.toggleSpamFilter}
+        />
+      </div>
+
+      <div style={{ ...card, marginTop: 20 }}>
+        <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Other channels</div>
+          <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
+            Connect more channels to handle every conversation in one place.
+          </div>
+        </div>
+        {OTHER_CHANNELS.map((c) => (
+          <div key={c.name} style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, borderBottom: rowBorder }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</div>
+              <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>{c.desc}</div>
+            </div>
+            <Button size="sm" variant="secondary" disabled>
+              Connect
+            </Button>
+          </div>
+        ))}
+      </div>
+    </>
   );
 });

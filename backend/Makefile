@@ -1,7 +1,7 @@
 BIN := bin
-BINARIES := sild-api sild-ws sild-worker sild-migrate
+BINARIES := sild-api sild-ws sild-worker sild-migrate sild-mail
 
-.PHONY: build $(BINARIES) dev run-api run-ws run-worker migrate test test-pg tidy fmt vet docker clean
+.PHONY: build $(BINARIES) dev run-api run-ws run-worker run-mail migrate test test-pg tidy fmt vet docker clean
 
 build: $(BINARIES)
 
@@ -15,6 +15,7 @@ $(BINARIES):
 run-api: ; go run ./cmd/sild-api
 run-ws: ; go run ./cmd/sild-ws
 run-worker: ; go run ./cmd/sild-worker -jobs webhook,push,email
+run-mail: ; go run ./cmd/sild-mail
 migrate: ; go run ./cmd/sild-migrate
 
 # Default test run uses SQLite (no infra). Cross-dialect tests gate on env vars.

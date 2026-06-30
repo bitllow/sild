@@ -62,13 +62,44 @@ func (r *tenantRepo) GetEmailConfig(ctx context.Context, tenantID string) (*mode
 }
 
 func (r *tenantRepo) SetEmailConfig(ctx context.Context, cfg *models.TenantEmailConfig) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(cfg).Error
+	// Capture the bool values up front: the Create below back-fills default-tagged
+	// zero fields (e.g. spam_filter→true) into cfg, which would corrupt the
+	// explicit write that follows.
+	verified, autoReply, spamFilter := cfg.Verified, cfg.AutoReply, cfg.SpamFilter
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Upsert the row (creating it + any allowlist associations on first write).
+		if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(cfg).Error; err != nil {
+			return err
+		}
+		// The bool columns carry DB defaults, so GORM omits a zero (false) value
+		// from the INSERT and the upsert leaves it unchanged — a disabled toggle
+		// wouldn't persist. Write them explicitly via a map, which never omits.
+		return tx.Model(&models.TenantEmailConfig{}).Where("tenant_id = ?", cfg.TenantID).
+			Updates(map[string]any{
+				"verified":    verified,
+				"auto_reply":  autoReply,
+				"spam_filter": spamFilter,
+			}).Error
+	})
 }
 
 func (r *tenantRepo) FindByInboundDomain(ctx context.Context, domain string) (*models.TenantEmailConfig, error) {
 	var c models.TenantEmailConfig
 	err := r.db.WithContext(ctx).Preload("AllowedDomains").
 		First(&c, "inbound_domain = ?", domain).Error
+	if err != nil {
+		return nil, translateErr(err)
+	}
+	return &c, nil
+}
+
+func (r *tenantRepo) FindByInboundToken(ctx context.Context, token string) (*models.TenantEmailConfig, error) {
+	if token == "" {
+		return nil, store.ErrNotFound
+	}
+	var c models.TenantEmailConfig
+	err := r.db.WithContext(ctx).Preload("AllowedDomains").
+		First(&c, "inbound_token = ?", token).Error
 	if err != nil {
 		return nil, translateErr(err)
 	}

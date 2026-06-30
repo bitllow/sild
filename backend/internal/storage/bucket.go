@@ -23,4 +23,8 @@ type Bucket interface {
 	SignGet(ctx context.Context, objectKey string, ttl time.Duration) (string, error)
 	// NewObjectKey returns a fresh, tenant-scoped object key.
 	NewObjectKey(tenantID, filename string) string
+	// Put writes object bytes server-side. Clients still upload direct via
+	// SignPut (§11); this is for ingestion paths that already hold the bytes —
+	// the email forwarding daemon writing inbound attachments (§6.2).
+	Put(ctx context.Context, objectKey string, data []byte, mimeType string) error
 }

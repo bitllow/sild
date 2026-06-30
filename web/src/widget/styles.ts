@@ -114,15 +114,30 @@ export const css = `
 .note { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 8px 16px; }
 .banner { margin: 0 0 4px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 12px; border-radius: var(--radius-md); padding: 8px 10px; text-align: center; }
 
+/* In-panel close button: a desktop affordance hidden here (the launcher toggles
+   closed), shown only on phones where the panel is full-screen. Sits over the
+   brand-colored header, top-right. */
+.mobile-close {
+  display: none;
+  position: absolute; top: 10px; right: 10px; z-index: 1;
+  width: 36px; height: 36px; border: 0; border-radius: 10px;
+  background: rgba(255,255,255,.16); color: #fff; cursor: pointer;
+  align-items: center; justify-content: center;
+}
+.mobile-close:hover { background: rgba(255,255,255,.26); }
+
 /* Phones: the floating 380px card wastes space and crowds the edges, so the
-   panel spans the viewport, stopping just above the launcher — which stays
-   visible as the close control (the Home view has no in-panel close button). */
+   panel goes full-screen. The launcher is hidden while open (it would cover the
+   composer), so the in-panel close button is the way out. */
 @media (max-width: 480px) {
   .launcher { right: 16px; bottom: 16px; width: 56px; height: 56px; }
+  .launcher.open { display: none; }
   .panel {
-    left: 10px; right: 10px; top: 10px; bottom: 84px;
+    left: 0; right: 0; top: 0; bottom: 0;
     width: auto; height: auto; max-width: none; max-height: none;
+    border-radius: 0;
     transform-origin: bottom center;
   }
+  .mobile-close { display: flex; }
 }
 `;

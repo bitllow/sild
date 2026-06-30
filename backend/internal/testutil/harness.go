@@ -117,6 +117,7 @@ func New(t *testing.T) *Harness {
 		Storage:  config.Storage{Backend: "local", PublicURL: "http://test.local", LocalDir: dir},
 		Realtime: config.Realtime{Broker: "memory"},
 		Archive:  config.Archive{Sink: "gcs_json", IdleDays: 30},
+		Email:    config.Email{InboundDomain: "inbound.test", SMTPListenAddr: ":0", From: "support@inbound.test"},
 	}
 	return NewWithConfig(t, cfg)
 }
