@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Acme Rides — Help</title>
     <style>
-      :root { --slate-900:#14181F; --slate-600:#4B5563; --slate-400:#98A2B3; --border:#EDF0F4; }
+      :root { --slate-900:#14181F; --slate-600:#4B5563; --slate-400:#98A2B3; --border:#EDF0F4; --brand:#2563FD; }
       * { box-sizing: border-box; }
       body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--slate-900); }
       header { height: 60px; display: flex; align-items: center; gap: 14px; padding: 0 32px; border-bottom: 1px solid var(--border); }
@@ -19,6 +19,22 @@
       p { font-size: 17px; line-height: 1.6; color: var(--slate-600); margin: 18px 0 0; }
       .hint { font-size: 14px; color: var(--slate-400); margin-top: 32px; }
 
+      /* Demo-only session control panel (not part of the widget). Lets you test
+         both identity modes — authed "real user" (conversation list) vs guest
+         (single thread) — and define the per-participant metadata the inbox shows. */
+      #ctl { position: fixed; top: 16px; right: 16px; width: 300px; z-index: 100; background: #fff;
+        border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(20,24,31,.12);
+        padding: 14px; font-size: 13px; }
+      #ctl h2 { margin: 0 0 10px; font-size: 13px; font-weight: 800; letter-spacing: -.01em; }
+      #ctl label { display: block; font-weight: 600; color: var(--slate-600); margin: 10px 0 4px; }
+      #ctl select, #ctl input, #ctl textarea { width: 100%; font: inherit; padding: 7px 9px; border: 1px solid var(--border);
+        border-radius: 8px; background: #fff; color: var(--slate-900); }
+      #ctl textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: vertical; }
+      #ctl button { width: 100%; margin-top: 12px; padding: 9px; border: 0; border-radius: 8px; background: var(--brand);
+        color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+      #ctl .cur { margin-top: 10px; font-size: 12px; color: var(--slate-400); word-break: break-all; }
+      #ctl .err { color: #C0362C; font-size: 12px; margin-top: 6px; min-height: 14px; }
+
       @media (max-width: 640px) {
         header { height: 56px; padding: 0 18px; gap: 0; }
         nav { display: none; }
@@ -26,6 +42,7 @@
         h1 { font-size: 30px; }
         p { font-size: 16px; }
         .hint { margin-top: 24px; }
+        #ctl { position: static; width: auto; margin: 16px; box-shadow: none; }
       }
     </style>
   </head>
@@ -44,28 +61,115 @@
       <p class="hint">Still stuck? Chat with us using the button in the corner. →</p>
     </main>
 
+    <!-- Demo session controls (dev only). -->
+    <div id="ctl">
+      <h2>Sild demo session</h2>
+      <label for="ctl-mode">Mode</label>
+      <select id="ctl-mode">
+        <option value="user">Real user — conversation list</option>
+        <option value="guest">Guest — single thread</option>
+      </select>
+      <label for="ctl-uid">User ID (the token's <code>sub</code>)</label>
+      <input id="ctl-uid" spellcheck="false" />
+      <label for="ctl-meta">Member metadata (JSON)</label>
+      <textarea id="ctl-meta" rows="6" spellcheck="false"></textarea>
+      <div class="err" id="ctl-err"></div>
+      <button id="ctl-start">Start session</button>
+      <div class="cur" id="ctl-cur"></div>
+    </div>
+
     <!-- Sild drop-in: self-contained, shadow-DOM isolated (§9).
          URLs are origin-relative so the demo works from any host — localhost or
          a LAN IP / phone — without rebuilding. The real host page would point
          baseUrl at the Sild deployment. -->
     <script src="/widget.js"></script>
     <script>
-      // The host backend mints a user JWT via its API key. For this demo the dev
-      // server stands in for that endpoint; a stable guest id persists the thread
-      // across reloads (the host's job per §9).
-      var guestId = localStorage.getItem("sild_guest");
-      if (!guestId) {
-        guestId = "guest_" + Math.random().toString(36).slice(2, 10);
-        localStorage.setItem("sild_guest", guestId);
-      }
-      Sild.init({
-        baseUrl: window.location.origin,
-        tokenProvider: function () {
-          return fetch("/v1/dev/widget-token?user_id=" + guestId)
+      (function () {
+        var BASE = window.location.origin;
+        var LS = { mode: "sild_demo_mode", uid: "sild_demo_uid", meta: "sild_demo_meta" };
+        var DEFAULT_META = JSON.stringify(
+          { name: "Mari Tamm", email: "mari@example.com", phone: "+372 5123 4567", plan: "premium" },
+          null, 2
+        );
+
+        function rand() { return Math.random().toString(36).slice(2, 10); }
+        function defaultUid(mode) { return mode === "guest" ? "guest_" + rand() : "u_demo"; }
+
+        var mode = localStorage.getItem(LS.mode) || "user";
+        var uid = localStorage.getItem(LS.uid) || defaultUid(mode);
+        var metaText = localStorage.getItem(LS.meta) || DEFAULT_META;
+
+        // ── Control panel wiring ──────────────────────────────────────────
+        var $mode = document.getElementById("ctl-mode");
+        var $uid = document.getElementById("ctl-uid");
+        var $meta = document.getElementById("ctl-meta");
+        var $err = document.getElementById("ctl-err");
+        var $cur = document.getElementById("ctl-cur");
+        $mode.value = mode;
+        $uid.value = uid;
+        $meta.value = metaText;
+        $cur.textContent = "Active: " + mode + " · " + uid;
+
+        // Switching mode suggests a fresh default id for that mode (editable).
+        $mode.addEventListener("change", function () { $uid.value = defaultUid($mode.value); });
+
+        document.getElementById("ctl-start").addEventListener("click", function () {
+          var parsed;
+          try { parsed = JSON.parse($meta.value || "{}"); }
+          catch (e) { $err.textContent = "Metadata must be valid JSON."; return; }
+          $err.textContent = "";
+          localStorage.setItem(LS.mode, $mode.value);
+          localStorage.setItem(LS.uid, $uid.value.trim() || defaultUid($mode.value));
+          localStorage.setItem(LS.meta, JSON.stringify(parsed, null, 2));
+          // A guest is scoped to one thread, so its conversation is re-derived on
+          // next load; drop any cached one so a fresh session starts clean.
+          localStorage.removeItem("sild_guest_conv_" + $uid.value.trim());
+          window.location.reload();
+        });
+
+        // ── Boot the widget for the active session ────────────────────────
+        var metadata = {};
+        try { metadata = JSON.parse(metaText); } catch (e) {}
+
+        // The host backend mints a user JWT via its API key; the dev server stands
+        // in for that endpoint here (§2.3). Same call for guest or real user — only
+        // the sub differs.
+        function tokenProvider() {
+          return fetch(BASE + "/v1/dev/widget-token?user_id=" + encodeURIComponent(uid))
             .then(function (r) { return r.json(); })
             .then(function (d) { return d.token; });
-        },
-      });
+        }
+
+        if (mode === "guest") {
+          // Guest = single thread (§9): ensure a conversation exists (carrying the
+          // metadata), then open the widget directly to it.
+          ensureGuestConversation().then(function (convId) {
+            window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, conversationId: convId, metadata: metadata });
+          });
+        } else {
+          // Real user = conversation list; metadata is attached when they open a
+          // new request from the widget.
+          window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, metadata: metadata });
+        }
+
+        // Create (once) and remember a guest's support-request conversation so the
+        // thread persists across reloads — the host's responsibility per §9.
+        function ensureGuestConversation() {
+          var key = "sild_guest_conv_" + uid;
+          var existing = localStorage.getItem(key);
+          if (existing) return Promise.resolve(existing);
+          return tokenProvider()
+            .then(function (token) {
+              return fetch(BASE + "/v1/me/support-requests", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+                body: JSON.stringify({ metadata: metadata }),
+              });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (conv) { localStorage.setItem(key, conv.id); return conv.id; });
+        }
+      })();
     </script>
   </body>
 </html>

@@ -11,15 +11,15 @@ import (
 // InternalActorID is set. Sortable ULID id drives ?before=/?after= pagination
 // and read-receipt monotonicity (§3, §4.2).
 type Message struct {
-	ID             string     `gorm:"primaryKey;size:40;index:idx_msg_page,priority:3"`
-	TenantID       string     `gorm:"size:40;not null;index:idx_msg_page,priority:1"`
-	ConversationID string     `gorm:"size:40;not null;index:idx_msg_page,priority:2;uniqueIndex:idx_msg_idem,priority:1"`
-	SenderKind     SenderKind `gorm:"size:16;not null"`
-	Visibility     Visibility `gorm:"size:16;not null;default:'participants'"`
-	Channel        Channel    `gorm:"size:16;not null;default:'app'"`
-	ExternalUserID  *string `gorm:"size:255"`
-	InternalActorID *string `gorm:"size:40"`
-	Body           string  `gorm:"type:text"`
+	ID              string     `gorm:"primaryKey;size:40;index:idx_msg_page,priority:3"`
+	TenantID        string     `gorm:"size:40;not null;index:idx_msg_page,priority:1"`
+	ConversationID  string     `gorm:"size:40;not null;index:idx_msg_page,priority:2;uniqueIndex:idx_msg_idem,priority:1"`
+	SenderKind      SenderKind `gorm:"size:16;not null"`
+	Visibility      Visibility `gorm:"size:16;not null;default:'participants'"`
+	Channel         Channel    `gorm:"size:16;not null;default:'app'"`
+	ExternalUserID  *string    `gorm:"size:255"`
+	InternalActorID *string    `gorm:"size:40"`
+	Body            string     `gorm:"type:text"`
 	// ClientMsgID is the caller-supplied idempotency key (§4.2). Unique per
 	// conversation; NULL for server ingress (multiple NULLs allowed on all
 	// three dialects, so ingress never collides).
@@ -56,12 +56,16 @@ func (a *MessageAttachment) BeforeCreate(*gorm.DB) error {
 	return nil
 }
 
-// EmailThread maps inbound replies back to a conversation via a token in the
-// subject / reply-to (§6.2). One row per conversation.
+// EmailThread is the per-conversation email-channel state (§6.2). One row per
+// conversation. Inbound mail binds to an OPEN conversation by original Sender +
+// normalized SubjectKey — no token is injected into outbound mail.
 type EmailThread struct {
 	ConversationID string `gorm:"primaryKey;size:40"`
 	TenantID       string `gorm:"size:40;not null;index"`
-	ThreadToken    string `gorm:"size:64;not null;uniqueIndex"`
+	ThreadToken    string `gorm:"size:64;not null;uniqueIndex"` // stable internal id (not used for threading)
+	Sender         string `gorm:"size:320;index"`               // original sender, for sender+subject threading
+	SubjectKey     string `gorm:"size:255;index"`               // normalized subject (truncated to 255), for threading
+	Subject        string `gorm:"type:text"`                    // original subject, for display + outbound "Re:" (unbounded)
 	LastAddress    string `gorm:"size:320"`
 	LastMessageID  string `gorm:"size:40"`
 }
@@ -70,11 +74,11 @@ type EmailThread struct {
 // (review finding). An attachment may only reference a completed upload owned by
 // the caller's tenant.
 type Upload struct {
-	ID              string  `gorm:"primaryKey;size:40"`
-	TenantID        string  `gorm:"size:40;not null;index"`
-	UploaderKind    MemberKind `gorm:"size:16;not null"`
-	ExternalUserID  *string `gorm:"size:255"`
-	InternalActorID *string `gorm:"size:40"`
+	ID              string       `gorm:"primaryKey;size:40"`
+	TenantID        string       `gorm:"size:40;not null;index"`
+	UploaderKind    MemberKind   `gorm:"size:16;not null"`
+	ExternalUserID  *string      `gorm:"size:255"`
+	InternalActorID *string      `gorm:"size:40"`
 	ObjectKey       string       `gorm:"size:512;not null;uniqueIndex"`
 	MimeType        string       `gorm:"size:255"`
 	SizeBytes       int64        `gorm:"not null"`

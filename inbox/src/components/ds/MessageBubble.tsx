@@ -86,19 +86,31 @@ export function MessageBubble({
           {time && <span className="sild-msg__time">{time}</span>}
         </div>
       )}
-      <div className="sild-msg__bubble">
-        {body}
-        {inlineImgs.map((a, i) => (
-          <img key={i} className="sild-msg__att-img" src={a.url} alt={a.filename || ""} />
-        ))}
-      </div>
+      {(body || inlineImgs.length > 0) && (
+        <div className="sild-msg__bubble">
+          {body}
+          {inlineImgs.map((a, i) =>
+            a.url ? (
+              <a key={i} href={a.url} target="_blank" rel="noopener noreferrer">
+                <img className="sild-msg__att-img" src={a.url} alt={a.filename || ""} />
+              </a>
+            ) : null
+          )}
+        </div>
+      )}
       {listed.length > 0 && (
         <div className="sild-msg__atts">
-          {listed.map((a, i) => (
-            <span key={i} className="sild-msg__att">
-              <Paperclip /> {a.filename || "attachment"}
-            </span>
-          ))}
+          {listed.map((a, i) =>
+            a.url ? (
+              <a key={i} className="sild-msg__att" href={a.url} target="_blank" rel="noopener noreferrer" download={a.filename || undefined}>
+                <Paperclip /> <span className="sild-msg__att-name">{a.filename || "attachment"}</span>
+              </a>
+            ) : (
+              <span key={i} className="sild-msg__att">
+                <Paperclip /> <span className="sild-msg__att-name">{a.filename || "attachment"}</span>
+              </span>
+            )
+          )}
         </div>
       )}
       {readReceipt && <div className="sild-msg__read">{readReceipt}</div>}

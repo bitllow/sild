@@ -38,6 +38,16 @@ export interface ApiConversation {
   created_at: string;
   members: ApiMember[];
   assignment?: ApiAssignment;
+  subject?: string; // email channel only — original email subject
+}
+
+export interface ApiAttachment {
+  object_key: string;
+  disposition: "inline" | "attachment";
+  mime_type: string;
+  size_bytes: number;
+  filename: string;
+  url?: string;
 }
 
 export interface ApiMessage {
@@ -51,7 +61,18 @@ export interface ApiMessage {
   external_user_id?: string;
   internal_actor_id?: string;
   client_msg_id?: string;
-  attachments: unknown[];
+  attachments: ApiAttachment[];
+}
+
+export interface ApiUploadGrant {
+  object_key: string;
+  upload_url: string;
+  expires_at: string;
+}
+
+export interface AttachmentRef {
+  object_key: string;
+  disposition: "inline" | "attachment";
 }
 
 export interface ApiMessagesPage {
@@ -168,8 +189,15 @@ export const adminApi = {
   },
   getConversation: (id: string) => api.get<ApiConversation>(`/conversations/${id}`),
   listMessages: (id: string) => api.get<ApiMessagesPage>(`/conversations/${id}/messages?limit=100`),
-  postMessage: (id: string, body: string, visibility: ApiVisibility = "participants") =>
-    api.post<ApiMessage>(`/conversations/${id}/messages`, { body, visibility }),
+  postMessage: (
+    id: string,
+    body: string,
+    visibility: ApiVisibility = "participants",
+    attachments: AttachmentRef[] = []
+  ) => api.post<ApiMessage>(`/conversations/${id}/messages`, { body, visibility, attachments }),
+  // Issue a signed direct-to-bucket PUT URL for an attachment (§11).
+  issueUpload: (mimeType: string, sizeBytes: number, filename: string) =>
+    api.post<ApiUploadGrant>("/uploads", { mime_type: mimeType, size_bytes: sizeBytes, filename }),
   claimAssignment: (id: string) => api.post<ApiAssignment>(`/admin/assignments/${id}/claim`),
   closeConversation: (id: string) => api.post<{ status: string }>(`/conversations/${id}/close`),
 

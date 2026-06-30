@@ -36,7 +36,13 @@ func (h *Handler) getConversation(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, views.Conversation(conv, members, assignment))
+	view := views.Conversation(conv, members, assignment)
+	// Email conversations carry a subject (the inbox renders it instead of the
+	// opaque conversation id); app conversations have none.
+	if subject := h.svc.EmailSubject(c.Request.Context(), apiutil.Tenant(c), convID); subject != "" {
+		view["subject"] = subject
+	}
+	c.JSON(http.StatusOK, view)
 }
 
 // postMessage: POST /v1/conversations/:id/messages (ingress §4.1, send §4.2).

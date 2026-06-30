@@ -8,6 +8,9 @@ backend/bin/
 *.db-wal
 *.db-shm
 
+# Local attachment uploads (dev storage backend, STORAGE_LOCAL_DIR)
+.uploads/
+
 # Env
 .env
 .env.local

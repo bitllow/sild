@@ -52,8 +52,10 @@
 .sild-msg__intlabel{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--amber-600)}
 .sild-msg__atts{display:flex;flex-direction:column;gap:6px;margin-top:6px}
 .sild-msg__att{display:flex;align-items:center;gap:8px;background:var(--white);border:1px solid var(--border-default);
-  border-radius:var(--radius-md);padding:7px 10px;font-size:13px;color:var(--text-primary)}
-.sild-msg__att-img{margin-top:6px;border-radius:var(--radius-md);max-width:240px;border:1px solid var(--border-subtle)}
+  border-radius:var(--radius-md);padding:7px 10px;font-size:13px;color:var(--text-primary);text-decoration:none;max-width:280px}
+a.sild-msg__att:hover{background:var(--slate-50)}
+.sild-msg__att .sild-msg__att-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sild-msg__att-img{margin-top:6px;border-radius:var(--radius-md);max-width:240px;max-height:260px;border:1px solid var(--border-subtle);display:block;cursor:pointer}
 .sild-msg__read{font-size:11px;color:var(--text-tertiary);margin-top:3px;padding:0 4px}
 
 /* ---------- StatusPill ---------- */

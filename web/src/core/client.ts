@@ -1,11 +1,21 @@
 import { Centrifuge } from "centrifuge";
 import type {
   ConnectionState,
+  PendingAttachment,
   SildConfig,
   WidgetConversation,
   WidgetMessage,
   WidgetState,
 } from "./types";
+
+interface ApiAttachment {
+  object_key: string;
+  disposition: "inline" | "attachment";
+  mime_type: string;
+  size_bytes: number;
+  filename: string;
+  url?: string;
+}
 
 interface ApiMessage {
   id: string;
@@ -14,6 +24,7 @@ interface ApiMessage {
   visibility: "participants" | "internal";
   body: string;
   created_at: string;
+  attachments?: ApiAttachment[];
 }
 
 interface Envelope {
@@ -50,6 +61,13 @@ function mapMessage(m: ApiMessage): WidgetMessage {
     author: system ? undefined : out ? undefined : "Support",
     time: clock(m.created_at),
     body: m.body,
+    attachments: (m.attachments || []).map((a) => ({
+      url: a.url,
+      disposition: a.disposition,
+      mimeType: a.mime_type,
+      filename: a.filename,
+      sizeBytes: a.size_bytes,
+    })),
   };
 }
 
@@ -58,6 +76,7 @@ function mapMessage(m: ApiMessage): WidgetMessage {
 export class SildClient {
   private base: string;
   private tokenProvider: () => Promise<string> | string;
+  private metadata: Record<string, unknown>;
   private token: string | null = null;
   private cf: Centrifuge | null = null;
   private listeners = new Set<() => void>();
@@ -75,6 +94,7 @@ export class SildClient {
   constructor(cfg: SildConfig) {
     this.base = (cfg.baseUrl || "").replace(/\/$/, "");
     this.tokenProvider = cfg.tokenProvider;
+    this.metadata = cfg.metadata || {};
   }
 
   subscribe(fn: () => void): () => void {
@@ -196,7 +216,7 @@ export class SildClient {
   }
 
   async openSupportRequest() {
-    const conv = await this.api<{ id: string }>("POST", "/me/support-requests", { metadata: {} });
+    const conv = await this.api<{ id: string }>("POST", "/me/support-requests", { metadata: this.metadata });
     await this.loadConversations();
     await this.openConversation(conv.id);
     // The socket connected before this conversation existed, so its server-side
@@ -221,14 +241,41 @@ export class SildClient {
     void this.loadConversations();
   }
 
-  async send(text: string) {
+  // upload sends a file direct to the bucket via a signed PUT (§11) and returns a
+  // reference to attach to a message. Images default to inline (rendered in the
+  // thread); everything else is an attachment (listed below the message).
+  async upload(file: File): Promise<PendingAttachment> {
+    const mime = file.type || "application/octet-stream";
+    const grant = await this.api<{ object_key: string; upload_url: string }>("POST", "/uploads", {
+      mime_type: mime,
+      size_bytes: file.size,
+      filename: file.name,
+    });
+    // The local dev backend returns an absolute URL on its configured public
+    // origin; rewrite it to the widget's own base so uploads work from any host
+    // (LAN/phone). Real cloud signed URLs have no local route and are used as-is.
+    const marker = "/v1/uploads/local/";
+    const i = grant.upload_url.indexOf(marker);
+    const putUrl = i >= 0 ? this.base + grant.upload_url.slice(i) : grant.upload_url;
+    const res = await fetch(putUrl, { method: "PUT", body: file, headers: { "Content-Type": mime } });
+    if (!res.ok) throw new Error("upload failed");
+    return {
+      objectKey: grant.object_key,
+      disposition: mime.startsWith("image/") ? "inline" : "attachment",
+      mimeType: mime,
+      filename: file.name,
+    };
+  }
+
+  async send(text: string, attachments: PendingAttachment[] = []) {
     const id = this.state.activeId;
     const body = text.trim();
-    if (!id || !body) return;
+    if (!id || (!body && attachments.length === 0)) return;
     try {
       const msg = await this.api<ApiMessage>("POST", `/conversations/${id}/messages`, {
         body,
         client_msg_id: uuid(),
+        attachments: attachments.map((a) => ({ object_key: a.objectKey, disposition: a.disposition })),
       });
       const mapped = mapMessage(msg);
       if (!this.state.messages.some((m) => m.id === mapped.id)) {

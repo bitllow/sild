@@ -10,18 +10,17 @@ func TestBuildMessage(t *testing.T) {
 		To:          "cust@x.com",
 		FromName:    "Acme Support",
 		FromAddress: "support@inbound.test",
-		Subject:     "Re: your ticket [sild#thr_123]",
+		Subject:     "Re: your ticket",
 		Body:        "Hello there.",
-		ReplyTo:     "support+sild#thr_123@inbound.test",
-		ThreadToken: "thr_123",
+		ReplyTo:     "support@inbound.test",
 	})
 	msg := string(out)
 
 	for _, want := range []string{
 		"From: Acme Support <support@inbound.test>\r\n",
 		"To: cust@x.com\r\n",
-		"Reply-To: support+sild#thr_123@inbound.test\r\n",
-		"Subject: Re: your ticket [sild#thr_123]\r\n",
+		"Reply-To: support@inbound.test\r\n",
+		"Subject: Re: your ticket\r\n",
 		"Content-Type: text/plain; charset=UTF-8\r\n",
 	} {
 		if !strings.Contains(msg, want) {

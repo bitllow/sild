@@ -102,10 +102,26 @@ export const css = `
 .msg.out .bubble { background: var(--brand); color: #fff; border-bottom-right-radius: var(--radius-xs); }
 .msg.system .bubble { background: transparent; color: var(--text-tertiary); font-size: 12px; padding: 4px 8px; }
 
+/* Inline images render in the thread; non-image files list as chips below. */
+.imglink { display: block; max-width: 100%; }
+.att-img { max-width: 220px; max-height: 240px; width: auto; height: auto; border-radius: var(--radius-lg); display: block; }
+.atts { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; max-width: 100%; }
+.att-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 240px; text-decoration: none; font-size: 13px; padding: 8px 11px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background: var(--surface-card); color: var(--text-primary); }
+.att-chip:hover { background: var(--slate-50); }
+.att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .composer { padding: 10px 12px 12px; background: var(--surface-card); border-top: 1px solid var(--border-default); flex: none; }
 .inputwrap { display: flex; align-items: flex-end; gap: 8px; background: var(--white); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 6px 8px; transition: border-color .14s, box-shadow .14s; }
 .inputwrap:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(37,99,253,.32); }
 .inputwrap textarea { flex: 1; border: 0; outline: none; resize: none; background: transparent; font-family: inherit; font-size: 14px; line-height: 1.5; color: var(--text-primary); max-height: 120px; padding: 6px 2px; }
+.attachbtn { width: 34px; height: 34px; flex: none; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-tertiary); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.attachbtn:hover:not(:disabled) { color: var(--brand); background: var(--surface-sunken); }
+.attachbtn:disabled { opacity: .4; cursor: not-allowed; }
+.pending { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.pchip { display: inline-flex; align-items: center; gap: 6px; max-width: 200px; font-size: 12px; background: var(--surface-sunken); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 5px 8px; color: var(--text-secondary); }
+.pchip.muted { color: var(--text-tertiary); }
+.pchip button { border: 0; background: transparent; cursor: pointer; color: var(--text-tertiary); padding: 0; font-size: 13px; line-height: 1; display: flex; }
+.pchip .att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .send { width: 34px; height: 34px; flex: none; border: 0; border-radius: var(--radius-md); background: var(--brand); color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .send:hover { background: var(--brand-hover); }
 .send:disabled { opacity: .4; cursor: not-allowed; }

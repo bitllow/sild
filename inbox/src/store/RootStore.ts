@@ -25,6 +25,7 @@ import type {
   Conversation,
   EmailChannel,
   InboxFilter,
+  PendingAttachment,
   InboxView,
   PlatformRole,
   SessionState,
@@ -60,6 +61,13 @@ export class RootStore {
   panelOpen = true;
   composer = "";
   internal = false;
+  // Files uploaded and queued to attach to the next outgoing message, plus a
+  // count of uploads still in flight (the composer disables Send while > 0).
+  // uploadGen bumps whenever the active conversation changes, so an upload that
+  // finishes after a switch is discarded rather than leaking into another thread.
+  pendingAtts: PendingAttachment[] = [];
+  uploading = 0;
+  private uploadGen = 0;
   loadingConvs = false;
   // pagination (cursor-based, scroll-loading)
   nextCursor: string | null = null;
@@ -460,6 +468,10 @@ export class RootStore {
     this.activeId = id;
     this.composer = "";
     this.internal = false;
+    // Abandon the previous conversation's attachment queue + any in-flight uploads.
+    this.pendingAtts = [];
+    this.uploading = 0;
+    this.uploadGen += 1;
     const conv = this.convs.find((c) => c.id === id);
     if (conv) conv.unread = 0;
     void this.refreshActiveMessages();
@@ -595,16 +607,76 @@ export class RootStore {
     this.internal = v;
   };
 
+  // attachFiles uploads each file direct-to-bucket (§11) and queues a reference
+  // for the next message. Uploads are bound to the current conversation via
+  // uploadGen, so a completion that lands after a conversation switch is dropped
+  // (it must never appear in — or be sent from — a different conversation).
+  attachFiles = (files: File[]) => {
+    const gen = this.uploadGen;
+    for (const file of files) {
+      runInAction(() => {
+        this.uploading += 1;
+      });
+      void this.uploadOne(file, gen);
+    }
+  };
+  private uploadOne = async (file: File, gen: number) => {
+    const mime = file.type || "application/octet-stream";
+    try {
+      const grant = await adminApi.issueUpload(mime, file.size, file.name);
+      // Local backend returns an absolute public-origin URL; PUT to its relative
+      // /v1 path so it goes same-origin through the Next proxy. Cloud signed URLs
+      // (no local route) are used as-is.
+      const marker = "/v1/uploads/local/";
+      const at = grant.upload_url.indexOf(marker);
+      const putUrl = at >= 0 ? grant.upload_url.slice(at) : grant.upload_url;
+      const res = await fetch(putUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": mime },
+        credentials: at >= 0 ? "include" : "omit",
+      });
+      if (!res.ok) throw new Error("upload failed");
+      runInAction(() => {
+        if (this.uploadGen !== gen) return; // conversation changed — discard
+        this.pendingAtts.push({
+          objectKey: grant.object_key,
+          disposition: mime.startsWith("image/") ? "inline" : "attachment",
+          mimeType: mime,
+          filename: file.name,
+        });
+      });
+    } catch (e) {
+      runInAction(() => {
+        if (this.uploadGen === gen) this.convError = e instanceof ApiError ? e.message : `Could not upload ${file.name}.`;
+      });
+    } finally {
+      runInAction(() => {
+        if (this.uploadGen === gen) this.uploading -= 1;
+      });
+    }
+  };
+  removePendingAtt = (i: number) => {
+    this.pendingAtts.splice(i, 1);
+  };
+
   sendMessage = async () => {
     const conv = this.active;
     const text = this.composer.trim();
-    if (!conv || !text || this.sending) return;
+    const atts = this.pendingAtts.slice();
+    if (!conv || (!text && atts.length === 0) || this.sending || this.uploading > 0) return;
     const internal = this.internal;
     this.sending = true;
     try {
-      await adminApi.postMessage(conv.id, text, internal ? "internal" : "participants");
+      await adminApi.postMessage(
+        conv.id,
+        text,
+        internal ? "internal" : "participants",
+        atts.map((a) => ({ object_key: a.objectKey, disposition: a.disposition }))
+      );
       runInAction(() => {
         this.composer = "";
+        this.pendingAtts = [];
       });
       await this.refreshActiveMessages();
     } catch (e) {

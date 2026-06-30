@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"errors"
+	"log"
 	"regexp"
 	"strings"
 
@@ -14,15 +15,74 @@ import (
 	"github.com/bitllow/sild/backend/internal/views"
 )
 
-// threadTokenRe extracts the thread token embedded in a subject as [sild#<tok>].
+// subjectPrefixRe strips leading reply/forward prefixes (Re:, Fwd:, Fw:, Aw:,
+// Sv:, …) so a reply threads to the same conversation as the original (§6.2).
+var subjectPrefixRe = regexp.MustCompile(`(?i)^\s*(re|fwd?|aw|sv|antw|wg)\s*:\s*`)
+
+// maxSubjectKeyLen caps the threading key to the SubjectKey column width
+// (varchar(255)) so an oversized Subject header can't fail the inbound insert.
+const maxSubjectKeyLen = 255
+
+// normalizeSubject is the threading key: prefixes stripped, whitespace collapsed,
+// lowercased, and truncated to the column width. Two emails with the "same"
+// subject (modulo Re:/Fwd:) match.
+func normalizeSubject(s string) string {
+	s = strings.TrimSpace(s)
+	for {
+		stripped := subjectPrefixRe.ReplaceAllString(s, "")
+		if stripped == s {
+			break
+		}
+		s = stripped
+	}
+	key := strings.ToLower(strings.Join(strings.Fields(s), " "))
+	if r := []rune(key); len(r) > maxSubjectKeyLen {
+		key = string(r[:maxSubjectKeyLen]) // rune-safe cap (varchar(255) is char-counted)
+	}
+	return key
+}
+
+// replySubject renders an outbound subject as "Re: <original>" (no token —
+// threading rides the Reply-To +subaddress, not the visible subject).
+func replySubject(subject string) string {
+	s := strings.TrimSpace(subject)
+	if s == "" {
+		return "Re: your message"
+	}
+	if strings.HasPrefix(strings.ToLower(s), "re:") {
+		return s
+	}
+	return "Re: " + s
+}
+
+// threadTokenRe finds an embedded thread token "sild#<tok>". It's set in the
+// outbound Reply-To as a +subaddress, so a reply carries it back in To/recipient
+// (surviving forwarding as a header) while the visible subject stays clean.
 var threadTokenRe = regexp.MustCompile(`sild#([A-Za-z0-9_]+)`)
 
-// SubjectWithToken decorates an outbound subject with the thread token (§6.2).
-func SubjectWithToken(subject, token string) string {
-	if subject == "" {
-		subject = "Re: your conversation"
+// extractThreadToken pulls the thread token from the places a reply preserves it
+// — the recipient and the To/Cc headers (+sild#<tok> subaddress), or the subject
+// as a last resort. Returns "" when none is present.
+func extractThreadToken(in mail.InboundEmail) string {
+	for _, s := range []string{in.Recipient, headerValue(in.Headers, "To"), headerValue(in.Headers, "Cc"), in.Subject} {
+		if m := threadTokenRe.FindStringSubmatch(s); m != nil {
+			return m[1]
+		}
 	}
-	return subject + " [sild#" + token + "]"
+	return ""
+}
+
+// replyToWithToken plus-addresses the tenant from-address with the thread token,
+// so a reply threads back precisely without touching the visible subject (§6.2).
+func replyToWithToken(fromAddress, token string) string {
+	if fromAddress == "" || token == "" {
+		return ""
+	}
+	at := strings.IndexByte(fromAddress, '@')
+	if at < 0 {
+		return fromAddress
+	}
+	return fromAddress[:at] + "+sild#" + token + fromAddress[at:]
 }
 
 // HandleInbound processes a parsed inbound email (§6.2): verify happens at the
@@ -89,13 +149,22 @@ func (s *Service) HandleForwarded(ctx context.Context, in mail.InboundEmail) (*m
 // address, invalid recipient) are acknowledged so the sender isn't retried.
 func (s *Service) ForwardedMailHandler() mail.Handler {
 	return func(ctx context.Context, in mail.InboundEmail) error {
-		_, err := s.HandleForwarded(ctx, in)
+		msg, err := s.HandleForwarded(ctx, in)
 		switch {
-		case err == nil:
+		case err == nil && msg != nil:
+			log.Printf("sild-mail: ingested mail from %s to %s → conversation %s", in.From, in.Recipient, msg.ConversationID)
 			return nil
-		case errors.Is(err, ErrNotFound), errors.Is(err, ErrValidation), errors.Is(err, ErrForbidden):
+		case err == nil:
+			log.Printf("sild-mail: dropped mail from %s to %s (spam filter)", in.From, in.Recipient)
+			return nil
+		case errors.Is(err, ErrNotFound):
+			log.Printf("sild-mail: dropped mail to %s (no tenant for that forwarding address)", in.Recipient)
+			return nil
+		case errors.Is(err, ErrValidation), errors.Is(err, ErrForbidden):
+			log.Printf("sild-mail: rejected mail to %s: %v", in.Recipient, err)
 			return nil // permanent/intentional — don't make the MTA retry forever
 		default:
+			log.Printf("sild-mail: transient error for mail to %s: %v", in.Recipient, err)
 			return err // transient — surface it so the daemon returns a 4xx
 		}
 	}
@@ -115,8 +184,9 @@ func (s *Service) ingestAndNotify(ctx context.Context, cfg *models.TenantEmailCo
 	return msg, nil
 }
 
-// ingest resolves the thread token and appends to the existing conversation, or
-// creates a new one. The bool reports whether a new conversation was created.
+// ingest binds the email to an existing OPEN conversation by sender + normalized
+// subject, or creates a new one. The bool reports whether a new conversation was
+// created. No special tokens — threading is sender + subject (§6.2).
 func (s *Service) ingest(ctx context.Context, tenantID string, in mail.InboundEmail) (*models.Message, bool, error) {
 	if len(in.RawAttachments) > 0 { // daemon path: upload in-memory bytes to the bucket
 		uploaded, err := s.uploadInboundAttachments(ctx, tenantID, in.RawAttachments)
@@ -125,32 +195,40 @@ func (s *Service) ingest(ctx context.Context, tenantID string, in mail.InboundEm
 		}
 		in.Attachments = append(in.Attachments, uploaded...)
 	}
-	if m := threadTokenRe.FindStringSubmatch(in.Subject); m != nil {
-		if thread, err := s.store.Email().FindByToken(ctx, m[1]); err == nil && thread.TenantID == tenantID {
+	// Prefer the explicit thread token when a reply carries one (it survives
+	// subject edits); otherwise bind by sender + normalized subject. Both match
+	// only OPEN conversations — closed is terminal (§1).
+	if token := extractThreadToken(in); token != "" {
+		if thread, err := s.store.Email().FindOpenByToken(ctx, tenantID, token); err == nil {
 			msg, err := s.appendInbound(ctx, tenantID, thread, in)
 			return msg, false, err
 		}
+	}
+	if thread, err := s.store.Email().FindOpenBySenderSubject(ctx, tenantID, in.From, normalizeSubject(in.Subject)); err == nil {
+		msg, err := s.appendInbound(ctx, tenantID, thread, in)
+		return msg, false, err
 	}
 	msg, err := s.createFromInbound(ctx, tenantID, in)
 	return msg, err == nil, err
 }
 
-// sendAutoReply emails the sender an acknowledgement carrying the thread token
-// so their reply threads back into the same conversation (§6.2).
+// sendAutoReply emails the sender an acknowledgement. The reply keeps the
+// original subject ("Re: …") so the sender's response threads back by
+// sender + subject — no token needed (§6.2).
 func (s *Service) sendAutoReply(ctx context.Context, cfg *models.TenantEmailConfig, convID, to string) {
 	if to == "" {
 		return
 	}
-	token := s.threadToken(ctx, cfg.TenantID, convID)
-	_ = s.mailer.Send(ctx, mail.OutboundEmail{
-		To:          to,
-		FromName:    cfg.FromName,
-		FromAddress: cfg.FromAddress,
-		Subject:     SubjectWithToken("Thanks for reaching out", token),
-		Body:        "Thanks — we received your message and a member of our team will reply shortly.",
-		ThreadToken: token,
-		ReplyTo:     replyTo(cfg, token),
-	})
+	out := mail.OutboundEmail{
+		To: to, FromName: cfg.FromName, FromAddress: cfg.FromAddress,
+		Subject: "Re: your message",
+		Body:    "Thanks — we received your message and a member of our team will reply shortly.",
+	}
+	if t, err := s.store.Email().Get(ctx, cfg.TenantID, convID); err == nil {
+		out.Subject = replySubject(t.Subject)
+		out.ReplyTo = replyToWithToken(cfg.FromAddress, t.ThreadToken)
+	}
+	_ = s.mailer.Send(ctx, out)
 }
 
 func (s *Service) appendInbound(ctx context.Context, tenantID string, thread *models.EmailThread, in mail.InboundEmail) (*models.Message, error) {
@@ -181,7 +259,9 @@ func (s *Service) createFromInbound(ctx context.Context, tenantID string, in mai
 	from := in.From
 	conv := &models.Conversation{TenantID: tenantID, Status: models.ConversationOpen, CreatedAt: s.now()}
 	var msg *models.Message
-	token := id.New("thr")
+	assignment := &models.Assignment{
+		TenantID: tenantID, Status: models.AssignmentQueued, CreatedAt: s.now(),
+	}
 
 	err := s.store.Tx(ctx, func(tx store.Store) error {
 		if err := tx.Conversations().Create(ctx, conv); err != nil {
@@ -193,13 +273,14 @@ func (s *Service) createFromInbound(ctx context.Context, tenantID string, in mai
 		}); err != nil {
 			return err
 		}
-		if err := tx.Assignments().Create(ctx, &models.Assignment{
-			TenantID: tenantID, ConversationID: conv.ID, Status: models.AssignmentQueued, CreatedAt: s.now(),
-		}); err != nil {
+		assignment.ConversationID = conv.ID
+		if err := tx.Assignments().Create(ctx, assignment); err != nil {
 			return err
 		}
 		if err := tx.Email().CreateThread(ctx, &models.EmailThread{
-			ConversationID: conv.ID, TenantID: tenantID, ThreadToken: token, LastAddress: from,
+			ConversationID: conv.ID, TenantID: tenantID, ThreadToken: id.New("thr"),
+			Sender: from, SubjectKey: normalizeSubject(in.Subject), Subject: in.Subject,
+			LastAddress: from,
 		}); err != nil {
 			return err
 		}
@@ -219,12 +300,16 @@ func (s *Service) createFromInbound(ctx context.Context, tenantID string, in mai
 	}
 	_ = s.fireWebhook(ctx, tenantID, conv.ID, "conversation.created",
 		map[string]any{"id": conv.ID, "channel": "email"})
+	// Nudge the agents channel so the new email conversation surfaces in the inbox
+	// queue live, without a refresh (§8) — same fan-out as host-created requests.
+	s.emit(ctx, realtime.Target{Tenant: tenantID}, realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
 	return msg, nil
 }
 
 // maybeSendOutboundEmail emails a participants message to any email member whose
-// address differs from the sender, embedding the thread token (§6.2). Called
-// from SendMessage. internal notes are never emailed (§5.6).
+// address differs from the sender, with a clean "Re: <subject>" so the reply
+// threads back by sender + subject (§6.2). Called from SendMessage. Internal
+// notes are never emailed (§5.6).
 func (s *Service) maybeSendOutboundEmail(ctx context.Context, tenantID, convID string, msg *models.Message) {
 	if msg.Visibility != models.VisibilityParticipants || msg.Channel == models.ChannelEmail {
 		return
@@ -243,13 +328,17 @@ func (s *Service) maybeSendOutboundEmail(ctx context.Context, tenantID, convID s
 	if len(recipients) == 0 {
 		return
 	}
-	token := s.threadToken(ctx, tenantID, convID)
 	cfg, _ := s.store.Tenants().GetEmailConfig(ctx, tenantID)
-	for _, to := range recipients {
-		out := mail.OutboundEmail{
-			To: to, Subject: SubjectWithToken("", token), Body: msg.Body,
-			ThreadToken: token, ReplyTo: replyTo(cfg, token),
+	thread, _ := s.store.Email().Get(ctx, tenantID, convID)
+	subject, replyTo := "Re: your message", ""
+	if thread != nil {
+		subject = replySubject(thread.Subject)
+		if cfg != nil {
+			replyTo = replyToWithToken(cfg.FromAddress, thread.ThreadToken)
 		}
+	}
+	for _, to := range recipients {
+		out := mail.OutboundEmail{To: to, Subject: subject, Body: msg.Body, ReplyTo: replyTo}
 		if cfg != nil {
 			out.FromName, out.FromAddress = cfg.FromName, cfg.FromAddress
 		}
@@ -257,17 +346,14 @@ func (s *Service) maybeSendOutboundEmail(ctx context.Context, tenantID, convID s
 	}
 }
 
-// threadToken returns the conversation's email thread token, creating one if the
-// conversation has not yet been emailed.
-func (s *Service) threadToken(ctx context.Context, tenantID, convID string) string {
+// EmailSubject returns the original subject of a conversation's email thread (the
+// inbox renders it in place of the opaque conversation id), or "" if there is no
+// email thread.
+func (s *Service) EmailSubject(ctx context.Context, tenantID, convID string) string {
 	if t, err := s.store.Email().Get(ctx, tenantID, convID); err == nil {
-		return t.ThreadToken
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return ""
+		return t.Subject
 	}
-	token := id.New("thr")
-	_ = s.store.Email().CreateThread(ctx, &models.EmailThread{ConversationID: convID, TenantID: tenantID, ThreadToken: token})
-	return token
+	return ""
 }
 
 // uploadInboundAttachments writes the daemon's in-memory attachment bytes to the
@@ -379,15 +465,4 @@ func domainAllowed(cfg *models.TenantEmailConfig, domain string) bool {
 		}
 	}
 	return false
-}
-
-func replyTo(cfg *models.TenantEmailConfig, token string) string {
-	if cfg == nil || cfg.FromAddress == "" {
-		return ""
-	}
-	at := strings.IndexByte(cfg.FromAddress, '@')
-	if at < 0 {
-		return cfg.FromAddress
-	}
-	return cfg.FromAddress[:at] + "+sild#" + token + cfg.FromAddress[at:]
 }

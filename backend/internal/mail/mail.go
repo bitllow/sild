@@ -44,14 +44,14 @@ type ParsedAttachment struct {
 	Content  []byte
 }
 
-// OutboundEmail is a message leaving via email (§6.2).
+// OutboundEmail is a message leaving via email (§6.2). Threading is by sender +
+// subject, so the subject is sent clean ("Re: …") with no token.
 type OutboundEmail struct {
 	To          string
 	FromName    string
 	FromAddress string
 	Subject     string
 	Body        string
-	ThreadToken string // embedded in subject + Reply-To for thread resolution
 	ReplyTo     string
 }
 

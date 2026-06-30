@@ -12,6 +12,7 @@ import (
 
 	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/mail"
+	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/testutil"
 )
@@ -36,8 +37,9 @@ func seedEmailTenant(t *testing.T, h *testutil.Harness, secret string) string {
 	return tenant.ID
 }
 
-// §6.2: inbound with no token creates a conversation; a reply embeds the thread
-// token; a follow-up inbound with that token threads into the same conversation.
+// §6.2: inbound creates a conversation; an agent reply goes out with a clean
+// "Re: <subject>"; the customer's reply threads back by sender + subject (no
+// special token).
 func TestEmailThreadingRoundTrip(t *testing.T) {
 	h := testutil.New(t)
 	tenantID := seedEmailTenant(t, h, "") // no secret → dev allows
@@ -54,12 +56,7 @@ func TestEmailThreadingRoundTrip(t *testing.T) {
 	}
 	convID := msg.ConversationID
 
-	thread, err := h.Store.Email().Get(ctx, tenantID, convID)
-	if err != nil {
-		t.Fatalf("thread: %v", err)
-	}
-
-	// Agent replies (participants) → outbound email to the customer.
+	// Agent replies (participants) → outbound email with a clean "Re:" subject.
 	agentID := "agent_1"
 	if _, err := h.Svc.SendMessage(ctx, tenantID, convID, domain.SendInput{
 		SenderKind: models.SenderAgent, Internal: &agentID, Body: "How can I help?",
@@ -68,14 +65,15 @@ func TestEmailThreadingRoundTrip(t *testing.T) {
 		t.Fatalf("agent reply: %v", err)
 	}
 	sent := h.Mailer.Messages()
-	if len(sent) != 1 || sent[0].To != "cust@x.com" || !strings.Contains(sent[0].Subject, thread.ThreadToken) {
-		t.Fatalf("expected outbound email to customer with token, got %+v", sent)
+	if len(sent) != 1 || sent[0].To != "cust@x.com" || sent[0].Subject != "Re: Need help" {
+		t.Fatalf("expected one clean-subject reply to the customer, got %+v", sent)
 	}
 
-	// Customer replies; subject carries the token → threads into same conv.
+	// Customer replies with the same subject (modulo Re:) → threads by sender +
+	// subject into the same conversation.
 	msg2, err := h.Svc.HandleInbound(ctx, mail.InboundEmail{
 		Recipient: "help@support.test", From: "cust@x.com",
-		Subject: "Re: Need help [sild#" + thread.ThreadToken + "]", TextBody: "thanks",
+		Subject: "Re: Need help", TextBody: "thanks",
 	})
 	if err != nil {
 		t.Fatalf("inbound reply: %v", err)
@@ -151,6 +149,28 @@ func TestHandleForwardedCreatesAndVerifies(t *testing.T) {
 	}
 }
 
+// A new email conversation must nudge the agents channel (tenant-targeted) so
+// the inbox surfaces it live; without it the conversation only appears on
+// refresh.
+func TestForwardedCreateNudgesAgentsChannel(t *testing.T) {
+	h := testutil.New(t)
+	tenantID, addr := seedForwardTenant(t, h, "eml_rt", false, true)
+	if _, err := h.Svc.HandleForwarded(context.Background(), mail.InboundEmail{
+		Recipient: addr, From: "cust@x.com", Subject: "Hi", TextBody: "hello",
+	}); err != nil {
+		t.Fatalf("forwarded: %v", err)
+	}
+	found := false
+	for _, e := range h.Pub.OfType(realtime.EventAssignmentUpdated) {
+		if e.Target.Tenant == tenantID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a tenant-targeted %s event for the new email conversation", realtime.EventAssignmentUpdated)
+	}
+}
+
 func TestHandleForwardedThreadsAndSubaddress(t *testing.T) {
 	h := testutil.New(t)
 	tenantID, addr := seedForwardTenant(t, h, "eml_route2", false, true)
@@ -160,23 +180,118 @@ func TestHandleForwardedThreadsAndSubaddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	thread, err := h.Store.Email().Get(ctx, tenantID, first.ConversationID)
-	if err != nil {
-		t.Fatalf("thread: %v", err)
-	}
+	_ = tenantID
 
-	// A reply carrying the token, sent to a +subaddressed form of the forwarding
-	// address, threads into the same conversation.
+	// A reply from the same sender with the same subject (modulo "Re:"), sent to a
+	// +subaddressed form of the forwarding address (tenant resolution strips the
+	// subaddress), threads into the same conversation — by sender + subject.
 	plusAddr := "eml_route2+inbox@inbound.test"
 	second, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{
 		Recipient: plusAddr, From: "cust@x.com",
-		Subject: "Re: Hi [sild#" + thread.ThreadToken + "]", TextBody: "two",
+		Subject: "Re: Hi", TextBody: "two",
 	})
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
 	if second.ConversationID != first.ConversationID {
 		t.Fatalf("reply opened a new conversation %s, want %s", second.ConversationID, first.ConversationID)
+	}
+}
+
+// Threading is by sender + normalized subject among OPEN conversations; the
+// original subject is stored for display.
+func TestForwardedThreadsBySenderSubject(t *testing.T) {
+	h := testutil.New(t)
+	tenantID, addr := seedForwardTenant(t, h, "eml_ss", false, true)
+	ctx := context.Background()
+	send := func(from, subject string) string {
+		m, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{Recipient: addr, From: from, Subject: subject, TextBody: "x"})
+		if err != nil || m == nil {
+			t.Fatalf("send %q/%q: msg=%v err=%v", from, subject, m, err)
+		}
+		return m.ConversationID
+	}
+
+	a := send("cust@x.com", "Order 9001")
+	if got := send("cust@x.com", "RE: Order 9001"); got != a { // same sender + subject (modulo Re:)
+		t.Fatalf("same sender+subject should thread into %s, got %s", a, got)
+	}
+	if got := send("cust@x.com", "Order 9002"); got == a { // different subject
+		t.Fatalf("a different subject should open a new conversation")
+	}
+	if got := send("other@x.com", "Order 9001"); got == a { // different sender
+		t.Fatalf("a different sender should open a new conversation")
+	}
+	if subj := h.Svc.EmailSubject(ctx, tenantID, a); subj != "Order 9001" {
+		t.Fatalf("EmailSubject = %q, want %q", subj, "Order 9001")
+	}
+
+	// Closed is terminal (§1): a later email with the same sender+subject starts a
+	// new conversation rather than reopening the closed one.
+	if err := h.Svc.CloseConversation(ctx, tenantID, a); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if got := send("cust@x.com", "Order 9001"); got == a {
+		t.Fatalf("a closed conversation must not be reused; expected a new conversation")
+	}
+}
+
+// The thread token (carried back in the Reply-To +subaddress) takes precedence
+// over sender+subject — a reply threads even if the subject changed.
+func TestForwardedThreadsByToken(t *testing.T) {
+	h := testutil.New(t)
+	tenantID, addr := seedForwardTenant(t, h, "eml_tok", false, true)
+	ctx := context.Background()
+	first, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{Recipient: addr, From: "cust@x.com", Subject: "Order 9001", TextBody: "one"})
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	thread, err := h.Store.Email().Get(ctx, tenantID, first.ConversationID)
+	if err != nil {
+		t.Fatalf("thread: %v", err)
+	}
+
+	second, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{
+		Recipient: addr, From: "someone-else@x.com", // different sender
+		Subject: "a completely different subject", TextBody: "two", // different subject
+		Headers: map[string]string{"To": "support+sild#" + thread.ThreadToken + "@inbound.test"},
+	})
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if second.ConversationID != first.ConversationID {
+		t.Fatalf("token reply should thread into %s, got %s", first.ConversationID, second.ConversationID)
+	}
+}
+
+// A long Subject header must still ingest: the full subject is stored for
+// display, and the threading key is truncated to the column width (so the insert
+// can't fail on a width-enforcing backend) while replies still thread.
+func TestForwardedLongSubject(t *testing.T) {
+	h := testutil.New(t)
+	tenantID, addr := seedForwardTenant(t, h, "eml_long", false, true)
+	ctx := context.Background()
+	long := strings.Repeat("supercalifragilistic ", 60) // > 512 chars
+
+	m1, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{Recipient: addr, From: "cust@x.com", Subject: long, TextBody: "one"})
+	if err != nil || m1 == nil {
+		t.Fatalf("a long-subject email must ingest, got msg=%v err=%v", m1, err)
+	}
+	th, err := h.Store.Email().Get(ctx, tenantID, m1.ConversationID)
+	if err != nil {
+		t.Fatalf("thread: %v", err)
+	}
+	if n := len([]rune(th.SubjectKey)); n > 255 {
+		t.Fatalf("subject key not truncated: %d runes", n)
+	}
+	if th.Subject != long {
+		t.Fatalf("the full subject should be stored for display")
+	}
+
+	// A reply with the same (long) subject threads into the same conversation.
+	m2, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{Recipient: addr, From: "cust@x.com", Subject: "Re: " + long, TextBody: "two"})
+	if err != nil || m2 == nil || m2.ConversationID != m1.ConversationID {
+		t.Fatalf("same long subject should thread; got msg=%v err=%v", m2, err)
 	}
 }
 
@@ -267,14 +382,13 @@ func TestForwardedAutoReply(t *testing.T) {
 	h := testutil.New(t)
 	tenantID, addr := seedForwardTenant(t, h, "eml_ar", true, true)
 	ctx := context.Background()
-	msg, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{Recipient: addr, From: "cust@x.com", Subject: "Hi", TextBody: "hello"})
-	if err != nil {
+	if _, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{Recipient: addr, From: "cust@x.com", Subject: "Hi", TextBody: "hello"}); err != nil {
 		t.Fatalf("forwarded: %v", err)
 	}
-	thread, _ := h.Store.Email().Get(ctx, tenantID, msg.ConversationID)
+	_ = tenantID
 	sent := h.Mailer.Messages()
-	if len(sent) != 1 || sent[0].To != "cust@x.com" || !strings.Contains(sent[0].Subject, thread.ThreadToken) {
-		t.Fatalf("expected one auto-reply to the sender with the thread token, got %+v", sent)
+	if len(sent) != 1 || sent[0].To != "cust@x.com" || sent[0].Subject != "Re: Hi" {
+		t.Fatalf("expected one auto-reply to the sender with a clean \"Re:\" subject, got %+v", sent)
 	}
 
 	// AutoReply off → no acknowledgement.

@@ -11,6 +11,8 @@ export interface ComposerBarProps
   onToggleInternal?: (v: boolean) => void;
   showInternalToggle?: boolean;
   disabled?: boolean;
+  /** Allow sending with empty text (e.g. when attachments are queued). */
+  canSendEmpty?: boolean;
 }
 
 const Paperclip = () => (
@@ -35,6 +37,7 @@ export function ComposerBar({
   onToggleInternal,
   showInternalToggle = false,
   disabled = false,
+  canSendEmpty = false,
   className = "",
   ...rest
 }: ComposerBarProps) {
@@ -54,10 +57,11 @@ export function ComposerBar({
   const ph =
     placeholder || (isInternal ? "Add an internal note (only your team sees this)…" : "Write a reply…");
 
+  const canSend = !disabled && (!!value?.trim() || canSendEmpty);
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (value && value.trim() && onSend) onSend();
+      if (canSend && onSend) onSend();
     }
   };
 
@@ -105,7 +109,7 @@ export function ComposerBar({
           type="button"
           className="sild-composer__icon sild-composer__send"
           aria-label="Send"
-          disabled={disabled || !value || !value.trim()}
+          disabled={!canSend}
           onClick={onSend}
         >
           <Send />

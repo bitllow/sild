@@ -193,7 +193,12 @@ type OutboxRepo interface {
 
 type EmailRepo interface {
 	CreateThread(ctx context.Context, t *models.EmailThread) error
-	FindByToken(ctx context.Context, token string) (*models.EmailThread, error)
+	// FindOpenByToken resolves a reply that carries the thread token (via the
+	// Reply-To +subaddress) to its OPEN conversation — the precise threading key.
+	FindOpenByToken(ctx context.Context, tenantID, token string) (*models.EmailThread, error)
+	// FindOpenBySenderSubject is the no-token fallback: resolve by original sender
+	// + normalized subject among OPEN conversations (§6.2 threading).
+	FindOpenBySenderSubject(ctx context.Context, tenantID, sender, subjectKey string) (*models.EmailThread, error)
 	Get(ctx context.Context, tenantID, convID string) (*models.EmailThread, error)
 	Update(ctx context.Context, t *models.EmailThread) error
 }

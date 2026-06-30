@@ -9,6 +9,7 @@ import type {
 } from "@/api/admin";
 import type { ApiMessagesPage, ApiQueueItem } from "@/api/admin";
 import type { ApiAssignment } from "@/api/admin";
+import type { MessageAttachment } from "@/components/ds";
 import type { Channel, Conversation, EmailChannel, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
 
 export function clockTime(iso: string): string {
@@ -58,6 +59,17 @@ export function mapMember(m: ApiMember): Member {
 
 /** Map a realtime message envelope payload (same shape as ApiMessage) using the
  *  already-loaded UI conversation to resolve the author. */
+// mapAttachments converts the API attachment shape to the UI render shape,
+// deriving kind (image → inline render) from the mime type.
+function mapAttachments(m: ApiMessage): MessageAttachment[] {
+  return (m.attachments || []).map((a) => ({
+    disposition: a.disposition,
+    kind: a.mime_type?.startsWith("image/") ? "image" : "file",
+    url: a.url,
+    filename: a.filename,
+  }));
+}
+
 export function mapRealtimeMessage(m: ApiMessage, conv: Conversation): Message {
   const isAgent = m.sender_kind === "agent" || m.sender_kind === "bot" || !!m.internal_actor_id;
   const system = m.sender_kind === "system";
@@ -76,6 +88,7 @@ export function mapRealtimeMessage(m: ApiMessage, conv: Conversation): Message {
     time: clockTime(m.created_at),
     body: m.body,
     channel: m.channel,
+    attachments: mapAttachments(m),
   };
 }
 
@@ -100,6 +113,7 @@ export function mapMessage(m: ApiMessage, conv: ApiConversation): Message {
     time: clockTime(m.created_at),
     body: m.body,
     channel: m.channel,
+    attachments: mapAttachments(m),
   };
 }
 
@@ -147,6 +161,7 @@ export function buildConversation(
 
   return {
     ...conversationShell(conv, a),
+    subject: conv.subject,
     time: relativeTime(lastTs),
     lastActivity: lastTs,
     preview,

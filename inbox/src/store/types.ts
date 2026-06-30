@@ -1,7 +1,15 @@
-import type { Presence } from "@/components/ds";
+import type { MessageAttachment, Presence } from "@/components/ds";
 
 export type UiStatus = "queued" | "assigned" | "closed";
 export type Channel = "app" | "email";
+
+/** A file uploaded and ready to attach to the next outgoing message. */
+export interface PendingAttachment {
+  objectKey: string;
+  disposition: "inline" | "attachment";
+  mimeType: string;
+  filename: string;
+}
 
 export interface Member {
   name: string;
@@ -20,6 +28,7 @@ export interface Message {
   body: string;
   channel?: Channel;
   read?: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface Conversation {
@@ -28,6 +37,9 @@ export interface Conversation {
   presence: Presence | null;
   channel: Channel;
   reference: string;
+  /** Email subject (email channel only) — shown in the header instead of the
+   *  opaque conversation id. Undefined for app conversations. */
+  subject?: string;
   /** Derived UI status: closed if the conversation is closed, else the
    *  assignment status. Drives the status pill / claim / close / composer. */
   status: UiStatus;

@@ -108,9 +108,28 @@ func (r *emailRepo) CreateThread(ctx context.Context, t *models.EmailThread) err
 	return r.db.WithContext(ctx).Create(t).Error
 }
 
-func (r *emailRepo) FindByToken(ctx context.Context, token string) (*models.EmailThread, error) {
+func (r *emailRepo) FindOpenByToken(ctx context.Context, tenantID, token string) (*models.EmailThread, error) {
 	var t models.EmailThread
-	if err := r.db.WithContext(ctx).First(&t, "thread_token = ?", token).Error; err != nil {
+	err := r.db.WithContext(ctx).
+		Joins("JOIN conversations c ON c.id = email_threads.conversation_id").
+		Where("email_threads.tenant_id = ? AND email_threads.thread_token = ? AND c.status = ?",
+			tenantID, token, models.ConversationOpen).
+		First(&t).Error
+	if err != nil {
+		return nil, translateErr(err)
+	}
+	return &t, nil
+}
+
+func (r *emailRepo) FindOpenBySenderSubject(ctx context.Context, tenantID, sender, subjectKey string) (*models.EmailThread, error) {
+	var t models.EmailThread
+	err := r.db.WithContext(ctx).
+		Joins("JOIN conversations c ON c.id = email_threads.conversation_id").
+		Where("email_threads.tenant_id = ? AND email_threads.sender = ? AND email_threads.subject_key = ? AND c.status = ?",
+			tenantID, sender, subjectKey, models.ConversationOpen).
+		Order("c.created_at DESC").
+		First(&t).Error
+	if err != nil {
 		return nil, translateErr(err)
 	}
 	return &t, nil

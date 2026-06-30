@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { SildClient } from "../core/client";
-import type { SildConfig, WidgetState } from "../core/types";
+import type { PendingAttachment, SildConfig, WidgetState } from "../core/types";
 
 function useClientState(client: SildClient): WidgetState {
   const [, setTick] = useState(0);
@@ -34,11 +34,24 @@ const ArrowIcon = () => (
     <path d="M5 12h14M12 5l7 7-7 7" />
   </svg>
 );
+const ClipIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+
+// inlineImages = images shown in the thread; otherAttachments = files listed below.
+const isInlineImage = (a: { disposition: string; mimeType: string; url?: string }) =>
+  a.disposition === "inline" && a.mimeType.startsWith("image/") && !!a.url;
 
 export function App({ client, config }: { client: SildClient; config: SildConfig }) {
   const [open, setOpen] = useState(false);
   const started = useRef(false);
   const state = useClientState(client);
+  // Draft = the user clicked "New conversation" but hasn't sent yet. The
+  // conversation is created server-side only on the first send, so a click never
+  // leaves an empty conversation in the inbox.
+  const [draft, setDraft] = useState(false);
 
   const toggle = () => {
     const next = !open;
@@ -51,7 +64,8 @@ export function App({ client, config }: { client: SildClient; config: SildConfig
 
   // guest tokens are scoped to one thread → no list/back affordance (§9)
   const guestThreadOnly = !!config.conversationId;
-  const inThread = !!state.activeId;
+  const inThread = !!state.activeId || draft;
+  const onBack = () => (draft ? setDraft(false) : client.backToList());
 
   return (
     <>
@@ -64,9 +78,16 @@ export function App({ client, config }: { client: SildClient; config: SildConfig
             <CloseIcon />
           </button>
           {inThread ? (
-            <Thread client={client} state={state} guestThreadOnly={guestThreadOnly} />
+            <Thread
+              client={client}
+              state={state}
+              guestThreadOnly={guestThreadOnly}
+              draft={draft && !state.activeId}
+              onBack={onBack}
+              onCreated={() => setDraft(false)}
+            />
           ) : (
-            <Home client={client} state={state} />
+            <Home client={client} state={state} onNew={() => setDraft(true)} />
           )}
         </div>
       )}
@@ -77,7 +98,7 @@ export function App({ client, config }: { client: SildClient; config: SildConfig
   );
 }
 
-function Home({ client, state }: { client: SildClient; state: WidgetState }) {
+function Home({ client, state, onNew }: { client: SildClient; state: WidgetState; onNew: () => void }) {
   return (
     <>
       <div class="brandhead">
@@ -89,7 +110,7 @@ function Home({ client, state }: { client: SildClient; state: WidgetState }) {
         <div class="card">
           <h2>Send us a message</h2>
           <p>We'll get back to you here. No queue numbers.</p>
-          <button class="btn" onClick={() => void client.openSupportRequest()}>
+          <button class="btn" onClick={onNew}>
             New conversation <ArrowIcon />
           </button>
         </div>
@@ -114,63 +135,139 @@ function Thread({
   client,
   state,
   guestThreadOnly,
+  draft,
+  onBack,
+  onCreated,
 }: {
   client: SildClient;
   state: WidgetState;
   guestThreadOnly: boolean;
+  draft: boolean;
+  onBack: () => void;
+  onCreated: () => void;
 }) {
   const [text, setText] = useState("");
+  const [atts, setAtts] = useState<PendingAttachment[]>([]);
+  const [uploading, setUploading] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
   }, [state.messages.length, state.loadingThread]);
 
-  const closed = state.conversations.find((c) => c.id === state.activeId)?.closed;
+  const closed = !draft && state.conversations.find((c) => c.id === state.activeId)?.closed;
+  const canSend = (!!text.trim() || atts.length > 0) && !closed && uploading === 0;
+
+  const onFiles = (e: Event) => {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = Array.from(input.files || []);
+    input.value = ""; // allow re-selecting the same file
+    for (const f of files) {
+      setUploading((n) => n + 1);
+      client
+        .upload(f)
+        .then((a) => setAtts((p) => [...p, a]))
+        .catch(() => {})
+        .finally(() => setUploading((n) => n - 1));
+    }
+  };
 
   const submit = () => {
+    if (!canSend) return;
     const t = text.trim();
-    if (!t) return;
+    const sending = atts;
     setText("");
+    setAtts([]);
     if (taRef.current) taRef.current.style.height = "auto";
-    void client.send(t);
+    if (draft) {
+      // Create the conversation only now (on first send), then post the message.
+      void client.openSupportRequest().then(() => {
+        onCreated();
+        return client.send(t, sending);
+      });
+    } else {
+      void client.send(t, sending);
+    }
   };
 
   return (
     <>
       <div class="threadhead">
         {!guestThreadOnly && (
-          <button class="iconbtn" aria-label="Back" onClick={() => client.backToList()}>
+          <button class="iconbtn" aria-label="Back" onClick={onBack}>
             <BackIcon />
           </button>
         )}
         <span class="av">S</span>
         <div>
           <div class="name">Sild support</div>
-          <div class="sub">{state.connection === "connected" ? "Replies in a few minutes" : "Connecting…"}</div>
+          <div class="sub">
+            {draft
+              ? "Type your message to start"
+              : state.connection === "connected"
+                ? "Replies in a few minutes"
+                : "Connecting…"}
+          </div>
         </div>
       </div>
       <div class="body" ref={scroller}>
         {state.loadingThread && <div class="note">Loading…</div>}
-        {state.messages.map((m) => (
-          <div class={`msg ${m.system ? "system" : m.direction}`} key={m.id}>
-            {!m.system && (m.author || m.time) && (
-              <div class="meta">
-                {m.author && <span class="author">{m.author}</span>}
-                {m.time && <span class="mtime">{m.time}</span>}
-              </div>
-            )}
-            <div class="bubble">{m.body}</div>
-          </div>
-        ))}
+        {state.messages.map((m) => {
+          const images = (m.attachments || []).filter(isInlineImage);
+          const files = (m.attachments || []).filter((a) => !isInlineImage(a));
+          return (
+            <div class={`msg ${m.system ? "system" : m.direction}`} key={m.id}>
+              {!m.system && (m.author || m.time) && (
+                <div class="meta">
+                  {m.author && <span class="author">{m.author}</span>}
+                  {m.time && <span class="mtime">{m.time}</span>}
+                </div>
+              )}
+              {images.map((a, i) => (
+                <a class="imglink" href={a.url} target="_blank" rel="noopener noreferrer" key={`img${i}`}>
+                  <img class="att-img" src={a.url} alt={a.filename} />
+                </a>
+              ))}
+              {m.body && <div class="bubble">{m.body}</div>}
+              {files.length > 0 && (
+                <div class="atts">
+                  {files.map((a, i) => (
+                    <a class="att-chip" href={a.url} target="_blank" rel="noopener noreferrer" download={a.filename} key={`f${i}`}>
+                      <ClipIcon />
+                      <span class="att-name">{a.filename}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
         {!state.loadingThread && state.messages.length === 0 && (
           <div class="note">Send a message to start the conversation.</div>
         )}
       </div>
       <div class="composer">
         {closed && <div class="banner">This conversation is closed.</div>}
+        {(atts.length > 0 || uploading > 0) && (
+          <div class="pending">
+            {atts.map((a, i) => (
+              <span class="pchip" key={i}>
+                <span class="att-name">{a.filename}</span>
+                <button aria-label="Remove" onClick={() => setAtts((p) => p.filter((_, j) => j !== i))}>
+                  ✕
+                </button>
+              </span>
+            ))}
+            {uploading > 0 && <span class="pchip muted">Uploading…</span>}
+          </div>
+        )}
         <div class="inputwrap">
+          <button class="attachbtn" aria-label="Attach a file" disabled={closed} onClick={() => fileRef.current?.click()}>
+            <ClipIcon />
+          </button>
+          <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={onFiles} />
           <textarea
             ref={taRef}
             rows={1}
@@ -190,7 +287,7 @@ function Thread({
               }
             }}
           />
-          <button class="send" aria-label="Send" disabled={!text.trim() || closed} onClick={submit}>
+          <button class="send" aria-label="Send" disabled={!canSend} onClick={submit}>
             <SendIcon />
           </button>
         </div>
