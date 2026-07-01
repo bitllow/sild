@@ -25,5 +25,6 @@ func All() []any {
 		&Outbox{},
 		&WebhookDelivery{},
 		&ConversationArchive{},
+		&Brand{},
 	}
 }

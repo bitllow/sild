@@ -1,4 +1,5 @@
 import type { MessageAttachment, Presence } from "@/components/ds";
+import type { ApiBrandConfig } from "@/api/admin";
 
 export type UiStatus = "queued" | "assigned" | "closed";
 export type Channel = "app" | "email";
@@ -94,7 +95,15 @@ export interface EmailChannel {
   fromAddress: string;
 }
 
+/** One brand — a named messenger look edited in Settings → Appearance (§8). */
+export type BrandConfig = ApiBrandConfig;
+export interface Brand {
+  id: string;
+  name: string;
+  config: BrandConfig;
+}
+
 export type InboxView = "inbox" | "settings";
-export type SettingsTab = "keys" | "webhooks" | "team" | "channels";
+export type SettingsTab = "channels" | "appearance" | "keys" | "webhooks" | "team";
 export type InboxFilter = "you" | "unassigned" | "closed" | "all";
 export type SessionState = "loading" | "authed" | "anon";

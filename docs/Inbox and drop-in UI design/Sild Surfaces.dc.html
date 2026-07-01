@@ -18,6 +18,8 @@
   <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/base.css">
   <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/styles.css">
   <script src="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/_ds_bundle.js"></script>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Figtree:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
   <style>
     *{box-sizing:border-box}
     html,body{margin:0;padding:0;height:100%}
@@ -257,12 +259,300 @@
             <h1 style="font-size:22px">Settings</h1>
             <div style="display:flex;gap:24px;margin-top:18px;border-bottom:1px solid var(--border-default)">
               <button onClick="{{ onTabChannels }}" style="{{ tabChannels }}">Channels</button>
+              <button onClick="{{ onTabAppearance }}" style="{{ tabAppearance }}">Appearance</button>
               <button onClick="{{ onTabKeys }}" style="{{ tabKeys }}">API keys</button>
               <button onClick="{{ onTabHooks }}" style="{{ tabHooks }}">Webhooks</button>
               <button onClick="{{ onTabTeam }}" style="{{ tabTeam }}">Team</button>
             </div>
           </div>
           <div style="flex:1;overflow-y:auto;padding:24px 28px">
+
+            <!-- Appearance (web widget branding) — full-width split -->
+            <sc-if value="{{ isAppearance }}">
+            <div style="max-width:1140px;position:relative">
+
+              <!-- Profile bar -->
+              <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:20px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:7px">Brand profile</div>
+                  <div style="display:flex;align-items:center;gap:10px;position:relative">
+                    <sc-if value="{{ apNotEditingName }}" hint-placeholder-val="{{ true }}">
+                    <button onClick="{{ onApToggleMenu }}" style="{{ apProfileBtnStyle }}">
+                      <span style="width:22px;height:22px;border-radius:6px;flex:none;background:{{ apBrandHex }}"></span>
+                      <span style="flex:1;text-align:left;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ apProfileName }}</span>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="flex:none;color:var(--text-tertiary)"><path d="m6 9 6 6 6-6"></path></svg>
+                    </button>
+                    <button onClick="{{ onApStartRename }}" aria-label="Rename profile" style="width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-default);background:var(--white);border-radius:8px;cursor:pointer;color:var(--text-secondary);box-shadow:var(--shadow-xs)">
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+                    </button>
+                    </sc-if>
+                    <sc-if value="{{ apEditingName }}">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <input value="{{ apProfileName }}" onChange="{{ onApSetName }}" onKeyDown="{{ onApNameKey }}" onBlur="{{ onApStopRename }}" autoFocus="{{ apTrue }}" placeholder="Profile name" style="width:288px;height:40px;padding:0 12px;border:1px solid var(--border-focus);border-radius:8px;background:var(--white);box-shadow:var(--ring);font-family:var(--font-sans);font-size:14px;font-weight:600;color:var(--text-primary);outline:none" />
+                      <button onMouseDown="{{ onApStopRename }}" aria-label="Done" style="width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;border:0;background:var(--brand);border-radius:8px;cursor:pointer;color:#fff">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                      </button>
+                    </div>
+                    </sc-if>
+                    <sc-if value="{{ apMenuOpen }}">
+                    <div style="position:absolute;top:46px;left:0;width:260px;background:var(--white);border:1px solid var(--border-default);border-radius:10px;box-shadow:var(--shadow-lg);padding:6px;z-index:30;animation:sild-rise .14s ease-out">
+                      <sc-for list="{{ apProfiles }}" as="p" hint-placeholder-count="2">
+                        <button onClick="{{ p.onPick }}" style="{{ p.rowStyle }}">
+                          <span style="width:18px;height:18px;border-radius:5px;flex:none;background:{{ p.color }}"></span>
+                          <span style="flex:1;text-align:left">{{ p.name }}</span>
+                          <sc-if value="{{ p.active }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
+                        </button>
+                      </sc-for>
+                      <div style="height:1px;background:var(--border-subtle);margin:6px 4px"></div>
+                      <button onClick="{{ onApNewProfile }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:0;background:transparent;border-radius:7px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--brand)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5v14"></path></svg>New profile
+                      </button>
+                    </div>
+                    </sc-if>
+                    <span style="font-size:13px;color:var(--text-tertiary)">applies to your web and in-app (SDK) messengers</span>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:14px;flex:none">
+                  <sc-if value="{{ apDirty }}"><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-tertiary)"><span style="width:7px;height:7px;border-radius:50%;background:var(--coral-500, #FF7A45)"></span>Unsaved changes</span></sc-if>
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.Button" variant="secondary" onClick="{{ onApReset }}" hint-size="auto,40px">Reset</x-import>
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.Button" onClick="{{ onApSave }}" disabled="{{ apNotDirty }}" hint-size="auto,40px">Save changes</x-import>
+                </div>
+              </div>
+
+              <!-- Backdrop to dismiss menu -->
+              <sc-if value="{{ apMenuOpen }}"><div onClick="{{ onApCloseMenu }}" style="position:fixed;inset:0;z-index:20"></div></sc-if>
+
+              <!-- Split: controls + preview -->
+              <div style="display:flex;gap:28px;align-items:flex-start">
+
+                <!-- ===== CONTROLS ===== -->
+                <div style="flex:1;min-width:0;max-width:560px;display:flex;flex-direction:column;gap:18px">
+
+                  <!-- Brand -->
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
+                    <div style="padding:14px 18px;border-bottom:1px solid var(--border-subtle)"><div style="font-size:15px;font-weight:700">Brand</div><div style="font-size:13px;color:var(--text-tertiary);margin-top:2px">Your logo and color. Everything else is generated from these.</div></div>
+                    <div style="padding:18px;display:flex;flex-direction:column;gap:20px">
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Logo</div>
+                        <div style="display:flex;align-items:center;gap:14px">
+                          <label style="position:relative;width:124px;height:66px;flex:none;border:1.5px dashed var(--border-default);border-radius:10px;background:var(--surface-sunken);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">
+                            <sc-if value="{{ apHasLogo }}"><img src="{{ apLogo }}" alt="Logo" style="max-width:88%;max-height:80%;object-fit:contain" /></sc-if>
+                            <sc-if value="{{ apNoLogo }}" hint-placeholder-val="{{ true }}"><div style="display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--text-tertiary)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg><span style="font-size:11px;font-weight:600">Upload</span></div></sc-if>
+                            <input type="file" accept="image/png,image/svg+xml,image/jpeg" onChange="{{ onApLogoChange }}" style="position:absolute;width:1px;height:1px;opacity:0;left:0;top:0" />
+                          </label>
+                          <div style="flex:1;min-width:0">
+                            <div style="font-size:13px;color:var(--text-secondary);line-height:1.5">PNG or SVG with a transparent background works best. Sits in the chat header.</div>
+                            <sc-if value="{{ apHasLogo }}"><button onClick="{{ onApLogoRemove }}" style="margin-top:6px;border:0;background:transparent;padding:0;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--danger, #DC2626)">Remove logo</button></sc-if>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Brand color</div>
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                          <sc-for list="{{ apSwatches }}" as="sw" hint-placeholder-count="6">
+                            <button onClick="{{ sw.onPick }}" aria-label="Pick color" style="{{ sw.style }}"><sc-if value="{{ sw.active }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></sc-if></button>
+                          </sc-for>
+                          <label style="position:relative;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border:1px solid var(--border-default);border-radius:8px;cursor:pointer;background:var(--white)">
+                            <span style="width:16px;height:16px;border-radius:4px;background:{{ apBrandHex }};border:1px solid rgba(0,0,0,.1)"></span>
+                            <span style="font-family:var(--font-mono);font-size:13px;color:var(--text-secondary)">{{ apBrandHex }}</span>
+                            <input type="color" value="{{ apBrandHex }}" onInput="{{ onApColorInput }}" style="position:absolute;width:1px;height:1px;opacity:0;left:0;top:0" />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Look & feel -->
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
+                    <div style="padding:14px 18px;border-bottom:1px solid var(--border-subtle)"><div style="font-size:15px;font-weight:700">Look &amp; feel</div></div>
+                    <div style="padding:18px;display:flex;flex-direction:column;gap:20px">
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Theme</div>
+                        <div style="display:flex;gap:4px;background:var(--surface-sunken);padding:4px;border-radius:10px">
+                          <sc-for list="{{ apThemeSegs }}" as="seg" hint-placeholder-count="3"><button onClick="{{ seg.onClick }}" style="{{ seg.style }}">{{ seg.label }}</button></sc-for>
+                        </div>
+                        <sc-if value="{{ apThemeAuto }}"><div style="font-size:12px;color:var(--text-tertiary);margin-top:7px">Follows each visitor's system setting. Preview shows the light variant.</div></sc-if>
+                      </div>
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Font</div>
+                        <x-import component-from-global-scope="SildDesignSystem_a95234.Select" options="{{ apFontOptions }}" value="{{ apFont }}" onChange="{{ onApFont }}" hint-size="100%,40px"></x-import>
+                      </div>
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Corners</div>
+                        <div style="display:flex;gap:4px;background:var(--surface-sunken);padding:4px;border-radius:10px">
+                          <sc-for list="{{ apRadiusSegs }}" as="seg" hint-placeholder-count="4"><button onClick="{{ seg.onClick }}" style="{{ seg.style }}">{{ seg.label }}</button></sc-for>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Launcher -->
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
+                    <div style="padding:14px 18px;border-bottom:1px solid var(--border-subtle)"><div style="font-size:15px;font-weight:700">Launcher</div><div style="font-size:13px;color:var(--text-tertiary);margin-top:2px">The floating button that opens the chat.</div></div>
+                    <div style="padding:18px;display:flex;flex-direction:column;gap:20px">
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Icon</div>
+                        <div style="display:flex;gap:10px">
+                          <button onClick="{{ onApIconChat }}" aria-label="Speech bubble" style="{{ apIconChatStyle }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"></path></svg></button>
+                          <button onClick="{{ onApIconMsg }}" aria-label="Message" style="{{ apIconMsgStyle }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button>
+                          <button onClick="{{ onApIconHelp }}" aria-label="Question" style="{{ apIconHelpStyle }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></button>
+                          <button onClick="{{ onApIconSpark }}" aria-label="Sparkle" style="{{ apIconSparkStyle }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"></path></svg></button>
+                          <div style="width:1px;align-self:stretch;background:var(--border-subtle);margin:0 2px"></div>
+                          <label aria-label="Upload custom icon" style="{{ apIconCustomStyle }}">
+                            <sc-if value="{{ apHasIconImg }}"><img src="{{ apIconImg }}" alt="" style="width:24px;height:24px;object-fit:contain" /></sc-if>
+                            <sc-if value="{{ apNoIconImg }}" hint-placeholder-val="{{ true }}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg></sc-if>
+                            <input type="file" accept="image/png,image/svg+xml" onChange="{{ onApIconUpload }}" style="position:absolute;width:1px;height:1px;opacity:0;left:0;top:0" />
+                          </label>
+                        </div>
+                        <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px">Upload your own (SVG or PNG). A white, transparent icon reads best on the colored button.</div>
+                      </div>
+                      <div style="display:flex;gap:18px">
+                        <div style="flex:1">
+                          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Position</div>
+                          <div style="display:flex;gap:4px;background:var(--surface-sunken);padding:4px;border-radius:10px">
+                            <sc-for list="{{ apPosSegs }}" as="seg" hint-placeholder-count="2"><button onClick="{{ seg.onClick }}" style="{{ seg.style }}">{{ seg.label }}</button></sc-for>
+                          </div>
+                        </div>
+                        <div style="flex:1">
+                          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Size</div>
+                          <div style="display:flex;gap:4px;background:var(--surface-sunken);padding:4px;border-radius:10px">
+                            <sc-for list="{{ apSizeSegs }}" as="seg" hint-placeholder-count="3"><button onClick="{{ seg.onClick }}" style="{{ seg.style }}">{{ seg.label }}</button></sc-for>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Welcome screen -->
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
+                    <div style="padding:14px 18px;border-bottom:1px solid var(--border-subtle)"><div style="font-size:15px;font-weight:700">Welcome screen</div></div>
+                    <div style="padding:18px;display:flex;flex-direction:column;gap:18px">
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Heading</div>
+                        <x-import component-from-global-scope="SildDesignSystem_a95234.Input" value="{{ apHeading }}" onChange="{{ onApHeading }}" placeholder="Hi there." hint-size="100%,40px"></x-import>
+                      </div>
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Subtext</div>
+                        <x-import component-from-global-scope="SildDesignSystem_a95234.Textarea" value="{{ apSub }}" onChange="{{ onApSub }}" rows="{{ ap2 }}" placeholder="How can we help?" hint-size="100%,64px"></x-import>
+                      </div>
+                      <div>
+                        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Suggested topics</div>
+                        <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">One per line. Shown as tappable buttons. Leave blank to hide.</div>
+                        <x-import component-from-global-scope="SildDesignSystem_a95234.Textarea" value="{{ apTopicsText }}" onChange="{{ onApTopics }}" rows="{{ ap3 }}" placeholder="Track my order&#10;Billing question" hint-size="100%,84px"></x-import>
+                      </div>
+                      <div style="display:flex;align-items:flex-start;gap:12px;padding-top:4px">
+                        <div style="flex:1"><div style="font-size:14px;font-weight:600">Show team in header</div><div style="font-size:13px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">Display agent avatars and an "online" status so it feels human.</div></div>
+                        <x-import component-from-global-scope="SildDesignSystem_a95234.Switch" checked="{{ apShowTeam }}" onChange="{{ onApShowTeam }}" hint-size="46px,26px"></x-import>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Footer -->
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
+                    <div style="padding:16px 18px;display:flex;align-items:flex-start;gap:12px">
+                      <div style="flex:1"><div style="font-size:14px;font-weight:600">Show "Powered by Sild"</div><div style="font-size:13px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">A small credit at the bottom of the chat. Can be turned off on paid plans.</div></div>
+                      <x-import component-from-global-scope="SildDesignSystem_a95234.Switch" checked="{{ apPoweredBy }}" onChange="{{ onApPoweredBy }}" hint-size="46px,26px"></x-import>
+                    </div>
+                  </div>
+
+                </div>
+
+                <!-- ===== LIVE PREVIEW ===== -->
+                <div style="width:430px;flex:none;position:sticky;top:0">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                    <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary)">Live preview</div>
+                    <div style="display:flex;gap:3px;background:var(--surface-sunken);padding:3px;border-radius:9px">
+                      <sc-for list="{{ apPreviewSegs }}" as="seg" hint-placeholder-count="2"><button onClick="{{ seg.onClick }}" style="{{ seg.style }}">{{ seg.label }}</button></sc-for>
+                    </div>
+                  </div>
+
+                  <!-- Canvas: faux website with the widget on top -->
+                  <div style="position:relative;height:560px;border-radius:14px;border:1px solid var(--border-default);overflow:hidden;background:linear-gradient(180deg,#EEF1F6,#E4E8EF)">
+                    <!-- faux site chrome -->
+                    <div style="height:34px;background:#fff;border-bottom:1px solid rgba(20,24,31,.07);display:flex;align-items:center;gap:6px;padding:0 12px">
+                      <span style="width:9px;height:9px;border-radius:50%;background:#E2655A"></span><span style="width:9px;height:9px;border-radius:50%;background:#E8B14C"></span><span style="width:9px;height:9px;border-radius:50%;background:#5BB463"></span>
+                      <div style="margin-left:8px;height:14px;flex:1;max-width:200px;border-radius:7px;background:var(--surface-sunken)"></div>
+                    </div>
+                    <div style="padding:22px 22px 0;opacity:.55">
+                      <div style="width:46%;height:13px;border-radius:6px;background:#fff;margin-bottom:12px"></div>
+                      <div style="width:72%;height:9px;border-radius:5px;background:#fff;margin-bottom:7px"></div>
+                      <div style="width:64%;height:9px;border-radius:5px;background:#fff;margin-bottom:7px"></div>
+                      <div style="width:68%;height:9px;border-radius:5px;background:#fff"></div>
+                    </div>
+
+                    <!-- Widget panel -->
+                    <div style="{{ apPanelStyle }}">
+                      <!-- HOME -->
+                      <sc-if value="{{ apPreviewHome }}" hint-placeholder-val="{{ true }}">
+                        <div style="{{ apHeaderStyle }}">
+                          <div style="display:flex;align-items:center;justify-content:space-between">
+                            <sc-if value="{{ apHasLogo }}"><img src="{{ apLogo }}" alt="" style="height:24px;max-width:120px;object-fit:contain;filter:brightness(0) invert(1)" /></sc-if>
+                            <sc-if value="{{ apNoLogo }}" hint-placeholder-val="{{ true }}"><div style="font-size:15px;font-weight:800;letter-spacing:-.01em">Acme Rides</div></sc-if>
+                          </div>
+                          <sc-if value="{{ apShowTeam }}">
+                            <div style="display:flex;align-items:center;gap:8px;margin-top:14px">
+                              <div style="display:flex">
+                                <span style="width:26px;height:26px;border-radius:50%;background:#7C9CF5;border:2px solid;border-color:{{ apBrandHex }};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">E</span>
+                                <span style="width:26px;height:26px;border-radius:50%;background:#E58A6B;border:2px solid;border-color:{{ apBrandHex }};margin-left:-8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">M</span>
+                              </div>
+                              <span style="font-size:12px;color:rgba(255,255,255,.85)">2 agents online</span>
+                            </div>
+                          </sc-if>
+                          <div style="font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:14px;line-height:1.2">{{ apHeading }}</div>
+                          <div style="font-size:13px;color:rgba(255,255,255,.85);margin-top:4px;line-height:1.45">{{ apSub }}</div>
+                        </div>
+                        <div style="{{ apBodyStyle }}">
+                          <div style="{{ apCardStyle }}">
+                            <div style="font-size:13px;font-weight:700;color:{{ apTextColor }}">Send us a message</div>
+                            <div style="font-size:12px;color:{{ apSubColor }};margin-top:3px;margin-bottom:12px">We typically reply in a few minutes.</div>
+                            <button style="{{ apPrimaryBtnStyle }}">New conversation<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></button>
+                          </div>
+                          <sc-if value="{{ apHasTopics }}">
+                            <div style="display:flex;flex-direction:column;gap:7px;margin-top:12px">
+                              <sc-for list="{{ apTopics }}" as="t" hint-placeholder-count="2"><button style="{{ apChipStyle }}">{{ t }}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="color:{{ apSubColor }}"><path d="m9 18 6-6-6-6"></path></svg></button></sc-for>
+                            </div>
+                          </sc-if>
+                        </div>
+                      </sc-if>
+
+                      <!-- CHAT -->
+                      <sc-if value="{{ apPreviewChat }}">
+                        <div style="{{ apChatHeaderStyle }}">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
+                          <sc-if value="{{ apShowTeam }}"><span style="width:30px;height:30px;border-radius:50%;background:#7C9CF5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex:none">E</span></sc-if>
+                          <div style="min-width:0"><div style="font-size:14px;font-weight:700;letter-spacing:-.01em">Eva</div><div style="font-size:11px;color:rgba(255,255,255,.8)">Replies in a few minutes</div></div>
+                        </div>
+                        <div style="{{ apChatBodyStyle }}">
+                          <div style="{{ apInBubbleStyle }}">Hi! How can we help with your trip today?</div>
+                          <div style="{{ apOutBubbleStyle }}">How do I change my pickup address?</div>
+                          <div style="{{ apInBubbleStyle }}">Open your trip, tap the pickup pin, and drag it to a new spot.</div>
+                        </div>
+                        <div style="{{ apComposerStyle }}">
+                          <div style="flex:1;font-size:12px;color:{{ apSubColor }}">Write a message…</div>
+                          <span style="width:30px;height:30px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;background:{{ apBrandHex }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg></span>
+                        </div>
+                      </sc-if>
+
+                      <sc-if value="{{ apPoweredBy }}"><div style="{{ apPoweredStyle }}">Powered by Sild</div></sc-if>
+                    </div>
+
+                    <!-- Launcher -->
+                    <button style="{{ apLauncherStyle }}">
+                      <sc-if value="{{ apIcoChat }}" hint-placeholder-val="{{ true }}"><svg width="{{ apLauncherIco }}" height="{{ apLauncherIco }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"></path></svg></sc-if>
+                      <sc-if value="{{ apIcoMsg }}"><svg width="{{ apLauncherIco }}" height="{{ apLauncherIco }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></sc-if>
+                      <sc-if value="{{ apIcoHelp }}"><svg width="{{ apLauncherIco }}" height="{{ apLauncherIco }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></sc-if>
+                      <sc-if value="{{ apIcoSpark }}"><svg width="{{ apLauncherIco }}" height="{{ apLauncherIco }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"></path></svg></sc-if>
+                      <sc-if value="{{ apIcoCustom }}"><img src="{{ apIconImg }}" alt="" style="width:{{ apLauncherIco }}px;height:{{ apLauncherIco }}px;object-fit:contain" /></sc-if>
+                    </button>
+                  </div>
+                  <div style="font-size:12px;color:var(--text-tertiary);margin-top:10px;text-align:center">This is exactly what visitors see on your site.</div>
+                </div>
+
+              </div>
+            </div>
+            </sc-if>
+
+            <sc-if value="{{ notAppearance }}" hint-placeholder-val="{{ true }}">
             <div style="max-width:760px">
 
               <!-- Channels -->
@@ -412,6 +702,7 @@
               </sc-if>
 
             </div>
+            </sc-if>
           </div>
         </div>
         </sc-if>
@@ -681,6 +972,7 @@
 class Component extends DCLogic {
   constructor(props){
     super(props);
+    this._apSaved = this.seedProfiles();
     this.state = {
       surface: 'inbox',
       // inbox
@@ -705,6 +997,9 @@ class Component extends DCLogic {
       keys: this.seedKeys(),
       webhooks: this.seedWebhooks(),
       team: this.seedTeam(),
+      // appearance / widget branding
+      apProfiles: this.cloneProfiles(this.seedProfiles()),
+      apProfileId: 'p1', apMenuOpen: false, apDirty: false, apPreview: 'home',
       // widget
       wOpen: true, wView: 'home', wMsgs: this.seedWidget(), wText: '',
       // app
@@ -774,6 +1069,14 @@ class Component extends DCLogic {
       { id:'t3', name:'Anu Pärn', email:'anu@sild.io', role:'owner' },
     ];
   }
+  seedProfiles(){
+    const base = { logo:null, brand:'#2563FD', theme:'light', font:'sild', radius:'default', launcherIcon:'chat', iconImg:null, launcherPos:'right', launcherSize:'md', heading:'Hi there.', sub:'How can we help? We typically reply in a few minutes.', topics:'Track my order\nChange pickup address\nBilling question', showTeam:true, poweredBy:true };
+    return [
+      { id:'p1', name:'Acme Rides', cfg:{ ...base } },
+      { id:'p2', name:'Acme Business', cfg:{ ...base, brand:'#14181F', theme:'dark', font:'inter', radius:'sharp', launcherIcon:'message', launcherSize:'lg', heading:'Need a hand?', sub:'Our team replies within the hour, around the clock.', topics:'Account & billing\nAPI & integrations', poweredBy:false } },
+    ];
+  }
+  cloneProfiles(ps){ return ps.map(p => ({ id:p.id, name:p.name, cfg:{ ...p.cfg } })); }
   seedWidget(){
     return [
       {id:1,dir:'out',author:'You',time:'Just now',body:'Hi — how do I change my pickup address after booking?'},
@@ -845,6 +1148,29 @@ class Component extends DCLogic {
   toggleWebhook = (id, v) => this.setState(s => ({ webhooks: s.webhooks.map(w => w.id===id ? { ...w, active:v } : w) }));
   deleteWebhook = (id) => this.setState(s => ({ webhooks: s.webhooks.filter(w => w.id!==id) }));
   setRole = (id, role) => this.setState(s => ({ team: s.team.map(t => t.id===id ? { ...t, role } : t) }));
+  // appearance
+  apActive = () => this.state.apProfiles.find(p => p.id===this.state.apProfileId) || this.state.apProfiles[0];
+  apSetCfg = (patch) => this.setState(s => ({ apProfiles: s.apProfiles.map(p => p.id===s.apProfileId ? { ...p, cfg:{ ...p.cfg, ...patch } } : p), apDirty:true }));
+  apToggleMenu = () => this.setState(s => ({ apMenuOpen: !s.apMenuOpen }));
+  apCloseMenu = () => this.setState({ apMenuOpen:false });
+  apPickProfile = (id) => this.setState({ apProfileId:id, apMenuOpen:false });
+  apStartRename = () => this.setState({ apEditingName:true, apMenuOpen:false });
+  apStopRename = () => this.setState({ apEditingName:false });
+  apSetName = (e) => { const v = e.target.value; this.setState(s => ({ apProfiles: s.apProfiles.map(p => p.id===s.apProfileId ? { ...p, name:v } : p), apDirty:true })); };
+  apNameKey = (e) => { if (e.key==='Enter' || e.key==='Escape') { e.preventDefault(); this.setState({ apEditingName:false }); } };
+  apNewProfile = () => { const id='p'+Date.now(); const cfg={ ...this.apActive().cfg, logo:null }; this.setState(s => ({ apProfiles:[...s.apProfiles, { id, name:'New brand', cfg }], apProfileId:id, apMenuOpen:false, apEditingName:true, apDirty:true })); };
+  apSave = () => { this._apSaved = this.cloneProfiles(this.state.apProfiles); this.setState({ apDirty:false }); };
+  apReset = () => this.setState(s => { const ps=this.cloneProfiles(this._apSaved); const has=ps.some(p => p.id===s.apProfileId); return { apProfiles:ps, apDirty:false, apMenuOpen:false, apProfileId: has ? s.apProfileId : ps[0].id }; });
+  apSetPreview = (v) => this.setState({ apPreview:v });
+  apLogoChange = (e) => { const f = e && e.target && e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => this.apSetCfg({ logo:r.result }); r.readAsDataURL(f); };
+  apLogoRemove = () => this.apSetCfg({ logo:null });
+  apIconUpload = (e) => { const f = e && e.target && e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => this.apSetCfg({ iconImg:r.result, launcherIcon:'custom' }); r.readAsDataURL(f); };
+  apColorInput = (e) => this.apSetCfg({ brand: e.target.value });
+  // ---- appearance style helpers ----
+  apSeg(a){ return { flex:1, border:0, cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight:600, padding:'7px 6px', borderRadius:'7px', whiteSpace:'nowrap', transition:'all .12s', background:a?'#fff':'transparent', color:a?'var(--text-primary)':'var(--text-secondary)', boxShadow:a?'var(--shadow-xs)':'none' }; }
+  apIconBtn(a){ return { width:'46px', height:'46px', display:'flex', alignItems:'center', justifyContent:'center', borderRadius:'10px', cursor:'pointer', border:'1px solid '+(a?'var(--border-focus)':'var(--border-default)'), background:a?'var(--brand-subtle)':'var(--white)', color:a?'var(--brand)':'var(--text-secondary)', boxShadow:a?'var(--ring)':'none', transition:'all .12s' }; }
+  apSwatch(a, color){ return { width:'34px', height:'34px', borderRadius:'9px', border:'1px solid rgba(0,0,0,.12)', background:color, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:a?('0 0 0 2px var(--white), 0 0 0 4px '+color):'none', transition:'box-shadow .12s' }; }
+  apMenuRow(a){ return { display:'flex', alignItems:'center', gap:'9px', width:'100%', padding:'9px 10px', border:0, background:a?'var(--brand-subtle)':'transparent', borderRadius:'7px', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight:600, color:a?'var(--brand)':'var(--text-primary)' }; }
   // widget
   toggleLauncher = () => this.setState(s => ({ wOpen: !s.wOpen }));
   wHome = () => this.setState({ wView:'home' });
@@ -875,6 +1201,94 @@ class Component extends DCLogic {
     this.setState(s => ({ aConvs: s.aConvs.map(c => c.id===id ? { ...c, messages:[...c.messages, { id:Date.now(), dir:'out', author:'You', time:'Now', body:t, read:'Delivered' }] } : c), aText:'' }));
     setTimeout(() => this.setState(s => ({ aConvs: s.aConvs.map(c => c.id===id ? { ...c, messages:[...c.messages, { id:Date.now()+1, dir:'in', author:c.name, time:'Now', body:'Thanks — one moment while I look into this.' }] } : c) })), 1000);
   };
+
+  apVals(){
+    const prof = this.apActive();
+    const c = prof.cfg;
+    const themePal = {
+      light: { page:'#F4F6FA', card:'#FFFFFF', text:'#14181F', sub:'#5B6472', border:'rgba(20,24,31,.09)', inBub:'#EAEEF4' },
+      dark:  { page:'#0E1116', card:'#181C23', text:'#F2F5F9', sub:'#9AA4B2', border:'rgba(255,255,255,.10)', inBub:'#262C35' },
+    };
+    const pal = c.theme==='dark' ? themePal.dark : themePal.light;
+    const rad = ({
+      sharp:   { panel:7,  bubble:8,  btn:7,  card:8,  launcher:'14px' },
+      default: { panel:16, bubble:18, btn:10, card:12, launcher:'18px' },
+      rounded: { panel:22, bubble:20, btn:13, card:16, launcher:'26px' },
+      pillowy: { panel:26, bubble:22, btn:16, card:18, launcher:'50%' },
+    })[c.radius] || { panel:16, bubble:18, btn:10, card:12, launcher:'18px' };
+    const fontMap = { system:"-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", sild:"'Schibsted Grotesk', sans-serif", inter:"'Inter', sans-serif", figtree:"'Figtree', sans-serif", dmsans:"'DM Sans', sans-serif" };
+    const font = fontMap[c.font] || fontMap.sild;
+    const lSize = ({ sm:52, md:60, lg:68 })[c.launcherSize] || 60;
+    const lIco = ({ sm:24, md:27, lg:30 })[c.launcherSize] || 27;
+    const side = c.launcherPos==='left' ? { left:'18px' } : { right:'18px' };
+    const brand = c.brand;
+
+    const topics = (c.topics || '').split('\n').map(t => t.trim()).filter(Boolean).slice(0, 4);
+
+    const seg = (group, current, set) => group.map(o => ({ label:o.label, style:this.apSeg(current===o.v), onClick:()=>this.apSetCfg(set(o.v)) }));
+
+    const palette = ['#2563FD','#14181F','#1F8A5B','#FF7A45','#7C3AED','#0EA5E9'];
+
+    return {
+      ap2: 2, ap3: 3, apTrue: true,
+      apProfileName: prof.name, apBrandHex: brand,
+      apMenuOpen: this.state.apMenuOpen, apDirty: this.state.apDirty, apNotDirty: !this.state.apDirty,
+      onApToggleMenu: this.apToggleMenu, onApCloseMenu: this.apCloseMenu, onApNewProfile: this.apNewProfile,
+      apEditingName: this.state.apEditingName, apNotEditingName: !this.state.apEditingName,
+      onApStartRename: this.apStartRename, onApStopRename: this.apStopRename, onApSetName: this.apSetName, onApNameKey: this.apNameKey,
+      onApSave: this.apSave, onApReset: this.apReset,
+      apProfileBtnStyle: { display:'flex', alignItems:'center', gap:'10px', width:'288px', height:'40px', padding:'0 12px', border:'1px solid '+(this.state.apMenuOpen?'var(--border-focus)':'var(--border-default)'), borderRadius:'8px', background:'var(--white)', boxShadow:this.state.apMenuOpen?'var(--ring)':'var(--shadow-xs)', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'14px', fontWeight:600, color:'var(--text-primary)' },
+      apProfiles: this.state.apProfiles.map(p => ({ name:p.name, color:p.cfg.brand, active:p.id===this.state.apProfileId, onPick:()=>this.apPickProfile(p.id), rowStyle:this.apMenuRow(p.id===this.state.apProfileId) })),
+
+      // logo + color
+      apHasLogo: !!c.logo, apNoLogo: !c.logo, apLogo: c.logo, onApLogoChange: this.apLogoChange, onApLogoRemove: this.apLogoRemove, onApColorInput: this.apColorInput,
+      apSwatches: palette.map(col => ({ color:col, active:brand===col, onPick:()=>this.apSetCfg({ brand:col }), style:this.apSwatch(brand===col, col) })),
+
+      // theme / font / radius
+      apThemeSegs: seg([{label:'Light',v:'light'},{label:'Dark',v:'dark'},{label:'Auto',v:'auto'}], c.theme, v=>({theme:v})),
+      apThemeAuto: c.theme==='auto',
+      apFontOptions: [{value:'system',label:'System default'},{value:'sild',label:'Sild Sans (default)'},{value:'inter',label:'Inter'},{value:'figtree',label:'Figtree'},{value:'dmsans',label:'DM Sans'}],
+      apFont: c.font, onApFont: (e)=>this.apSetCfg({ font: e && e.target ? e.target.value : e }),
+      apRadiusSegs: seg([{label:'Sharp',v:'sharp'},{label:'Default',v:'default'},{label:'Rounded',v:'rounded'},{label:'Pillowy',v:'pillowy'}], c.radius, v=>({radius:v})),
+
+      // launcher
+      apIconChatStyle: this.apIconBtn(c.launcherIcon==='chat'), apIconMsgStyle: this.apIconBtn(c.launcherIcon==='message'), apIconHelpStyle: this.apIconBtn(c.launcherIcon==='help'), apIconSparkStyle: this.apIconBtn(c.launcherIcon==='sparkle'),
+      apIconCustomStyle: { ...this.apIconBtn(c.launcherIcon==='custom'), position:'relative', overflow:'hidden', cursor:'pointer' },
+      apHasIconImg: !!c.iconImg, apNoIconImg: !c.iconImg, apIconImg: c.iconImg, onApIconUpload: this.apIconUpload,
+      onApIconChat: ()=>this.apSetCfg({launcherIcon:'chat'}), onApIconMsg: ()=>this.apSetCfg({launcherIcon:'message'}), onApIconHelp: ()=>this.apSetCfg({launcherIcon:'help'}), onApIconSpark: ()=>this.apSetCfg({launcherIcon:'sparkle'}),
+      apPosSegs: seg([{label:'Left',v:'left'},{label:'Right',v:'right'}], c.launcherPos, v=>({launcherPos:v})),
+      apSizeSegs: seg([{label:'Small',v:'sm'},{label:'Medium',v:'md'},{label:'Large',v:'lg'}], c.launcherSize, v=>({launcherSize:v})),
+
+      // welcome
+      apHeading: c.heading, onApHeading: (e)=>this.apSetCfg({ heading:e.target.value }),
+      apSub: c.sub, onApSub: (e)=>this.apSetCfg({ sub:e.target.value }),
+      apTopicsText: c.topics, onApTopics: (e)=>this.apSetCfg({ topics:e.target.value }),
+      apShowTeam: c.showTeam, onApShowTeam: (v)=>this.apSetCfg({ showTeam:v }),
+      apPoweredBy: c.poweredBy, onApPoweredBy: (v)=>this.apSetCfg({ poweredBy:v }),
+
+      // preview state
+      apPreviewHome: this.state.apPreview==='home', apPreviewChat: this.state.apPreview==='chat',
+      apPreviewSegs: [{label:'Home',v:'home'},{label:'Conversation',v:'chat'}].map(o => ({ label:o.label, style:this.apSeg(this.state.apPreview===o.v), onClick:()=>this.apSetPreview(o.v) })),
+
+      // preview computed styles
+      apTextColor: pal.text, apSubColor: pal.sub,
+      apTopics: topics, apHasTopics: topics.length>0,
+      apIcoChat: c.launcherIcon==='chat', apIcoMsg: c.launcherIcon==='message', apIcoHelp: c.launcherIcon==='help', apIcoSpark: c.launcherIcon==='sparkle', apIcoCustom: c.launcherIcon==='custom' && !!c.iconImg, apLauncherIco: lIco,
+      apPanelStyle: { position:'absolute', bottom:'84px', width:'300px', height:'430px', ...side, background:pal.card, borderRadius:rad.panel+'px', fontFamily:font, boxShadow:'0 16px 48px rgba(20,24,31,.24)', overflow:'hidden', display:'flex', flexDirection:'column', border:'1px solid '+pal.border },
+      apHeaderStyle: { background:brand, color:'#fff', padding:'18px 18px 20px', flex:'none' },
+      apChatHeaderStyle: { background:brand, color:'#fff', padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px', flex:'none' },
+      apBodyStyle: { flex:1, minHeight:0, padding:'14px', background:pal.page, overflow:'hidden' },
+      apChatBodyStyle: { flex:1, minHeight:0, padding:'14px 12px', background:pal.page, display:'flex', flexDirection:'column', gap:'8px', justifyContent:'flex-end', overflow:'hidden' },
+      apCardStyle: { background:pal.card, border:'1px solid '+pal.border, borderRadius:rad.card+'px', padding:'14px', boxShadow:'0 1px 2px rgba(20,24,31,.04)' },
+      apPrimaryBtnStyle: { width:'100%', height:'38px', border:0, borderRadius:rad.btn+'px', background:brand, color:'#fff', fontFamily:font, fontSize:'13px', fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', gap:'6px', cursor:'default' },
+      apChipStyle: { width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px', background:pal.card, border:'1px solid '+pal.border, borderRadius:rad.btn+'px', padding:'10px 12px', fontFamily:font, fontSize:'13px', fontWeight:600, color:pal.text, cursor:'default' },
+      apInBubbleStyle: { alignSelf:'flex-start', maxWidth:'82%', background:pal.inBub, color:pal.text, padding:'9px 12px', borderRadius:rad.bubble+'px', borderBottomLeftRadius:'6px', fontSize:'13px', lineHeight:1.4 },
+      apOutBubbleStyle: { alignSelf:'flex-end', maxWidth:'82%', background:brand, color:'#fff', padding:'9px 12px', borderRadius:rad.bubble+'px', borderBottomRightRadius:'6px', fontSize:'13px', lineHeight:1.4 },
+      apComposerStyle: { padding:'10px 12px', borderTop:'1px solid '+pal.border, background:pal.card, display:'flex', alignItems:'center', gap:'8px', flex:'none' },
+      apPoweredStyle: { textAlign:'center', fontSize:'11px', color:pal.sub, padding:'8px 0 10px', background:pal.card, flex:'none' },
+      apLauncherStyle: { position:'absolute', bottom:'18px', ...side, width:lSize+'px', height:lSize+'px', borderRadius:rad.launcher, border:0, background:brand, color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 10px 26px rgba(20,24,31,.3)', cursor:'default' },
+    };
+  }
 
   renderVals(){
     const s = this.state;
@@ -960,10 +1374,14 @@ class Component extends DCLogic {
 
       // settings
       isKeys: s.settingsTab==='keys', isHooks: s.settingsTab==='webhooks', isTeam: s.settingsTab==='team', isChannels: s.settingsTab==='channels',
+      isAppearance: s.settingsTab==='appearance', notAppearance: s.settingsTab!=='appearance',
       tabChannels: this.tabStyle(s.settingsTab==='channels'),
+      tabAppearance: this.tabStyle(s.settingsTab==='appearance'),
       tabKeys: this.tabStyle(s.settingsTab==='keys'), tabHooks: this.tabStyle(s.settingsTab==='webhooks'), tabTeam: this.tabStyle(s.settingsTab==='team'),
       onTabChannels: () => this.setSettingsTab('channels'),
+      onTabAppearance: () => this.setSettingsTab('appearance'),
       onTabKeys: () => this.setSettingsTab('keys'), onTabHooks: () => this.setSettingsTab('webhooks'), onTabTeam: () => this.setSettingsTab('team'),
+      ...this.apVals(),
       // channels
       chEmailRow: this.channelRowStyle(s.channelSel==='email'), chWaRow: this.channelRowStyle(s.channelSel==='whatsapp'), chSmsRow: this.channelRowStyle(s.channelSel==='sms'), chSlackRow: this.channelRowStyle(s.channelSel==='slack'),
       onChEmail: () => this.setChannel('email'), onChWa: () => this.setChannel('whatsapp'), onChSms: () => this.setChannel('sms'), onChSlack: () => this.setChannel('slack'),

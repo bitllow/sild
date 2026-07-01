@@ -30,6 +30,7 @@ const (
 	PushToken    = "pt"
 	ReadReceipt  = "rr"
 	Outbox       = "evt"
+	Brand        = "br"
 )
 
 // New returns a fresh prefixed ULID, e.g. New(Conversation) -> "c_01J9...".

@@ -8,7 +8,12 @@ const API = process.env.SILD_API_URL || "http://localhost:8080";
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    return [{ source: "/v1/:path*", destination: `${API}/v1/:path*` }];
+    return [
+      { source: "/v1/:path*", destination: `${API}/v1/:path*` },
+      // The Appearance live preview loads the real drop-in bundle from the
+      // backend and renders it with the draft config (preview === production).
+      { source: "/widget.js", destination: `${API}/widget.js` },
+    ];
   },
 };
 

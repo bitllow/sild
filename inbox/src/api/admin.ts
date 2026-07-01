@@ -168,6 +168,39 @@ export interface EmailChannelPatch {
   from_address?: string;
 }
 
+// ── Appearance: web/SDK messenger branding (§8) ─────────────────────────────
+// One brand profile's config — the messenger look the widget + SDK render.
+// Mirrors domain.BrandConfig on the Go side.
+export interface ApiBrandConfig {
+  logo: string; // bucket object key (or legacy data:/http URL)
+  logoUrl?: string; // resolved signed URL for display (read-only, from server)
+  brand: string;
+  theme: "light" | "dark" | "auto";
+  font: "system" | "sild" | "inter" | "figtree" | "dmsans";
+  radius: "sharp" | "default" | "rounded" | "pillowy";
+  launcherIcon: "chat" | "message" | "help" | "sparkle" | "custom";
+  iconImg: string;
+  iconImgUrl?: string;
+  launcherPos: "left" | "right";
+  launcherSize: "sm" | "md" | "lg";
+  heading: string;
+  sub: string;
+  topics: string;
+  showTeam: boolean;
+  poweredBy: boolean;
+}
+
+export interface ApiBrand {
+  id: string;
+  name: string;
+  config: ApiBrandConfig;
+}
+
+export interface ApiBrands {
+  brands: ApiBrand[];
+  active_brand_id: string;
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 export const adminApi = {
   loginPassword: (email: string, password: string) =>
@@ -225,4 +258,9 @@ export const adminApi = {
   getEmailChannel: () => api.get<ApiEmailChannel>("/admin/channels/email"),
   updateEmailChannel: (patch: EmailChannelPatch) =>
     api.patch<ApiEmailChannel>("/admin/channels/email", patch as Record<string, unknown>),
+
+  // ── Settings: appearance (§8) — brands saved as one staged set ─────────
+  getBrands: () => api.get<ApiBrands>("/admin/brands"),
+  saveBrands: (brands: ApiBrand[], activeBrandId: string) =>
+    api.put<ApiBrands>("/admin/brands", { brands, active_brand_id: activeBrandId }),
 };

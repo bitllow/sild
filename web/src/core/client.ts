@@ -1,5 +1,6 @@
 import { Centrifuge } from "centrifuge";
 import type {
+  BrandResponse,
   ConnectionState,
   PendingAttachment,
   SildConfig,
@@ -7,6 +8,20 @@ import type {
   WidgetMessage,
   WidgetState,
 } from "./types";
+
+// WidgetClient is the surface the <App> renders against — implemented by the
+// live SildClient and the no-network PreviewClient, so the same component drives
+// production and the Appearance preview.
+export interface WidgetClient {
+  state: WidgetState;
+  subscribe(fn: () => void): () => void;
+  start(conversationId?: string): void | Promise<void>;
+  openConversation(id: string): void | Promise<void>;
+  openSupportRequest(): void | Promise<string>;
+  send(text: string, attachments?: PendingAttachment[]): void | Promise<void>;
+  backToList(): void;
+  upload(file: File): Promise<PendingAttachment>;
+}
 
 interface ApiAttachment {
   object_key: string;
@@ -73,7 +88,7 @@ function mapMessage(m: ApiMessage): WidgetMessage {
 
 /** Framework-agnostic Sild client (§4.2 REST + §5 realtime over SSE). The widget
  *  and a future @sild/react both render this; it owns no DOM. */
-export class SildClient {
+export class SildClient implements WidgetClient {
   private base: string;
   private tokenProvider: () => Promise<string> | string;
   private metadata: Record<string, unknown>;
@@ -137,6 +152,22 @@ export class SildClient {
     const data = text ? JSON.parse(text) : null;
     if (!res.ok) throw new Error(data?.error?.message || res.statusText);
     return data as T;
+  }
+
+  // fetchBrand loads the active brand (name + config) for an already-authenticated
+  // surface (native SDK). The web widget uses fetchPublicBrand at load instead, to
+  // avoid minting a token / creating a user just to style the launcher.
+  async fetchBrand(): Promise<BrandResponse> {
+    return this.api<BrandResponse>("GET", "/me/brand");
+  }
+
+  // fetchPublicBrand loads branding unauthenticated, keyed by the host-embedded
+  // app id (= tenant id). No Authorization header → no token, no user record.
+  async fetchPublicBrand(appId?: string): Promise<BrandResponse> {
+    const q = appId ? `?app_id=${encodeURIComponent(appId)}` : "";
+    const res = await fetch(this.base + "/v1/public/brand" + q);
+    if (!res.ok) throw new Error("brand fetch failed");
+    return (await res.json()) as BrandResponse;
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────────
@@ -298,5 +329,36 @@ export class SildClient {
 
   get connection(): ConnectionState {
     return this.state.connection;
+  }
+}
+
+// PreviewClient backs the Appearance live preview: a static, no-network client
+// seeded with a sample thread so the real <App> renders realistic content
+// (bubbles, header, composer) without touching the backend.
+export class PreviewClient implements WidgetClient {
+  state: WidgetState = {
+    ready: true,
+    error: null,
+    connection: "connected",
+    conversations: [],
+    activeId: "preview",
+    loadingThread: false,
+    messages: [
+      { id: "p1", direction: "in", body: "Hi! How can we help with your trip today?", time: "" },
+      { id: "p2", direction: "out", body: "How do I change my pickup address?", time: "" },
+      { id: "p3", direction: "in", body: "Open your trip, tap the pickup pin, and drag it to a new spot.", time: "" },
+    ],
+  };
+
+  subscribe(): () => void {
+    return () => {};
+  }
+  start(): void {}
+  openConversation(): void {}
+  openSupportRequest(): void {}
+  send(): void {}
+  backToList(): void {}
+  async upload(file: File): Promise<PendingAttachment> {
+    return { objectKey: "", disposition: "attachment", mimeType: file.type, filename: file.name };
   }
 }

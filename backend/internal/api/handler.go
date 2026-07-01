@@ -49,6 +49,10 @@ func (h *Handler) Mount(e *gin.Engine) {
 	// Email inbound (§6.2): provider posts here, signature is the gate.
 	v1.POST("/email/inbound", h.emailInbound)
 
+	// Public brand for the web drop-in's load path (§9): unauthenticated, keyed by
+	// the host-embedded app id. Branding is public; this mints no token/user.
+	v1.GET("/public/brand", h.getPublicBrand)
+
 	// Local storage backend serves attachment bytes here (§11). GCS/S3 use
 	// direct-to-bucket signed URLs and don't mount these.
 	if h.cfg.Storage.Backend == "local" || h.cfg.Storage.Backend == "" {
@@ -81,6 +85,8 @@ func (h *Handler) Mount(e *gin.Engine) {
 	me.POST("/support-requests", h.openSupportRequest)
 	me.POST("/push-tokens", h.registerPush)
 	me.DELETE("/push-tokens", h.deregisterPush)
+	// Active brand config for the messenger surfaces (web widget + SDK), §8/§9.
+	me.GET("/brand", h.getMyBrand)
 
 	// Admin auth (no session yet), §4.3.
 	adminAuth := v1.Group("/admin/auth")
@@ -113,6 +119,8 @@ func (h *Handler) Mount(e *gin.Engine) {
 	priv.GET("/webhooks/:id/deliveries", h.listDeliveries)
 	priv.GET("/channels/email", h.getEmailChannel)
 	priv.PATCH("/channels/email", h.updateEmailChannel)
+	priv.GET("/brands", h.listBrands)
+	priv.PUT("/brands", h.saveBrands)
 	priv.GET("/team", h.listTeam)
 	priv.POST("/team", h.inviteAgent)
 	priv.PATCH("/team/:id", h.updateAgent)

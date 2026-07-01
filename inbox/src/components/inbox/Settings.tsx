@@ -5,6 +5,7 @@ import { useStore } from "@/store/StoreProvider";
 import { Avatar, Button, CopyIcon, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
 import type { PlatformRole } from "@/store/types";
 import { tabStyle } from "./styles";
+import { Appearance } from "./Appearance";
 
 const ROLE_OPTIONS = [
   { value: "owner", label: "owner" },
@@ -36,6 +37,12 @@ export const Settings = observer(function Settings() {
       <div style={{ padding: "22px 28px 0", flex: "none" }}>
         <h1 style={{ fontSize: 22 }}>Settings</h1>
         <div style={{ display: "flex", gap: 24, marginTop: 18, borderBottom: "1px solid var(--border-default)" }}>
+          <button onClick={() => store.setSettingsTab("channels")} style={tabStyle(tab === "channels")}>
+            Channels
+          </button>
+          <button onClick={() => store.setSettingsTab("appearance")} style={tabStyle(tab === "appearance")}>
+            Appearance
+          </button>
           <button onClick={() => store.setSettingsTab("keys")} style={tabStyle(tab === "keys")}>
             API keys
           </button>
@@ -45,12 +52,15 @@ export const Settings = observer(function Settings() {
           <button onClick={() => store.setSettingsTab("team")} style={tabStyle(tab === "team")}>
             Team
           </button>
-          <button onClick={() => store.setSettingsTab("channels")} style={tabStyle(tab === "channels")}>
-            Channels
-          </button>
         </div>
       </div>
 
+      {/* Appearance breaks out of the 760px column into a full-width split. */}
+      {tab === "appearance" ? (
+        <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px" }}>
+          <Appearance />
+        </div>
+      ) : (
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px" }}>
         <div style={{ maxWidth: 760 }}>
           {tab === "keys" && (
@@ -153,6 +163,7 @@ export const Settings = observer(function Settings() {
           {tab === "channels" && <Channels />}
         </div>
       </div>
+      )}
     </div>
   );
 });

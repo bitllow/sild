@@ -29,4 +29,5 @@ type Store interface {
 	Outbox() OutboxRepo
 	Email() EmailRepo
 	Archives() ArchiveRepo
+	Brands() BrandRepo
 }

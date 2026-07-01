@@ -22,6 +22,8 @@ import {
 } from "./map";
 import type {
   ApiKey,
+  BrandConfig,
+  Brand,
   Conversation,
   EmailChannel,
   InboxFilter,
@@ -96,6 +98,18 @@ export class RootStore {
   settingsLoaded = false;
   keyDialog = false;
   revealedKey: string | null = null;
+
+  // --- settings: appearance (§8) ---
+  // The staged brand set; edits are local until Save. brandBaseline is the last
+  // saved snapshot (JSON) — Reset restores it and dirty is any diff from it.
+  brands: Brand[] = [];
+  activeBrandId = "";
+  brandsLoaded = false;
+  brandBaseline = "";
+  brandSaving = false;
+  brandMenuOpen = false;
+  brandEditingName = false;
+  brandPreview: "home" | "chat" = "home";
 
   // --- realtime (§5) ---
   rtState: RealtimeState = "disconnected";
@@ -742,22 +756,152 @@ export class RootStore {
   // ─────────────────────────── settings ───────────────────────────
   loadSettings = async () => {
     try {
-      const [keys, webhooks, team, email] = await Promise.all([
+      const [keys, webhooks, team, email, brands] = await Promise.all([
         adminApi.listApiKeys(),
         adminApi.listWebhooks(),
         adminApi.listTeam(),
         adminApi.getEmailChannel(),
+        adminApi.getBrands(),
       ]);
       runInAction(() => {
         this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
         this.webhooks = webhooks.map(mapWebhook);
         this.team = team.map(mapTeamMember);
         this.emailChannel = mapEmailChannel(email);
+        this.applyBrands(brands.brands, brands.active_brand_id);
         this.settingsLoaded = true;
       });
     } catch {
       runInAction(() => {
         this.settingsLoaded = true;
+      });
+    }
+  };
+
+  // ─────────────────────────── settings: appearance (§8) ───────────────────
+  private applyBrands = (brands: { id: string; name: string; config: BrandConfig }[], activeId: string) => {
+    this.brands = brands.map((b) => ({ id: b.id, name: b.name, config: { ...b.config } }));
+    this.activeBrandId = activeId || this.brands[0]?.id || "";
+    this.brandBaseline = this.brandSnapshot();
+    this.brandsLoaded = true;
+  };
+
+  // Snapshot of everything Save persists (the brand set + which is active), used
+  // for dirty tracking and Reset. Resolved asset URLs (logoUrl/iconImgUrl) are
+  // excluded: they're server-signed and rotate on each read, so including them
+  // would flag spurious "unsaved changes".
+  private brandSnapshot = (): string =>
+    JSON.stringify({
+      b: this.brands.map((x) => ({ id: x.id, name: x.name, config: this.persistedConfig(x.config) })),
+      a: this.activeBrandId,
+    });
+
+  private persistedConfig = (c: BrandConfig): BrandConfig => {
+    const { logoUrl: _l, iconImgUrl: _i, ...rest } = c;
+    return rest as BrandConfig;
+  };
+
+  get brandDirty(): boolean {
+    return this.brandsLoaded && this.brandBaseline !== this.brandSnapshot();
+  }
+
+  get activeBrand(): Brand | null {
+    return this.brands.find((b) => b.id === this.activeBrandId) ?? this.brands[0] ?? null;
+  }
+
+  selectBrand = (id: string) => {
+    this.activeBrandId = id;
+    this.brandMenuOpen = false;
+  };
+  toggleBrandMenu = () => {
+    this.brandMenuOpen = !this.brandMenuOpen;
+  };
+  closeBrandMenu = () => {
+    this.brandMenuOpen = false;
+  };
+  startBrandRename = () => {
+    this.brandEditingName = true;
+    this.brandMenuOpen = false;
+  };
+  stopBrandRename = () => {
+    this.brandEditingName = false;
+  };
+  setBrandPreview = (v: "home" | "chat") => {
+    this.brandPreview = v;
+  };
+
+  // Edit the active brand's config (any control) — mutates in place; dirty falls
+  // out of the snapshot diff.
+  patchBrand = (patch: Partial<BrandConfig>) => {
+    const b = this.activeBrand;
+    if (b) Object.assign(b.config, patch);
+  };
+  renameBrand = (name: string) => {
+    const b = this.activeBrand;
+    if (b) b.name = name;
+  };
+
+  // Upload a logo/icon to the bucket via the shared signed-PUT flow (same as
+  // message attachments) and return the object key to store on the config —
+  // assets live in storage, not as base64 in the brand row.
+  uploadBrandAsset = async (file: File): Promise<string> => {
+    const mime = file.type || "application/octet-stream";
+    const grant = await adminApi.issueUpload(mime, file.size, file.name);
+    // Local backend returns an absolute public-origin URL; PUT to its relative
+    // /v1 path so it goes same-origin through the Next proxy. Cloud signed URLs
+    // (no local route) are used as-is.
+    const marker = "/v1/uploads/local/";
+    const at = grant.upload_url.indexOf(marker);
+    const putUrl = at >= 0 ? grant.upload_url.slice(at) : grant.upload_url;
+    const res = await fetch(putUrl, {
+      method: "PUT",
+      body: file,
+      headers: { "Content-Type": mime },
+      credentials: at >= 0 ? "include" : "omit",
+    });
+    if (!res.ok) throw new Error("upload failed");
+    return grant.object_key;
+  };
+
+  // New brand clones the active config (minus logo) and opens rename immediately.
+  // The temp id (no br_ prefix) tells the backend to mint a real id on save.
+  newBrand = () => {
+    const base = this.activeBrand;
+    const config: BrandConfig = base ? { ...base.config, logo: "" } : ({} as BrandConfig);
+    const id = "new_" + Math.random().toString(36).slice(2, 10);
+    this.brands.push({ id, name: "New brand", config });
+    this.activeBrandId = id;
+    this.brandMenuOpen = false;
+    this.brandEditingName = true;
+  };
+
+  resetBrands = () => {
+    const parsed = JSON.parse(this.brandBaseline) as { b: Brand[]; a: string };
+    this.brands = parsed.b.map((b) => ({ id: b.id, name: b.name, config: { ...b.config } }));
+    this.activeBrandId = parsed.a;
+    this.brandMenuOpen = false;
+    this.brandEditingName = false;
+  };
+
+  saveBrands = async () => {
+    if (this.brandSaving || !this.brandDirty) return;
+    this.brandSaving = true;
+    try {
+      const res = await adminApi.saveBrands(
+        this.brands.map((b) => ({ id: b.id, name: b.name, config: this.persistedConfig(b.config) })),
+        this.activeBrandId
+      );
+      runInAction(() => {
+        this.applyBrands(res.brands, res.active_brand_id);
+        this.brandEditingName = false;
+      });
+    } catch (e) {
+      runInAction(() => {
+        this.convError = e instanceof ApiError ? e.message : "Could not save appearance.";
+      });
+    } finally {
+      runInAction(() => {
+        this.brandSaving = false;
       });
     }
   };

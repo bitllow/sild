@@ -1,17 +1,33 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { SildClient } from "../core/client";
-import type { PendingAttachment, SildConfig, WidgetState } from "../core/types";
+import type { BrandConfig, PendingAttachment, WidgetState } from "../core/types";
+import type { WidgetClient } from "../core/client";
+import { LAUNCHER_ICON, parseTopics, type WidgetMode } from "./theme";
 
-function useClientState(client: SildClient): WidgetState {
+function useClientState(client: WidgetClient): WidgetState {
   const [, setTick] = useState(0);
   useEffect(() => client.subscribe(() => setTick((t) => t + 1)), [client]);
   return client.state;
 }
 
 // ── icons ──────────────────────────────────────────────────────────────────
-const ChatIcon = () => (
-  <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+const ChatIcon = ({ s = 27 }: { s?: number }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+  </svg>
+);
+const MessageIcon = ({ s = 27 }: { s?: number }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
+const HelpIcon = ({ s = 27 }: { s?: number }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+const SparkleIcon = ({ s = 27 }: { s?: number }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />
   </svg>
 );
 const CloseIcon = () => (
@@ -34,77 +50,160 @@ const ArrowIcon = () => (
     <path d="M5 12h14M12 5l7 7-7 7" />
   </svg>
 );
+const ChevronIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m9 18 6-6-6-6" />
+  </svg>
+);
 const ClipIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
   </svg>
 );
 
-// inlineImages = images shown in the thread; otherAttachments = files listed below.
+// LauncherGlyph renders the configured launcher icon (preset or custom upload).
+function LauncherGlyph({ config, size }: { config: BrandConfig; size: number }) {
+  const iconSrc = config.iconImgUrl || config.iconImg;
+  if (config.launcherIcon === "custom" && iconSrc) {
+    return <img src={iconSrc} alt="" style={{ width: size, height: size }} />;
+  }
+  switch (config.launcherIcon) {
+    case "message":
+      return <MessageIcon s={size} />;
+    case "help":
+      return <HelpIcon s={size} />;
+    case "sparkle":
+      return <SparkleIcon s={size} />;
+    default:
+      return <ChatIcon s={size} />;
+  }
+}
+
 const isInlineImage = (a: { disposition: string; mimeType: string; url?: string }) =>
   a.disposition === "inline" && a.mimeType.startsWith("image/") && !!a.url;
 
-export function App({ client, config }: { client: SildClient; config: SildConfig }) {
-  const [open, setOpen] = useState(false);
+export interface AppProps {
+  client: WidgetClient;
+  config: BrandConfig;
+  /** Conversation to open directly (guest, single-thread mode). */
+  conversationId?: string;
+  /** Brand name — the header fallback shown when no logo is set. */
+  name?: string;
+  /** "live" floats over the host page; "preview" fills the Appearance canvas. */
+  mode?: WidgetMode;
+  /** In preview, which screen to show (driven by the settings Home/Conversation toggle). */
+  previewView?: "home" | "chat";
+}
+
+export function App({ client, config, conversationId, name, mode = "live", previewView = "home" }: AppProps) {
+  const preview = mode === "preview";
+  const [open, setOpen] = useState(preview);
   const started = useRef(false);
   const state = useClientState(client);
-  // Draft = the user clicked "New conversation" but hasn't sent yet. The
-  // conversation is created server-side only on the first send, so a click never
-  // leaves an empty conversation in the inbox.
   const [draft, setDraft] = useState(false);
 
   const toggle = () => {
+    if (preview) return; // in preview the panel + launcher are both always shown
     const next = !open;
     setOpen(next);
     if (next && !started.current) {
       started.current = true;
-      void client.start(config.conversationId);
+      void client.start(conversationId);
     }
   };
 
-  // guest tokens are scoped to one thread → no list/back affordance (§9)
-  const guestThreadOnly = !!config.conversationId;
-  const inThread = !!state.activeId || draft;
+  const iconSize = LAUNCHER_ICON[config.launcherSize] || 27;
+  const guestThreadOnly = !!conversationId;
+  const inThread = preview ? previewView === "chat" : !!state.activeId || draft;
   const onBack = () => (draft ? setDraft(false) : client.backToList());
+  const panelOpen = preview || open;
 
   return (
     <>
-      {open && (
+      {panelOpen && (
         <div class="panel" role="dialog" aria-label="Support chat">
-          {/* On mobile the panel is full-screen and the launcher is hidden, so an
-              in-panel close button is the only way out (and never covers the
-              composer). Hidden on desktop, where the launcher toggles closed. */}
-          <button class="mobile-close" aria-label="Close chat" onClick={() => setOpen(false)}>
-            <CloseIcon />
-          </button>
+          {!preview && (
+            <button class="mobile-close" aria-label="Close chat" onClick={() => setOpen(false)}>
+              <CloseIcon />
+            </button>
+          )}
           {inThread ? (
             <Thread
               client={client}
+              config={config}
               state={state}
+              preview={preview}
               guestThreadOnly={guestThreadOnly}
               draft={draft && !state.activeId}
               onBack={onBack}
               onCreated={() => setDraft(false)}
             />
           ) : (
-            <Home client={client} state={state} onNew={() => setDraft(true)} />
+            <Home
+              client={client}
+              config={config}
+              name={name}
+              state={state}
+              preview={preview}
+              onNew={() => setDraft(true)}
+            />
           )}
+          {config.poweredBy && <div class="powered">Powered by Sild</div>}
         </div>
       )}
-      <button class={`launcher${open ? " open" : ""}`} aria-label="Chat with us" onClick={toggle}>
-        {open ? <CloseIcon /> : <ChatIcon />}
+      <button class={`launcher${open && !preview ? " open" : ""}`} aria-label="Chat with us" onClick={toggle}>
+        {open && !preview ? <CloseIcon /> : <LauncherGlyph config={config} size={iconSize} />}
       </button>
     </>
   );
 }
 
-function Home({ client, state, onNew }: { client: SildClient; state: WidgetState; onNew: () => void }) {
+// TeamHeader renders the "agents online" row shown on Home when showTeam is on.
+function TeamHeader() {
+  return (
+    <div class="team">
+      <div class="stack">
+        <span class="tav" style={{ background: "#7C9CF5" }}>E</span>
+        <span class="tav" style={{ background: "#E58A6B" }}>M</span>
+      </div>
+      <span class="online">2 agents online</span>
+    </div>
+  );
+}
+
+function Home({
+  client,
+  config,
+  name,
+  state,
+  preview,
+  onNew,
+}: {
+  client: WidgetClient;
+  config: BrandConfig;
+  name?: string;
+  state: WidgetState;
+  preview: boolean;
+  onNew: () => void;
+}) {
+  const topics = parseTopics(config.topics);
+  const startTopic = () => {
+    if (preview) return;
+    onNew();
+  };
   return (
     <>
       <div class="brandhead">
-        <SildMark />
-        <h1>Hi there.</h1>
-        <p>How can we help? We typically reply in a few minutes.</p>
+        <div class="toprow">
+          {config.logoUrl || config.logo ? (
+            <img class="logo" src={config.logoUrl || config.logo} alt={name || "Logo"} />
+          ) : (
+            name && <div class="brandname">{name}</div>
+          )}
+        </div>
+        {config.showTeam && <TeamHeader />}
+        <h1>{config.heading}</h1>
+        {config.sub && <p>{config.sub}</p>}
       </div>
       <div class="body">
         <div class="card">
@@ -114,6 +213,16 @@ function Home({ client, state, onNew }: { client: SildClient; state: WidgetState
             New conversation <ArrowIcon />
           </button>
         </div>
+        {topics.length > 0 && (
+          <div class="topics">
+            {topics.map((t) => (
+              <button class="topic" key={t} onClick={startTopic}>
+                {t}
+                <ChevronIcon />
+              </button>
+            ))}
+          </div>
+        )}
         {state.conversations.length > 0 && <div class="eyebrow">Recent</div>}
         {state.conversations.map((c) => (
           <div class="row" key={c.id} onClick={() => void client.openConversation(c.id)}>
@@ -133,14 +242,18 @@ function Home({ client, state, onNew }: { client: SildClient; state: WidgetState
 
 function Thread({
   client,
+  config,
   state,
+  preview,
   guestThreadOnly,
   draft,
   onBack,
   onCreated,
 }: {
-  client: SildClient;
+  client: WidgetClient;
+  config: BrandConfig;
   state: WidgetState;
+  preview: boolean;
   guestThreadOnly: boolean;
   draft: boolean;
   onBack: () => void;
@@ -159,11 +272,12 @@ function Thread({
 
   const closed = !draft && state.conversations.find((c) => c.id === state.activeId)?.closed;
   const canSend = (!!text.trim() || atts.length > 0) && !closed && uploading === 0;
+  const agentName = config.showTeam ? "Eva" : "Support";
 
   const onFiles = (e: Event) => {
     const input = e.currentTarget as HTMLInputElement;
     const files = Array.from(input.files || []);
-    input.value = ""; // allow re-selecting the same file
+    input.value = "";
     for (const f of files) {
       setUploading((n) => n + 1);
       client
@@ -182,8 +296,7 @@ function Thread({
     setAtts([]);
     if (taRef.current) taRef.current.style.height = "auto";
     if (draft) {
-      // Create the conversation only now (on first send), then post the message.
-      void client.openSupportRequest().then(() => {
+      void Promise.resolve(client.openSupportRequest()).then(() => {
         onCreated();
         return client.send(t, sending);
       });
@@ -200,13 +313,17 @@ function Thread({
             <BackIcon />
           </button>
         )}
-        <span class="av">S</span>
+        {config.showTeam ? (
+          <span class="av" style={{ background: "#7C9CF5" }}>{agentName.charAt(0)}</span>
+        ) : (
+          <span class="av">S</span>
+        )}
         <div>
-          <div class="name">Sild support</div>
+          <div class="name">{config.showTeam ? agentName : "Sild support"}</div>
           <div class="sub">
             {draft
               ? "Type your message to start"
-              : state.connection === "connected"
+              : state.connection === "connected" || preview
                 ? "Replies in a few minutes"
                 : "Connecting…"}
           </div>
@@ -291,27 +408,7 @@ function Thread({
             <SendIcon />
           </button>
         </div>
-        <div class="powered">Powered by Sild</div>
       </div>
     </>
-  );
-}
-
-function SildMark() {
-  return (
-    <svg class="tile" width="34" height="34" viewBox="0 0 40 40" fill="none" aria-label="Sild">
-      <rect width="40" height="40" rx="11" fill="rgba(255,255,255,.16)" />
-      <g transform="translate(6.6 12.2) scale(0.202)" fill="#fff">
-        <circle cx="33" cy="50" r="16" />
-        <path d="M28 60 L42 60 L21 71 Z" />
-        <circle cx="66" cy="49" r="13" />
-        <path d="M60 58 L72 58 L66 70 Z" />
-        <circle cx="99" cy="50" r="16" />
-        <path d="M90 60 L104 60 L111 71 Z" />
-      </g>
-      <g transform="translate(6.6 12.2) scale(0.202)" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round">
-        <path d="M33 33 Q66 -9 99 33" />
-      </g>
-    </svg>
   );
 }

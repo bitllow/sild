@@ -203,6 +203,21 @@ type EmailRepo interface {
 	Update(ctx context.Context, t *models.EmailThread) error
 }
 
+// BrandRepo persists per-tenant brands for the messenger appearance (Settings →
+// Appearance). Brands are edited as a set and saved atomically, so the write path
+// is a full replace rather than per-row CRUD.
+type BrandRepo interface {
+	// List returns the tenant's brands ordered by position.
+	List(ctx context.Context, tenantID string) ([]models.Brand, error)
+	// Active returns the tenant's active brand, or ErrNotFound if the tenant has
+	// none yet.
+	Active(ctx context.Context, tenantID string) (*models.Brand, error)
+	// Replace atomically swaps the tenant's entire brand set for the given rows
+	// (delete-all + insert). Positions and the single Active flag are taken from
+	// the passed rows as-is; the domain layer normalizes them first.
+	Replace(ctx context.Context, tenantID string, brands []models.Brand) error
+}
+
 type ArchiveRepo interface {
 	CreateTombstone(ctx context.Context, a *models.ConversationArchive) error
 	GetTombstone(ctx context.Context, tenantID, convID string) (*models.ConversationArchive, error)
