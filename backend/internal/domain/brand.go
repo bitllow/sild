@@ -3,11 +3,13 @@ package domain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/id"
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
@@ -110,20 +112,30 @@ func isObjectKey(v string) bool {
 }
 
 // resolveAssets fills LogoURL/IconImgURL with signed GET URLs for object-key
-// assets so a client can render them. Best-effort: a signing failure leaves the
-// URL empty (the client falls back to the raw value / hides the image).
-func (s *Service) resolveAssets(ctx context.Context, c BrandConfig) BrandConfig {
-	if isObjectKey(c.Logo) {
-		if u, err := s.bucket.SignGet(ctx, c.Logo, brandAssetTTL); err == nil {
-			c.LogoURL = u
-		}
-	}
-	if isObjectKey(c.IconImg) {
-		if u, err := s.bucket.SignGet(ctx, c.IconImg, brandAssetTTL); err == nil {
-			c.IconImgURL = u
-		}
-	}
+// assets so a client can render them. Signing is scoped to tenantID.
+func (s *Service) resolveAssets(ctx context.Context, tenantID string, c BrandConfig) BrandConfig {
+	c.LogoURL = s.signOwnedAsset(ctx, tenantID, c.Logo)
+	c.IconImgURL = s.signOwnedAsset(ctx, tenantID, c.IconImg)
 	return c
+}
+
+// signOwnedAsset returns a signed GET URL for an object key ONLY when that key is
+// backed by an upload owned by tenantID — mirroring the message-attachment path
+// (Uploads().GetByObjectKey). This stops the public brand endpoint from becoming
+// a cross-tenant signing oracle for an arbitrary key persisted in a brand config.
+// A legacy data:/http value returns "" so the client renders it directly.
+func (s *Service) signOwnedAsset(ctx context.Context, tenantID, key string) string {
+	if !isObjectKey(key) {
+		return ""
+	}
+	if _, err := s.store.Uploads().GetByObjectKey(ctx, tenantID, key); err != nil {
+		return "" // not this tenant's upload (or unknown) — never sign it
+	}
+	u, err := s.bucket.SignGet(ctx, key, brandAssetTTL)
+	if err != nil {
+		return ""
+	}
+	return u
 }
 
 // decodeConfig unmarshals a stored brand blob onto the defaults, so any field
@@ -157,33 +169,39 @@ func (s *Service) ListBrands(ctx context.Context, tenantID string) ([]Brand, err
 	out := make([]Brand, 0, len(rows))
 	for _, r := range rows {
 		b := toBrand(r)
-		b.Config = s.resolveAssets(ctx, b.Config)
+		b.Config = s.resolveAssets(ctx, tenantID, b.Config)
 		out = append(out, b)
 	}
 	return out, nil
 }
 
-// ActiveBrand returns the active brand for a surface (widget / SDK), seeding a
-// default brand if the tenant has none yet.
+// ActiveBrand returns the active brand for a surface (widget / SDK). It is
+// READ-ONLY: if the tenant has no brand yet it returns an in-memory default and
+// writes nothing. Seeding a persistent default is exclusively the authenticated
+// admin path (ListBrands), so an unauthenticated /public/brand page view causes
+// no DB side effects.
 func (s *Service) ActiveBrand(ctx context.Context, tenantID string) (Brand, error) {
 	row, err := s.store.Brands().Active(ctx, tenantID)
 	if err == nil {
 		b := toBrand(*row)
-		b.Config = s.resolveAssets(ctx, b.Config)
+		b.Config = s.resolveAssets(ctx, tenantID, b.Config)
 		return b, nil
 	}
-	// No active brand (or none at all) — seed and return the default. ListBrands
-	// already resolves assets.
-	brands, lerr := s.ListBrands(ctx, tenantID)
+	if !errors.Is(err, store.ErrNotFound) {
+		return Brand{}, err
+	}
+	// No active row. Fall back to the first brand if any exist, else an in-memory
+	// default — never seed here.
+	rows, lerr := s.store.Brands().List(ctx, tenantID)
 	if lerr != nil {
 		return Brand{}, lerr
 	}
-	for _, b := range brands {
-		if b.Active {
-			return b, nil
-		}
+	if len(rows) > 0 {
+		b := toBrand(rows[0])
+		b.Config = s.resolveAssets(ctx, tenantID, b.Config)
+		return b, nil
 	}
-	return brands[0], nil
+	return Brand{Name: "Default", Active: true, Config: DefaultBrandConfig()}, nil
 }
 
 // PublicBrand returns a tenant's active brand for the unauthenticated widget
@@ -265,7 +283,7 @@ func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Bran
 	out := make([]Brand, 0, len(rows))
 	for _, r := range rows {
 		b := toBrand(r)
-		b.Config = s.resolveAssets(ctx, b.Config)
+		b.Config = s.resolveAssets(ctx, tenantID, b.Config)
 		out = append(out, b)
 	}
 	return out, nil

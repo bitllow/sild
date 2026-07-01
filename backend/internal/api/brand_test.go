@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -221,7 +222,19 @@ func TestBrandLogoStoredAsObjectKeyResolvedToURL(t *testing.T) {
 	owner := loginAs(t, h, "owner@test")
 	tok := h.MintToken(tenant.ID, "u_widget")
 
-	key := tenant.ID + "/obj_test123/logo.png"
+	// A real upload grant → an object key OWNED by this tenant. resolveAssets only
+	// signs owned keys, so a fabricated key would (correctly) not resolve.
+	var grant struct {
+		ObjectKey string `json:"object_key"`
+	}
+	gw := h.Request("POST", "/v1/uploads").Cookie("sild_admin", owner).
+		JSON(map[string]any{"mime_type": "image/png", "size_bytes": 1024, "filename": "logo.png"}).Do()
+	if gw.Code != http.StatusOK && gw.Code != http.StatusCreated {
+		t.Fatalf("upload grant: %d %s", gw.Code, gw.Body)
+	}
+	testutil.DecodeJSON(t, gw, &grant)
+	key := grant.ObjectKey
+
 	w := h.Request("PUT", "/v1/admin/brands").Cookie("sild_admin", owner).JSON(map[string]any{
 		"active_brand_id": "a",
 		"brands": []map[string]any{
@@ -251,6 +264,55 @@ func TestBrandLogoStoredAsObjectKeyResolvedToURL(t *testing.T) {
 	testutil.DecodeJSON(t, w, &mine)
 	if mine.Config.Logo != key || !strings.Contains(mine.Config.LogoURL, key) {
 		t.Fatalf("me/brand did not resolve logo: %+v", mine.Config)
+	}
+}
+
+// The unauthenticated public brand path is READ-ONLY: a page view for a tenant
+// with no brand yet returns an in-memory default and writes no DB rows (no
+// "page view causes backend side effects").
+func TestPublicBrandDoesNotSeed(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+
+	w := h.Request("GET", "/v1/public/brand?app_id="+tenant.ID).Do()
+	if w.Code != http.StatusOK {
+		t.Fatalf("public brand: %d %s", w.Code, w.Body)
+	}
+	rows, err := h.Store.Brands().List(context.Background(), tenant.ID)
+	if err != nil {
+		t.Fatalf("list brands: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("public read must not seed rows, found %d", len(rows))
+	}
+}
+
+// A brand config may persist any string in logo/iconImg, but only keys backed by
+// an upload owned by the tenant get signed — otherwise the public endpoint would
+// be a cross-tenant object-signing oracle.
+func TestBrandCrossTenantAssetNotSigned(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
+	owner := loginAs(t, h, "owner@test")
+
+	foreignKey := "t_other/obj_stolen/secret.png" // not this tenant's upload
+	w := h.Request("PUT", "/v1/admin/brands").Cookie("sild_admin", owner).JSON(map[string]any{
+		"active_brand_id": "a",
+		"brands": []map[string]any{
+			{"id": "a", "name": "X", "config": map[string]any{"brand": "#2563FD", "logo": foreignKey}},
+		},
+	}).Do()
+	if w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body)
+	}
+
+	var got brandsJSON
+	w = h.Request("GET", "/v1/admin/brands").Cookie("sild_admin", owner).Do()
+	testutil.DecodeJSON(t, w, &got)
+	b := got.Brands[0]
+	if b.Config.LogoURL != "" {
+		t.Fatalf("unowned key must not be signed, got logoUrl=%q", b.Config.LogoURL)
 	}
 }
 
