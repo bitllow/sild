@@ -1,0 +1,39 @@
+# Email ingest daemon (§6.2). MX for mail.sild.bitllow.com points at the node;
+# orgs forward their support mailbox to <token>@mail.sild.bitllow.com and every
+# message becomes a conversation.
+#
+# Port mapping: the container listens on :2525 as the unprivileged "nonroot"
+# user; kubelet/CNI binds host port 25 and forwards it to the pod's 2525, so no
+# privileged bind is needed inside the container. hostPort 25 is a single-node
+# resource, so pin one replica and use Recreate to avoid two pods contending for
+# it during a rollout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-mail
+  namespace: sild
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: sild-mail }
+  template:
+    metadata:
+      labels: { app: sild-mail }
+    spec:
+      containers:
+        - name: sild-mail
+          image: dmitri896/sild:backend
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/sild-mail"]
+          envFrom:
+            - configMapRef: { name: sild-config }
+            - secretRef: { name: sild-secrets }
+          env:
+            - { name: SILD_SMTP_ADDR, value: ":2525" }
+          ports:
+            - { containerPort: 2525, hostPort: 25, name: smtp, protocol: TCP }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }

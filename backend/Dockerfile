@@ -9,7 +9,9 @@ ENV CGO_ENABLED=0
 RUN go build -o /out/sild-api      ./cmd/sild-api     && \
     go build -o /out/sild-ws       ./cmd/sild-ws      && \
     go build -o /out/sild-worker   ./cmd/sild-worker  && \
-    go build -o /out/sild-migrate  ./cmd/sild-migrate
+    go build -o /out/sild-migrate  ./cmd/sild-migrate && \
+    go build -o /out/sild-mail     ./cmd/sild-mail    && \
+    go build -o /out/sild-dev      ./cmd/sild-dev
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/ /usr/local/bin/

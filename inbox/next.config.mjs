@@ -7,6 +7,9 @@ const API = process.env.SILD_API_URL || "http://localhost:8080";
 
 const nextConfig = {
   reactStrictMode: true,
+  // Emit a self-contained server bundle (server.js + trimmed node_modules) so
+  // the Docker runtime image stays small — see deploy/inbox.Dockerfile.
+  output: "standalone",
   async rewrites() {
     return [
       { source: "/v1/:path*", destination: `${API}/v1/:path*` },

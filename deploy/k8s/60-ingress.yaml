@@ -1,0 +1,104 @@
+# HTTPS ingress (nginx `public` class) with per-host Let's Encrypt certs issued
+# by the cluster's existing cert-manager ClusterIssuer. SMTP (mail) is NOT here —
+# it's plain TCP on node port 25 via the sild-mail hostPort.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sild-api
+  namespace: sild
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+spec:
+  ingressClassName: public
+  tls:
+    - hosts: [api.sild.bitllow.com]
+      secretName: sild-api-tls
+  rules:
+    - host: api.sild.bitllow.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sild-api
+                port: { number: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sild-ws
+  namespace: sild
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Long-lived websocket connections.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: public
+  tls:
+    - hosts: [ws.sild.bitllow.com]
+      secretName: sild-ws-tls
+  rules:
+    - host: ws.sild.bitllow.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sild-ws
+                port: { number: 8081 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sild-inbox
+  namespace: sild
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+spec:
+  ingressClassName: public
+  tls:
+    - hosts: [inbox.sild.bitllow.com]
+      secretName: sild-inbox-tls
+  rules:
+    - host: inbox.sild.bitllow.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sild-inbox
+                port: { number: 3000 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sild-demo
+  namespace: sild
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Land visitors on the demo host page; it embeds the widget (same-origin WS).
+    nginx.ingress.kubernetes.io/app-root: /sild-demo
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: public
+  tls:
+    - hosts: [sild.bitllow.com]
+      secretName: sild-demo-tls
+  rules:
+    - host: sild.bitllow.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sild-demo
+                port: { number: 8080 }

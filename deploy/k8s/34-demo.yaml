@@ -1,0 +1,65 @@
+# Public widget demo at https://sild.bitllow.com. Runs the single-process
+# `sild-dev` binary (REST + WS/SSE + /widget.js + /sild-demo host page + a guest
+# token mint), but against the SHARED Postgres + Redis — NOT its own SQLite — so
+# it operates on the same tenant the inbox reads. On first start against an empty
+# DB, sild-dev's devSeed creates the "Dev Tenant" (owner admin@sild.local /
+# password123, an API key, and sample conversations); the inbox then shows them,
+# and conversations opened from the demo widget land in that same tenant.
+#
+# Recreate (not RollingUpdate) so two pods never race to seed during a rollout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-demo
+  namespace: sild
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: sild-demo }
+  template:
+    metadata:
+      labels: { app: sild-demo }
+    spec:
+      securityContext:
+        fsGroup: 65532
+      containers:
+        - name: sild-demo
+          image: dmitri896/sild:backend
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/sild-dev"]
+          envFrom:
+            - configMapRef: { name: sild-config } # DB_DRIVER=postgres, broker=redis, DSN target
+            - secretRef: { name: sild-secrets }   # DB_DSN
+          env:
+            # sild-dev is dev tooling; keep it in development mode so the guest
+            # token mint + demo host page behave, even against the shared DB.
+            - { name: SILD_ENV, value: "development" }
+            - { name: SILD_HTTP_ADDR, value: ":8080" }
+            - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
+            - { name: STORAGE_PUBLIC_URL, value: "https://sild.bitllow.com" }
+          ports:
+            - { containerPort: 8080, name: http }
+          readinessProbe:
+            httpGet: { path: /sild-demo, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sild-demo
+  namespace: sild
+spec:
+  selector: { app: sild-demo }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

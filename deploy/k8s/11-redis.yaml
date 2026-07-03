@@ -1,0 +1,38 @@
+# Redis 7 — the realtime broker (sild-api publishes, sild-ws holds connections;
+# ARCHITECTURE §3a) plus general cache. Pure pub/sub, no persistence needed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-redis
+  namespace: sild
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sild-redis }
+  template:
+    metadata:
+      labels: { app: sild-redis }
+    spec:
+      containers:
+        - name: sild-redis
+          image: redis:7
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - { containerPort: 6379, name: redis }
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sild-redis
+  namespace: sild
+spec:
+  selector: { app: sild-redis }
+  ports:
+    - { port: 6379, targetPort: 6379 }

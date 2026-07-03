@@ -1,0 +1,45 @@
+# Realtime transport (Centrifuge WS/SSE) — holds connections, subscribes to Redis
+# for fan-out. Reachable at wss://ws.sild.bitllow.com/v1/ws and in-cluster at
+# sild-ws:8081.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-ws
+  namespace: sild
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sild-ws }
+  template:
+    metadata:
+      labels: { app: sild-ws }
+    spec:
+      containers:
+        - name: sild-ws
+          image: dmitri896/sild:backend
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/sild-ws"]
+          envFrom:
+            - configMapRef: { name: sild-config }
+            - secretRef: { name: sild-secrets }
+          env:
+            - { name: SILD_WS_ADDR, value: ":8081" }
+          ports:
+            - { containerPort: 8081, name: ws }
+          readinessProbe:
+            tcpSocket: { port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sild-ws
+  namespace: sild
+spec:
+  selector: { app: sild-ws }
+  ports:
+    - { name: ws, port: 8081, targetPort: 8081 }

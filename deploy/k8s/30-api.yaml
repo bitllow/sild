@@ -1,0 +1,56 @@
+# REST API (§4) — stateless; publishes realtime events to Redis after each write.
+# Reachable at https://api.sild.bitllow.com and in-cluster at sild-api:8080.
+# Local attachment storage (§11) persists on a hostPath; fsGroup 65532 matches the
+# distroless "nonroot" uid/gid so the container can write it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-api
+  namespace: sild
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sild-api }
+  template:
+    metadata:
+      labels: { app: sild-api }
+    spec:
+      securityContext:
+        fsGroup: 65532
+      containers:
+        - name: sild-api
+          image: dmitri896/sild:backend
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/sild-api"]
+          envFrom:
+            - configMapRef: { name: sild-config }
+            - secretRef: { name: sild-secrets }
+          env:
+            - { name: SILD_HTTP_ADDR, value: ":8080" }
+            - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
+          ports:
+            - { containerPort: 8080, name: http }
+          readinessProbe:
+            httpGet: { path: /.well-known/jwks.json, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - { name: uploads, mountPath: /data/uploads }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: uploads
+          hostPath:
+            path: /data/sild-uploads
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sild-api
+  namespace: sild
+spec:
+  selector: { app: sild-api }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

@@ -1,0 +1,25 @@
+# Background jobs (§6.1 webhook relay + §12 archive). No inbound ports.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-worker
+  namespace: sild
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sild-worker }
+  template:
+    metadata:
+      labels: { app: sild-worker }
+    spec:
+      containers:
+        - name: sild-worker
+          image: dmitri896/sild:backend
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/sild-worker", "-jobs", "webhook,archive"]
+          envFrom:
+            - configMapRef: { name: sild-config }
+            - secretRef: { name: sild-secrets }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }

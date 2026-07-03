@@ -1,0 +1,40 @@
+# Agent console (Next.js) at https://inbox.sild.bitllow.com. The browser stays
+# same-origin: Next proxies /v1/* and /widget.js to the in-cluster API (baked in
+# at build time, see deploy/inbox.Dockerfile), and connects realtime straight to
+# wss://ws.sild.bitllow.com/v1/ws.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-inbox
+  namespace: sild
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sild-inbox }
+  template:
+    metadata:
+      labels: { app: sild-inbox }
+    spec:
+      containers:
+        - name: sild-inbox
+          image: dmitri896/sild:inbox
+          imagePullPolicy: Always
+          ports:
+            - { containerPort: 3000, name: http }
+          readinessProbe:
+            httpGet: { path: /, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sild-inbox
+  namespace: sild
+spec:
+  selector: { app: sild-inbox }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }

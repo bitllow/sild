@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-postgres
+  namespace: sild
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # single RWO hostPath — never run two writers at once
+  selector:
+    matchLabels: { app: sild-postgres }
+  template:
+    metadata:
+      labels: { app: sild-postgres }
+    spec:
+      containers:
+        - name: sild-postgres
+          image: postgres:16
+          envFrom:
+            - secretRef: { name: sild-secrets }
+          env:
+            # PGDATA in a subdir keeps initdb happy when the volume root isn't empty.
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { containerPort: 5432, name: postgres }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "sild"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+      volumes:
+        - name: data
+          hostPath:
+            path: /data/sild-postgres
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sild-postgres
+  namespace: sild
+spec:
+  selector: { app: sild-postgres }
+  ports:
+    - { port: 5432, targetPort: 5432 }
