@@ -12,6 +12,8 @@ export interface ConversationRowProps extends React.HTMLAttributes<HTMLDivElemen
   presence?: Presence | null;
   src?: string;
   status?: React.ReactNode;
+  // Allow test hooks (data-testid, data-conversation) to pass through to the row.
+  [key: `data-${string}`]: string | undefined;
 }
 
 const Mail = () => (

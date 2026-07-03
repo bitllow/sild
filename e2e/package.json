@@ -1,0 +1,27 @@
+{
+  "name": "@sild/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sild end-to-end behavior tests (Playwright) — inbox + drop-in widget, driven from the user's perspective against a real zero-infra backend.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "PWDEBUG=1 playwright test",
+    "test:ui": "playwright test --ui",
+    "test:inbox": "playwright test --project=inbox",
+    "test:widget": "playwright test --project=widget",
+    "test:cross": "playwright test --project=cross",
+    "report": "playwright show-report",
+    "test:coverage": "E2E_COVERAGE=1 playwright test --project=inbox --workers=1",
+    "coverage:report": "open coverage/index.html",
+    "codegen:inbox": "playwright codegen http://localhost:3000",
+    "codegen:widget": "playwright codegen http://localhost:8080/sild-demo",
+    "widget:build": "node ../web/build.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.7",
+    "monocart-reporter": "^2.9.19",
+    "typescript": "^5.7.3"
+  }
+}

@@ -54,7 +54,7 @@ export const ConversationList = observer(function ConversationList() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <h2 style={{ fontSize: 18 }}>Inbox</h2>
-            <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+            <span data-testid="open-count" style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
               {store.openCount} open
             </span>
           </div>
@@ -112,16 +112,16 @@ export const ConversationList = observer(function ConversationList() {
             borderRadius: 8,
           }}
         >
-          <button onClick={() => store.setFilter("you")} style={filterStyle(store.filter === "you")}>
+          <button data-testid="filter-you" aria-pressed={store.filter === "you"} onClick={() => store.setFilter("you")} style={filterStyle(store.filter === "you")}>
             You
           </button>
-          <button onClick={() => store.setFilter("unassigned")} style={filterStyle(store.filter === "unassigned")}>
+          <button data-testid="filter-unassigned" aria-pressed={store.filter === "unassigned"} onClick={() => store.setFilter("unassigned")} style={filterStyle(store.filter === "unassigned")}>
             Unassigned
           </button>
-          <button onClick={() => store.setFilter("closed")} style={filterStyle(store.filter === "closed")}>
+          <button data-testid="filter-closed" aria-pressed={store.filter === "closed"} onClick={() => store.setFilter("closed")} style={filterStyle(store.filter === "closed")}>
             Closed
           </button>
-          <button onClick={() => store.setFilter("all")} style={filterStyle(store.filter === "all")}>
+          <button data-testid="filter-all" aria-pressed={store.filter === "all"} onClick={() => store.setFilter("all")} style={filterStyle(store.filter === "all")}>
             All
           </button>
         </div>
@@ -164,6 +164,8 @@ export const ConversationList = observer(function ConversationList() {
         {rows.map((c) => (
           <ConversationRow
             key={c.id}
+            data-testid="conversation-row"
+            data-conversation={c.id}
             name={c.name}
             preview={c.preview}
             time={c.time}

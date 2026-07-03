@@ -43,6 +43,7 @@ export const ConversationView = observer(function ConversationView() {
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
       {/* Header */}
       <div
+        data-testid="conversation-header"
         style={{
           height: 64,
           flex: "none",

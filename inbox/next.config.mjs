@@ -7,6 +7,10 @@ const API = process.env.SILD_API_URL || "http://localhost:8080";
 
 const nextConfig = {
   reactStrictMode: true,
+  // The dev-tools indicator renders a portal in the bottom-left corner, on top
+  // of the inbox's sign-out control. Disable it only when explicitly requested
+  // (e.g. e2e runs) so it can't intercept clicks; normal `npm run dev` keeps it.
+  ...(process.env.SILD_DISABLE_DEV_INDICATOR ? { devIndicators: false } : {}),
   // Emit a self-contained server bundle (server.js + trimmed node_modules) so
   // the Docker runtime image stays small — see deploy/inbox.Dockerfile.
   output: "standalone",

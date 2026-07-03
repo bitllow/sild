@@ -374,7 +374,7 @@ export const Appearance = observer(function Appearance() {
                 <div style={fieldLabel}>Brand color</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   {SWATCHES.map((col) => (
-                    <button key={col} onClick={() => patch({ brand: col })} aria-label="Pick color" style={swatch(config.brand === col, col)}>
+                    <button key={col} data-testid="brand-swatch" data-color={col} onClick={() => patch({ brand: col })} aria-label="Pick color" style={swatch(config.brand === col, col)}>
                       {config.brand === col && <Check w={16} sw={3} color="#fff" />}
                     </button>
                   ))}
@@ -553,7 +553,7 @@ export const Appearance = observer(function Appearance() {
               <div style={{ width: "68%", height: 9, borderRadius: 5, background: "#fff" }} />
             </div>
             {/* the real widget mounts here (absolute, fills the canvas) */}
-            <div ref={canvasRef} style={{ position: "absolute", inset: 0 }} />
+            <div ref={canvasRef} data-testid="appearance-preview" style={{ position: "absolute", inset: 0 }} />
           </div>
           <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 10, textAlign: "center" }}>This is exactly what visitors see on your site.</div>
         </div>

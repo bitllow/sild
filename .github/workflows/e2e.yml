@@ -1,0 +1,116 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Go backend unit/integration suite (the inbox+widget e2e below drives the app,
+  # this covers the backend directly).
+  backend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: go test
+        working-directory: backend
+        run: go test ./...
+
+  # Browser behavior tests for the inbox + drop-in widget, run against a real
+  # backend. Matrix covers both the zero-infra default (SQLite) and the primary
+  # production target (Postgres, with full trigram search). Tuned for the free
+  # public runners (ubuntu-latest, 2 vCPU).
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sild
+          POSTGRES_PASSWORD: sild
+          POSTGRES_DB: sild
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sild"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            inbox/package-lock.json
+
+      # 1. Build the widget FIRST so it is embedded into the Go binary at build.
+      - name: Build widget bundle
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      # 2. Pre-build the backend (fail fast + warm the Go build cache).
+      - name: Build backend
+        working-directory: backend
+        run: go build ./...
+
+      # 3. Inbox dependencies (Next.js dev server).
+      - name: Install inbox
+        working-directory: inbox
+        run: npm ci
+
+      # 4. E2E dependencies + Chromium (only Chromium to keep the runner light).
+      - name: Install e2e
+        working-directory: e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      # 5. Run the suite. webServer[] boots sild-dev against the matrix DB; the
+      #    widget build above is already embedded.
+      - name: Run Playwright tests
+        working-directory: e2e
+        run: npm test
+        env:
+          CI: "1"
+          SILD_E2E_SKIP_BUILD: "1" # widget already built in step 1
+          SILD_E2E_DB_DRIVER: ${{ matrix.db }}
+          SILD_E2E_DB_DSN: ${{ matrix.db == 'postgres' && 'host=localhost port=5432 user=sild password=sild dbname=sild sslmode=disable' || '' }}
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.db }}
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7

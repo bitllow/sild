@@ -17,6 +17,7 @@ export interface MessageBubbleProps extends React.HTMLAttributes<HTMLDivElement>
   system?: boolean;
   attachments?: MessageAttachment[];
   readReceipt?: string;
+  [key: `data-${string}`]: string | undefined;
 }
 
 const Paperclip = () => (
@@ -59,7 +60,7 @@ export function MessageBubble({
 
   if (system) {
     return (
-      <div className={cls} {...rest}>
+      <div className={cls} data-testid="message" data-kind="system" {...rest}>
         <div className="sild-msg__bubble">{body}</div>
       </div>
     );
@@ -69,7 +70,13 @@ export function MessageBubble({
   const listed = attachments.filter((a) => a.disposition !== "inline" || a.kind !== "image");
 
   return (
-    <div className={cls} {...rest}>
+    <div
+      className={cls}
+      data-testid="message"
+      data-kind={kind}
+      data-internal={internal ? "true" : "false"}
+      {...rest}
+    >
       {(author || time || internal || channel === "email") && (
         <div className="sild-msg__meta">
           {author && <span className="sild-msg__author">{author}</span>}
