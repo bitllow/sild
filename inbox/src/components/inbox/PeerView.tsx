@@ -94,13 +94,16 @@ function PeerBubble({ m, peer }: { m: PeerMessage; peer: ReturnType<typeof useSt
       </div>
     );
   }
+  // The signed-in operator's own messages are right-aligned in brand colour. Every
+  // other message — the parties AND any other agent who stepped in — is a named,
+  // left-aligned bubble, so a second operator isn't mislabelled as "You".
   const style = peer.roleStyle(m.role, m.isAgent);
   return (
     <div data-testid="peer-message" style={{ display: "flex", flexDirection: "column", gap: 3, maxWidth: "100%" }}>
-      {!m.isAgent && (
+      {!m.mine && (
         <div style={{ display: "flex", alignItems: "center", gap: 7, paddingLeft: 3 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: style.color }}>{m.author}</span>
-          <RolePill role={m.role} peer={peer} />
+          <RolePill role={m.isAgent ? "support" : m.role} isAgent={m.isAgent} peer={peer} />
           {m.time && <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{m.time}</span>}
         </div>
       )}
@@ -111,17 +114,17 @@ function PeerBubble({ m, peer }: { m: PeerMessage; peer: ReturnType<typeof useSt
           fontSize: 14,
           lineHeight: 1.45,
           borderRadius: 16,
-          alignSelf: m.isAgent ? "flex-end" : "flex-start",
-          background: m.isAgent ? "var(--brand)" : "var(--surface-card)",
-          color: m.isAgent ? "#fff" : "var(--text-primary)",
-          border: m.isAgent ? "0" : "1px solid var(--border-default)",
-          borderBottomRightRadius: m.isAgent ? 5 : 16,
-          borderBottomLeftRadius: m.isAgent ? 16 : 5,
+          alignSelf: m.mine ? "flex-end" : "flex-start",
+          background: m.mine ? "var(--brand)" : "var(--surface-card)",
+          color: m.mine ? "#fff" : "var(--text-primary)",
+          border: m.mine ? "0" : "1px solid var(--border-default)",
+          borderBottomRightRadius: m.mine ? 5 : 16,
+          borderBottomLeftRadius: m.mine ? 16 : 5,
         }}
       >
         {m.body}
       </div>
-      {m.isAgent && (
+      {m.mine && (
         <span style={{ alignSelf: "flex-end", fontSize: 11, color: "var(--text-tertiary)", paddingRight: 3 }}>
           You (support){m.time ? ` · ${m.time}` : ""}
         </span>

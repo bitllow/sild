@@ -27,6 +27,10 @@ export interface PeerMessage {
   body: string;
   joinNote: boolean;
   isAgent: boolean;
+  /** True only for the signed-in operator's own messages (right-aligned "You").
+   *  Another agent in the same thread is isAgent but not mine — rendered as an
+   *  incoming, named support message. */
+  mine: boolean;
 }
 
 export interface PeerConversation {
@@ -72,10 +76,14 @@ function mapParticipant(m: ApiMember): PeerParticipant {
   };
 }
 
-function mapPeerMessage(m: ApiMessage, participants: PeerParticipant[]): PeerMessage {
+function mapPeerMessage(m: ApiMessage, participants: PeerParticipant[], meId: string | null): PeerMessage {
   const isAgent = m.sender_kind === "agent" || !!m.internal_actor_id;
   const joinNote = m.sender_kind === "system";
   const author = participants.find((p) => p.id && p.id === m.external_user_id);
+  // Only the signed-in operator's own messages are "mine" (right-aligned). A
+  // system join-note is authored by the joining agent's actor but reads as a
+  // centered system line, never as the viewer's own bubble.
+  const mine = isAgent && !joinNote && !!meId && m.internal_actor_id === meId;
   return {
     id: m.id,
     author: isAgent || joinNote ? m.author_name || "Support" : author?.name || m.external_user_id || "User",
@@ -84,6 +92,7 @@ function mapPeerMessage(m: ApiMessage, participants: PeerParticipant[]): PeerMes
     body: m.body,
     joinNote,
     isAgent,
+    mine,
   };
 }
 
@@ -174,7 +183,7 @@ export class PeerStore {
         if (conv) {
           conv.messages = [...page.messages]
             .sort((a, b) => a.id.localeCompare(b.id))
-            .map((m) => mapPeerMessage(m, conv.participants));
+            .map((m) => mapPeerMessage(m, conv.participants, this.root.meId));
         }
         this.loadingThread = false;
       });
@@ -222,7 +231,7 @@ export class PeerStore {
 
   private appendMessage(conv: PeerConversation, m: ApiMessage) {
     if (conv.messages.some((x) => x.id === m.id)) return;
-    conv.messages.push(mapPeerMessage(m, conv.participants));
+    conv.messages.push(mapPeerMessage(m, conv.participants, this.root.meId));
     conv.messages.sort((a, b) => a.id.localeCompare(b.id));
     if (m.sender_kind !== "system") {
       conv.preview = m.body;
@@ -323,14 +332,26 @@ export class PeerStore {
     return new Set(this.partyRoles(c)).size > 1;
   }
 
+  // The free-text haystack for a conversation: reference, and for every
+  // participant their name, id (external_user_id / internal_actor_id) and all
+  // metadata values (phone, vehicle, plan…), plus the last-message preview — so
+  // an agent can find a peer chat by trip reference, a participant's id, or any
+  // metadata value, not just their display name.
+  private searchHay(c: PeerConversation): string {
+    const parts: string[] = [c.reference, c.preview];
+    for (const p of c.participants) {
+      parts.push(p.name, p.id, ...Object.values(p.meta));
+    }
+    return parts.join(" ").toLowerCase();
+  }
+
   // The conversations shown in the list, after the active role filter + free text.
   get filtered(): PeerConversation[] {
     const q = this.query.trim().toLowerCase();
     return this.conversations.filter((c) => {
       if (this.roleFilter && !this.partyRoles(c).includes(this.roleFilter)) return false;
       if (!q) return true;
-      const hay = (c.reference + " " + c.participants.map((p) => p.name).join(" ") + " " + c.preview).toLowerCase();
-      return hay.includes(q);
+      return this.searchHay(c).includes(q);
     });
   }
 
@@ -346,7 +367,7 @@ export class PeerStore {
     const q = this.query.trim().toLowerCase();
     if (!q) return [];
     return this.conversations
-      .filter((c) => (c.reference + " " + c.participants.map((p) => p.name).join(" ")).toLowerCase().includes(q))
+      .filter((c) => this.searchHay(c).includes(q))
       .slice(0, 5)
       .map((c) => ({ id: c.id, title: this.title(c), reference: c.reference }));
   }

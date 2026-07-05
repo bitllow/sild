@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/auth"
+	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
@@ -83,7 +84,38 @@ func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, ro
 // SetPeerAccess toggles an operator's access to peer conversations (Settings →
 // Team). Per-user, independent of platform role.
 func (s *Service) SetPeerAccess(ctx context.Context, tenantID, adminID string, peerAccess bool) error {
-	return mapStoreErr(s.store.Admins().SetPeerAccess(ctx, tenantID, adminID, peerAccess))
+	if err := s.store.Admins().SetPeerAccess(ctx, tenantID, adminID, peerAccess); err != nil {
+		return mapStoreErr(err)
+	}
+	// Reconcile the operator's LIVE realtime subscriptions so the change takes
+	// effect at once: a revoke stops peer message delivery to an already-open
+	// connection immediately, and a grant starts it — otherwise the peer channel
+	// set is only re-derived at reconnect (agentSubscriptions).
+	s.reconcilePeerSubscriptions(ctx, tenantID, adminID, peerAccess)
+	return nil
+}
+
+// reconcilePeerSubscriptions adds or removes the operator's server-side
+// subscriptions to every peer conv channel, matching a peer_access change on a
+// still-connected inbox socket. Best-effort (the realtime layer may not support
+// live subscription changes — tests/workers — and reconnect re-derives anyway).
+func (s *Service) reconcilePeerSubscriptions(ctx context.Context, tenantID, adminID string, grant bool) {
+	sub, ok := s.pub.(realtime.Subscriber)
+	if !ok {
+		return
+	}
+	ids, err := s.store.Conversations().PeerConversationIDs(ctx, tenantID)
+	if err != nil {
+		return
+	}
+	for _, cid := range ids {
+		ch := realtime.ConvChannel(cid)
+		if grant {
+			_ = sub.Subscribe(adminID, ch)
+		} else {
+			_ = sub.Unsubscribe(adminID, ch)
+		}
+	}
 }
 
 // GetAdmin loads a single admin user (Settings → Team, /admin/me).

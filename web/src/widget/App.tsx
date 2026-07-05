@@ -154,7 +154,11 @@ export function App({ client, config, conversationId, name, mode = "live", previ
       started.current = true;
       void client.start(command.conversationId);
     } else if (command.conversationId) {
-      void client.openConversation(command.conversationId);
+      // The socket connected earlier, before this conversation existed, so its
+      // server-side subscriptions don't cover conv:<id> yet — reconnect to
+      // re-derive membership and receive live replies (§5.2), mirroring the
+      // reconnect after creating a support request.
+      void Promise.resolve(client.openConversation(command.conversationId)).then(() => client.reconnect());
     }
   }, [command?.seq]);
 

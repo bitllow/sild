@@ -173,7 +173,14 @@
         if (mode === "user") {
           driverCard.style.display = "flex";
           document.getElementById("open-chat").addEventListener("click", function () {
-            fetch(BASE + "/v1/dev/peer-conversation?user_id=" + encodeURIComponent(uid))
+            // The rider = the current demo session (its user id + metadata). Edit
+            // the id / metadata in the session panel and Start session to change
+            // who the peer chat is with — the inbox can then find it by that id or
+            // any metadata value (name, phone, plan…).
+            var riderMeta = JSON.stringify(Object.assign({ role: "rider" }, metadata));
+            var url = BASE + "/v1/dev/peer-conversation?user_id=" + encodeURIComponent(uid) +
+              "&meta=" + encodeURIComponent(riderMeta);
+            fetch(url)
               .then(function (r) { return r.json(); })
               .then(function (d) { if (widget && d.conversation_id) widget.open(d.conversation_id); });
           });

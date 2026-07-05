@@ -232,6 +232,11 @@ export class RootStore {
         this.meId = me.id;
         this.peerAccess = !!me.peer_access;
       });
+      // Load peer conversations up front (not lazily on first visit) so the nav
+      // attention badge is live from session start and realtime peer messages
+      // route to the peer store — otherwise, until the surface is opened once,
+      // peer.owns() is false and peer arrivals are dropped into a queue refetch.
+      if (this.peerAccess) void this.peer.loadConversations();
     } catch {
       /* leave peer surface hidden */
     }

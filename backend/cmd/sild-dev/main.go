@@ -100,12 +100,19 @@ func main() {
 			if reference == "" {
 				reference = "trip_9021"
 			}
+			// Optional rider metadata (URL-encoded JSON) from the demo session, so
+			// the rider participant carries the same name/phone/plan the inbox shows
+			// and can be found by those values in the peer search.
+			riderMeta := json.RawMessage(nil)
+			if m := c.Query("meta"); m != "" && json.Valid([]byte(m)) {
+				riderMeta = json.RawMessage(m)
+			}
 			ids, err := st.Tenants().AllIDs(c.Request.Context())
 			if err != nil || len(ids) == 0 {
 				c.JSON(500, gin.H{"error": "no tenant"})
 				return
 			}
-			id, err := ensurePeerConversation(c.Request.Context(), svc, ids[0], rider, reference)
+			id, err := ensurePeerConversation(c.Request.Context(), svc, ids[0], rider, reference, riderMeta)
 			if err != nil {
 				c.JSON(500, gin.H{"error": err.Error()})
 				return
@@ -194,7 +201,7 @@ func strptr(s string) *string { return &s }
 // ensurePeerConversation finds (by reference + rider) or creates a driver↔rider
 // peer conversation and returns its id, seeding a driver message so the widget
 // thread opens with content. Peer conversations carry no assignment.
-func ensurePeerConversation(ctx context.Context, svc *domain.Service, tenantID, riderID, reference string) (string, error) {
+func ensurePeerConversation(ctx context.Context, svc *domain.Service, tenantID, riderID, reference string, riderMeta json.RawMessage) (string, error) {
 	if existing, err := svc.ListPeerConversations(ctx, tenantID); err == nil {
 		for _, cv := range existing {
 			if cv["reference"] == reference && peerHasMember(cv, riderID) {
@@ -203,7 +210,9 @@ func ensurePeerConversation(ctx context.Context, svc *domain.Service, tenantID, 
 		}
 	}
 	driverID := "u_driver_" + reference
-	riderMeta, _ := json.Marshal(map[string]string{"name": "Rider", "role": "rider"})
+	if len(riderMeta) == 0 {
+		riderMeta, _ = json.Marshal(map[string]string{"name": "Rider", "role": "rider"})
+	}
 	driverMeta, _ := json.Marshal(map[string]string{
 		"name": "Toomas Vaher", "role": "driver", "vehicle": "Silver estate · 421 KLM", "phone": "+372 5987 6543",
 	})

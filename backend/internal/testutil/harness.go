@@ -31,10 +31,28 @@ import (
 	"gorm.io/gorm"
 )
 
-// CapturePublisher records every published envelope for assertions.
+// CapturePublisher records every published envelope for assertions. It also
+// implements realtime.Subscriber so tests can assert live subscription changes
+// (e.g. peer_access revoke → unsubscribe from peer channels).
 type CapturePublisher struct {
-	mu     sync.Mutex
-	Events []Captured
+	mu           sync.Mutex
+	Events       []Captured
+	Subscribed   []string // "userID→channel"
+	Unsubscribed []string // "userID→channel"
+}
+
+func (p *CapturePublisher) Subscribe(userID, channel string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Subscribed = append(p.Subscribed, userID+"→"+channel)
+	return nil
+}
+
+func (p *CapturePublisher) Unsubscribe(userID, channel string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Unsubscribed = append(p.Unsubscribed, userID+"→"+channel)
+	return nil
 }
 
 // Captured is one published envelope plus its target.

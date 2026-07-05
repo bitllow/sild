@@ -23,6 +23,10 @@ export interface WidgetClient {
   upload(file: File): Promise<PendingAttachment>;
   /** Toggle the reply-notification sound (shared across the home + thread headers). */
   toggleSound(): void;
+  /** Force the realtime socket to reconnect so the server re-derives this user's
+   *  channel subscriptions — needed after opening a conversation created after the
+   *  socket connected (its conv:<id> channel isn't in the current subscription set). */
+  reconnect(): void;
 }
 
 interface ApiAttachment {
@@ -411,7 +415,7 @@ export class SildClient implements WidgetClient {
     return conv.id;
   }
 
-  private reconnect() {
+  reconnect() {
     if (!this.cf) return;
     try {
       this.cf.disconnect();
@@ -517,6 +521,7 @@ export class PreviewClient implements WidgetClient {
   openSupportRequest(): void {}
   send(): void {}
   backToList(): void {}
+  reconnect(): void {}
   toggleSound(): void {
     this.state = { ...this.state, soundOn: !this.state.soundOn };
     for (const l of this.listeners) l();

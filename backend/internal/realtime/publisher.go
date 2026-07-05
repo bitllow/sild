@@ -51,6 +51,16 @@ type Publisher interface {
 	Publish(ctx context.Context, t Target, env Envelope) error
 }
 
+// Subscriber adjusts a connected user's server-side subscriptions live, so an
+// access change (e.g. peer_access granted/revoked) takes effect without waiting
+// for the connection to reconnect — subscriptions are otherwise only derived at
+// connect time (agentSubscriptions). Implemented by the Centrifuge publisher;
+// absent in tests/workers, so callers type-assert and no-op when unavailable.
+type Subscriber interface {
+	Subscribe(userID, channel string) error
+	Unsubscribe(userID, channel string) error
+}
+
 // NoopPublisher drops events — used where realtime is irrelevant (some workers).
 type NoopPublisher struct{}
 

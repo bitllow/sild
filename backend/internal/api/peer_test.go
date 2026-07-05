@@ -188,6 +188,34 @@ func TestPeerImplicitJoin(t *testing.T) {
 	}
 }
 
+// Revoking peer access reconciles the operator's LIVE realtime subscriptions:
+// they are unsubscribed from every peer conv channel at once, so a still-open
+// inbox stops receiving peer publications without waiting for a reconnect.
+// Granting subscribes them.
+func TestPeerAccessRevokeUnsubscribesRealtime(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
+	ctx := context.Background()
+	peer := mkPeer(t, h, tenant.ID, "trip_1")
+
+	h.Pub.Reset()
+	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, true); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	wantChan := agent.ID + "→" + "conv:" + peer.ID
+	if len(h.Pub.Subscribed) != 1 || h.Pub.Subscribed[0] != wantChan {
+		t.Fatalf("grant should subscribe to %s, got %v", wantChan, h.Pub.Subscribed)
+	}
+
+	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, false); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if len(h.Pub.Unsubscribed) != 1 || h.Pub.Unsubscribed[0] != wantChan {
+		t.Fatalf("revoke should unsubscribe from %s, got %v", wantChan, h.Pub.Unsubscribed)
+	}
+}
+
 // The per-user peer_access flag persists through the team PATCH and surfaces in
 // both the team list and /admin/me.
 func TestPeerAccessTogglePersists(t *testing.T) {
