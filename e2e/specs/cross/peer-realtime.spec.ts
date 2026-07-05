@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoInbox } from "../../support/inbox";
+import { gotoInbox, composer, composerSend, composerFileInput } from "../../support/inbox";
 import {
   createWidgetPage,
   widgetComposer,
@@ -44,8 +44,9 @@ test("peer chat: rider (widget) → agent observes → step-in reply → widget,
     // Agent steps in (implicit join) — reply reaches the widget, and the inbox row
     // gains the "You joined" marker.
     const agentMsg = `two minutes away ${uid("m")}`;
-    await page.getByTestId("peer-composer").fill(agentMsg);
-    await page.getByTestId("peer-send").click();
+    // The peer composer reuses the shared ComposerBar (same selectors as support).
+    await composer(page).fill(agentMsg);
+    await composerSend(page).click();
     await expectRealtimeVisible(widgetBubble(widget, agentMsg));
     await expect(page.getByTestId("peer-row").filter({ hasText: agentMsg }).getByText("You joined")).toBeVisible();
 
@@ -54,6 +55,27 @@ test("peer chat: rider (widget) → agent observes → step-in reply → widget,
     await widgetComposer(widget).fill(followUp);
     await widgetSend(widget).click();
     await expectRealtimeVisible(page.getByTestId("peer-message").filter({ hasText: followUp }));
+
+    // Attachments cross both ways in a peer chat, same as an assigned conversation.
+    const riderFile = `${uid("ridecard")}.txt`;
+    await widget.locator('input[type="file"]').setInputFiles({
+      name: riderFile,
+      mimeType: "text/plain",
+      buffer: Buffer.from("rider attachment"),
+    });
+    await expect(widget.getByText(riderFile)).toBeVisible();
+    await widgetSend(widget).click();
+    await expectRealtimeVisible(page.getByText(riderFile)); // rendered in the peer view
+
+    const agentFile = `${uid("dispatch")}.txt`;
+    await composerFileInput(page).setInputFiles({
+      name: agentFile,
+      mimeType: "text/plain",
+      buffer: Buffer.from("agent attachment"),
+    });
+    await expect(page.getByText(agentFile)).toBeVisible(); // pending chip in the peer composer
+    await composerSend(page).click();
+    await expectRealtimeVisible(widget.getByText(agentFile));
   } finally {
     await context.close();
   }

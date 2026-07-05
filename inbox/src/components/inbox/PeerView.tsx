@@ -3,9 +3,9 @@
 import { useEffect, useRef } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { AvatarStack, Badge, PanelIcon } from "@/components/ds";
+import { AttachmentChips, AvatarStack, Badge, ComposerBar, InlineImages, PanelIcon } from "@/components/ds";
 import { RolePill } from "./PeerBits";
-import type { PeerConversation, PeerMessage } from "@/store/peer";
+import type { PeerMessage } from "@/store/peer";
 
 export const PeerView = observer(function PeerView() {
   const store = useStore();
@@ -77,7 +77,7 @@ export const PeerView = observer(function PeerView() {
             You&apos;re observing. Sending a message adds you to the conversation — both parties will see you.
           </div>
         )}
-        <PeerComposer active={active} />
+        <PeerComposer />
       </div>
     </div>
   );
@@ -123,7 +123,9 @@ function PeerBubble({ m, peer }: { m: PeerMessage; peer: ReturnType<typeof useSt
         }}
       >
         {m.body}
+        <InlineImages attachments={m.attachments} />
       </div>
+      <AttachmentChips attachments={m.attachments} />
       {m.mine && (
         <span style={{ alignSelf: "flex-end", fontSize: 11, color: "var(--text-tertiary)", paddingRight: 3 }}>
           You (support){m.time ? ` · ${m.time}` : ""}
@@ -133,54 +135,50 @@ function PeerBubble({ m, peer }: { m: PeerMessage; peer: ReturnType<typeof useSt
   );
 }
 
-const PeerComposer = observer(function PeerComposer({ active }: { active: PeerConversation }) {
-  const store = useStore();
-  const peer = store.peer;
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const submit = () => void peer.send();
+// PeerComposer reuses the shared ComposerBar + upload flow (same as the support
+// view), so attachments and any future composer work come for free. No internal-
+// note toggle — peer conversations have no agent-only notes.
+const PeerComposer = observer(function PeerComposer() {
+  const peer = useStore().peer;
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, border: "1px solid var(--border-default)", borderRadius: 12, padding: 8, background: "var(--surface-card)" }}>
-      <textarea
-        ref={taRef}
-        data-testid="peer-composer"
-        rows={1}
-        placeholder="Message everyone in this conversation…"
-        value={peer.composer}
+    <>
+      {(peer.pendingAtts.length > 0 || peer.uploading > 0) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {peer.pendingAtts.map((a, i) => (
+            <span
+              key={i}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 220, fontSize: 12, color: "var(--text-secondary)", background: "var(--surface-sunken)", border: "1px solid var(--border-default)", borderRadius: 8, padding: "5px 8px" }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.filename}</span>
+              <button onClick={() => peer.removePendingAtt(i)} aria-label="Remove attachment" style={{ border: 0, background: "transparent", cursor: "pointer", color: "var(--text-tertiary)", padding: 0, display: "flex", lineHeight: 1 }}>
+                ✕
+              </button>
+            </span>
+          ))}
+          {peer.uploading > 0 && <span style={{ fontSize: 12, color: "var(--text-tertiary)", alignSelf: "center" }}>Uploading…</span>}
+        </div>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
         onChange={(e) => {
-          peer.setComposer(e.target.value);
-          const el = e.currentTarget;
-          el.style.height = "auto";
-          el.style.height = Math.min(el.scrollHeight, 140) + "px";
+          const files = Array.from(e.target.files || []);
+          e.target.value = "";
+          if (files.length) peer.attachFiles(files);
         }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        style={{ flex: 1, resize: "none", border: 0, outline: "none", background: "transparent", font: "inherit", fontSize: 14, color: "var(--text-primary)", lineHeight: 1.4, maxHeight: 140 }}
       />
-      <button
-        data-testid="peer-send"
-        aria-label="Send"
-        onClick={submit}
-        disabled={!peer.composer.trim() || peer.sending}
-        style={{
-          flex: "none",
-          height: 34,
-          padding: "0 14px",
-          border: 0,
-          borderRadius: 9,
-          background: peer.composer.trim() ? "var(--brand)" : "var(--surface-sunken)",
-          color: peer.composer.trim() ? "#fff" : "var(--text-tertiary)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 14,
-          fontWeight: 600,
-          cursor: peer.composer.trim() ? "pointer" : "default",
-        }}
-      >
-        Send
-      </button>
-    </div>
+      <ComposerBar
+        value={peer.composer}
+        onChange={(v) => peer.setComposer(v)}
+        onSend={() => void peer.send()}
+        onAttach={() => fileRef.current?.click()}
+        placeholder="Message everyone in this conversation…"
+        canSendEmpty={peer.pendingAtts.length > 0}
+        disabled={peer.uploading > 0}
+      />
+    </>
   );
 });

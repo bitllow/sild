@@ -10,6 +10,7 @@ import {
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
+import { uploadFile } from "@/api/upload";
 import { PeerStore } from "./peer";
 import {
   buildConversation,
@@ -720,7 +721,9 @@ export class RootStore {
 
   // chime plays the two-tone notification when unmuted (no-op otherwise). The
   // Web Audio plumbing + autoplay unlock live at module scope (see playChime).
-  private chime = () => {
+  // chime plays the reply-notification sound (honors the mute toggle). Public so
+  // the peer store (PeerRoot) can chime on inbound peer messages too.
+  chime = () => {
     if (this.soundOn) playChime();
   };
 
@@ -899,30 +902,11 @@ export class RootStore {
     }
   };
   private uploadOne = async (file: File, gen: number) => {
-    const mime = file.type || "application/octet-stream";
     try {
-      const grant = await adminApi.issueUpload(mime, file.size, file.name);
-      // Local backend returns an absolute public-origin URL; PUT to its relative
-      // /v1 path so it goes same-origin through the Next proxy. Cloud signed URLs
-      // (no local route) are used as-is.
-      const marker = "/v1/uploads/local/";
-      const at = grant.upload_url.indexOf(marker);
-      const putUrl = at >= 0 ? grant.upload_url.slice(at) : grant.upload_url;
-      const res = await fetch(putUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": mime },
-        credentials: at >= 0 ? "include" : "omit",
-      });
-      if (!res.ok) throw new Error("upload failed");
+      const att = await uploadFile(file);
       runInAction(() => {
         if (this.uploadGen !== gen) return; // conversation changed — discard
-        this.pendingAtts.push({
-          objectKey: grant.object_key,
-          disposition: mime.startsWith("image/") ? "inline" : "attachment",
-          mimeType: mime,
-          filename: file.name,
-        });
+        this.pendingAtts.push(att);
       });
     } catch (e) {
       runInAction(() => {

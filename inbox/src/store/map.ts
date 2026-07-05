@@ -61,7 +61,7 @@ export function mapMember(m: ApiMember): Member {
  *  already-loaded UI conversation to resolve the author. */
 // mapAttachments converts the API attachment shape to the UI render shape,
 // deriving kind (image → inline render) from the mime type.
-function mapAttachments(m: ApiMessage): MessageAttachment[] {
+export function mapAttachments(m: ApiMessage): MessageAttachment[] {
   return (m.attachments || []).map((a) => ({
     disposition: a.disposition,
     kind: a.mime_type?.startsWith("image/") ? "image" : "file",

@@ -1,8 +1,10 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { adminApi, type ApiMember, type ApiMessage, type ApiQueueConversation } from "@/api/admin";
 import type { RealtimeEnvelope } from "@/api/realtime";
-import type { Presence } from "@/components/ds";
-import { clockTime, relativeTime } from "./map";
+import type { MessageAttachment, Presence } from "@/components/ds";
+import { uploadFile } from "@/api/upload";
+import type { PendingAttachment } from "./types";
+import { clockTime, mapAttachments, relativeTime } from "./map";
 
 // Peer conversations are direct chats between end-user parties with no support
 // assignment. Everything role-related is DERIVED from the participants present —
@@ -31,6 +33,7 @@ export interface PeerMessage {
    *  Another agent in the same thread is isAgent but not mine — rendered as an
    *  incoming, named support message. */
   mine: boolean;
+  attachments: MessageAttachment[];
 }
 
 export interface PeerConversation {
@@ -51,6 +54,8 @@ export interface PeerConversation {
 export interface PeerRoot {
   meId: string | null;
   requestReconnect(): void;
+  /** Play the reply-notification chime (honors the shared sound toggle). */
+  chime(): void;
 }
 
 const isAgentRole = (role: string) => role === "support" || role === "agent";
@@ -93,6 +98,7 @@ function mapPeerMessage(m: ApiMessage, participants: PeerParticipant[], meId: st
     joinNote,
     isAgent,
     mine,
+    attachments: mapAttachments(m),
   };
 }
 
@@ -103,6 +109,12 @@ export class PeerStore {
   loadingThread = false;
   composer = "";
   sending = false;
+  // Files uploaded and queued to attach to the next message, plus in-flight upload
+  // count (Send waits for uploads). uploadGen invalidates uploads that land after a
+  // conversation switch — same shape as the support composer (see RootStore).
+  pendingAtts: PendingAttachment[] = [];
+  uploading = 0;
+  private uploadGen = 0;
   // Search-with-autocomplete state (the peer list uses this instead of tabs).
   query = "";
   searchOpen = false;
@@ -266,10 +278,39 @@ export class PeerStore {
   setActive = async (id: string) => {
     this.activeId = id;
     this.composer = "";
+    this.pendingAtts = [];
+    this.uploading = 0;
+    this.uploadGen += 1; // discard any upload still in flight for the previous conv
     this.unreadByConv.set(id, 0);
     const conv = this.conversations.find((c) => c.id === id);
     if (conv) conv.unread = 0;
     await this.loadMessages(id);
+  };
+
+  // attachFiles uploads each file (shared uploadFile helper) and queues a reference
+  // for the next peer message — same flow as the support composer.
+  attachFiles = (files: File[]) => {
+    const gen = this.uploadGen;
+    for (const file of files) {
+      runInAction(() => {
+        this.uploading += 1;
+      });
+      void uploadFile(file)
+        .then((att) =>
+          runInAction(() => {
+            if (this.uploadGen === gen) this.pendingAtts.push(att);
+          })
+        )
+        .catch(() => {})
+        .finally(() =>
+          runInAction(() => {
+            if (this.uploadGen === gen) this.uploading -= 1;
+          })
+        );
+    }
+  };
+  removePendingAtt = (i: number) => {
+    this.pendingAtts.splice(i, 1);
   };
 
   loadMessages = async (id: string) => {
@@ -302,11 +343,17 @@ export class PeerStore {
   send = async () => {
     const id = this.activeId;
     const body = this.composer.trim();
-    if (!id || !body || this.sending) return;
+    const atts = this.pendingAtts.slice();
+    if (!id || (!body && atts.length === 0) || this.sending || this.uploading > 0) return;
     this.sending = true;
     this.composer = "";
+    this.pendingAtts = [];
     try {
-      const msg = await adminApi.postPeerMessage(id, body);
+      const msg = await adminApi.postPeerMessage(
+        id,
+        body,
+        atts.map((a) => ({ object_key: a.objectKey, disposition: a.disposition }))
+      );
       runInAction(() => {
         const conv = this.conversations.find((c) => c.id === id);
         if (conv) {
@@ -349,15 +396,17 @@ export class PeerStore {
         void this.loadConversations();
         return;
       }
+      const own = m.sender_kind === "agent" || !!m.internal_actor_id;
+      const inbound = !own && m.sender_kind !== "system";
       runInAction(() => {
         this.appendMessage(conv, m);
-        const own = m.sender_kind === "agent" || !!m.internal_actor_id;
-        if (cid !== this.activeId && !own && m.sender_kind !== "system") {
+        if (inbound && cid !== this.activeId) {
           const n = (this.unreadByConv.get(cid) || 0) + 1;
           this.unreadByConv.set(cid, n);
           conv.unread = n;
         }
       });
+      if (inbound) this.root.chime(); // match the support inbox's inbound chime
     } else if (env.type === "member.added") {
       // Someone joined (an agent stepped in) — refresh participants + the row.
       void this.loadConversations();
