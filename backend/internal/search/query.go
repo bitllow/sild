@@ -14,6 +14,11 @@ type Query struct {
 	Meta     map[string]string // member-metadata filters (phone, app_version, meta.<key>)
 	Keywords []string          // free text → partial match on body + member text
 
+	// PeerOnly restricts results to peer conversations — open, no assignment (the
+	// peer surface's search, GET /admin/search?peer=true). Set by the handler, not
+	// parsed from the bar.
+	PeerOnly bool
+
 	Before string
 	Limit  int
 }

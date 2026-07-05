@@ -188,6 +188,52 @@ func TestPeerImplicitJoin(t *testing.T) {
 	}
 }
 
+// Peer search (GET /admin/search?peer=true, via the shared search backend) finds
+// a peer conversation by a participant's id and by any metadata value, and never
+// returns support (assignment-carrying) conversations.
+func TestPeerSearchByIdAndMetadata(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+
+	// A peer conversation whose rider has a distinctive id + metadata value.
+	_, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
+		Reference: "trip_find", OpenAssignment: false,
+		Members: []domain.MemberInput{
+			{UserID: "p_zorro", ConvRole: models.ConvRole("rider"), Metadata: json.RawMessage(`{"name":"Zelda Xylophone","plan":"platinum"}`)},
+			{UserID: "p_dd", ConvRole: models.ConvRole("driver"), Metadata: json.RawMessage(`{"name":"Dan Driver"}`)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create peer: %v", err)
+	}
+	// A support conversation that must NOT appear in peer search.
+	mkSupport(t, h, tenant.ID, "support")
+
+	search := func(q string) []string {
+		res, err := h.Search.Search(ctx, tenant.ID, q, "", "", 25, true)
+		if err != nil {
+			t.Fatalf("search %q: %v", q, err)
+		}
+		ids := make([]string, 0, len(res.Conversations))
+		for _, c := range res.Conversations {
+			ids = append(ids, c.ConversationID)
+		}
+		return ids
+	}
+
+	if got := search("p_zorro"); len(got) != 1 { // by participant id
+		t.Fatalf("search by id: got %d hits, want 1 (%v)", len(got), got)
+	}
+	if got := search("platinum"); len(got) != 1 { // by metadata value (no configured keys)
+		t.Fatalf("search by metadata: got %d hits, want 1 (%v)", len(got), got)
+	}
+	// A term that only matches the support conversation returns nothing (peer scope).
+	if got := search("u_support"); len(got) != 0 {
+		t.Fatalf("peer search leaked a support conversation: %v", got)
+	}
+}
+
 // Revoking peer access reconciles the operator's LIVE realtime subscriptions:
 // they are unsubscribed from every peer conv channel at once, so a still-open
 // inbox stops receiving peer publications without waiting for a reconnect.

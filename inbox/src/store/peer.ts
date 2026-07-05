@@ -107,10 +107,18 @@ export class PeerStore {
   query = "";
   searchOpen = false;
   roleFilter: string | null = null;
+  searching = false;
+  // Keyset pagination for the default list (infinite scroll) — same shape as the
+  // support queue. Null while a text search is active (search has its own paging).
+  cursor: string | null = null;
+  hasMore = false;
+  loadingMore = false;
   // Client-side unread (agents aren't conversation members, so there are no read
   // receipts to derive from): bumped on inbound realtime while a peer row isn't
   // active, cleared on open. Kept out of the row objects so a list refetch keeps it.
   private unreadByConv = new Map<string, number>();
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private searchSeq = 0;
 
   constructor(private root: PeerRoot) {
     makeAutoObservable(this, { owns: false });
@@ -123,8 +131,17 @@ export class PeerStore {
     this.query = "";
     this.searchOpen = false;
     this.roleFilter = null;
+    this.searching = false;
+    this.cursor = null;
+    this.hasMore = false;
     this.composer = "";
     this.unreadByConv.clear();
+  }
+
+  // A text search is active — the list shows server search hits, not the paginated
+  // default list, so infinite scroll is paused (search has its own result set).
+  private get isSearching(): boolean {
+    return this.query.trim().length > 0;
   }
 
   // owns reports whether a conversation id belongs to the peer surface, so the
@@ -133,11 +150,17 @@ export class PeerStore {
     return convId === this.activeId || this.conversations.some((c) => c.id === convId);
   }
 
+  // loadConversations (re)loads the FIRST page of the default list, honoring the
+  // active role filter. Server-side keyset pagination — not a fetch-all.
   loadConversations = async () => {
     try {
-      const { conversations } = await adminApi.listPeerConversations();
+      const { conversations, next_cursor, has_more } = await adminApi.listPeerConversations({
+        role: this.roleFilter || undefined,
+      });
       runInAction(() => {
         this.conversations = conversations.map((c) => this.buildRow(c));
+        this.cursor = has_more ? next_cursor : null;
+        this.hasMore = has_more;
         this.loaded = true;
         if (!this.activeId && this.conversations.length) void this.setActive(this.conversations[0].id);
       });
@@ -147,6 +170,81 @@ export class PeerStore {
       });
     }
   };
+
+  // loadMore appends the next keyset page (infinite scroll), default list only.
+  loadMore = async () => {
+    if (this.isSearching || !this.hasMore || this.loadingMore || !this.cursor) return;
+    this.loadingMore = true;
+    try {
+      const { conversations, next_cursor, has_more } = await adminApi.listPeerConversations({
+        role: this.roleFilter || undefined,
+        cursor: this.cursor,
+      });
+      runInAction(() => {
+        const seen = new Set(this.conversations.map((c) => c.id));
+        for (const c of conversations) if (!seen.has(c.id)) this.conversations.push(this.buildRow(c));
+        this.cursor = has_more ? next_cursor : null;
+        this.hasMore = has_more;
+        this.loadingMore = false;
+      });
+    } catch {
+      runInAction(() => {
+        this.loadingMore = false;
+      });
+    }
+  };
+
+  // runSearch replaces the list with server search hits (GET /admin/search?peer=true
+  // — the shared search backend, so id/metadata/keyword matching matches support
+  // search). Hits are hydrated into peer rows via the shared conversation endpoints.
+  private runSearch = async (q: string) => {
+    const seq = ++this.searchSeq;
+    runInAction(() => {
+      this.searching = true;
+    });
+    try {
+      const { conversations } = await adminApi.searchPeer(q);
+      const rows = await Promise.all(conversations.map((hit) => this.hydrateHit(hit.conversation_id, hit.snippet)));
+      if (seq !== this.searchSeq) return; // stale response
+      runInAction(() => {
+        this.conversations = rows.filter((r): r is PeerConversation => r !== null);
+        this.cursor = null;
+        this.hasMore = false;
+        this.searching = false;
+      });
+    } catch {
+      runInAction(() => {
+        this.searching = false;
+      });
+    }
+  };
+
+  // hydrateHit turns a search hit id into a peer row using the shared conversation
+  // + messages endpoints (same pattern as the support inbox's search hydration).
+  private async hydrateHit(id: string, snippet?: string): Promise<PeerConversation | null> {
+    try {
+      const [conv, page] = await Promise.all([adminApi.getConversation(id), adminApi.listMessages(id)]);
+      const participants = conv.members.map(mapParticipant);
+      const messages = [...page.messages]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((m) => mapPeerMessage(m, participants, this.root.meId));
+      const last = page.messages[page.messages.length - 1];
+      const lastActivity = last?.created_at || conv.created_at;
+      return {
+        id: conv.id,
+        reference: conv.reference || conv.id,
+        participants,
+        preview: snippet || messages.filter((m) => !m.joinNote).slice(-1)[0]?.body || "",
+        time: relativeTime(lastActivity),
+        lastActivity,
+        unread: this.unreadByConv.get(conv.id) || 0,
+        joined: participants.some((p) => p.isAgent),
+        messages,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   private buildRow(c: ApiQueueConversation): PeerConversation {
     const participants = c.members.map(mapParticipant);
@@ -277,10 +375,19 @@ export class PeerStore {
     });
   };
 
-  // ── search + filter (derived, tenant-agnostic) ───────────────────────────
+  // ── search + filter (server-side) ────────────────────────────────────────
+  // Free text runs a debounced server search (shared search backend, peer-scoped);
+  // clearing it restores the paginated default list. Mirrors the support inbox.
   setQuery = (v: string) => {
     this.query = v;
     this.searchOpen = true;
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    if (!v.trim()) {
+      this.searching = false;
+      void this.loadConversations();
+      return;
+    }
+    this.searchTimer = setTimeout(() => void this.runSearch(v), 280);
   };
   openSearch = () => {
     this.searchOpen = true;
@@ -288,13 +395,16 @@ export class PeerStore {
   closeSearch = () => {
     this.searchOpen = false;
   };
+  // Picking a role clears any text search and reloads the list filtered server-side.
   pickRole = (role: string) => {
     this.roleFilter = role;
     this.query = "";
     this.searchOpen = false;
+    void this.loadConversations();
   };
   clearRole = () => {
     this.roleFilter = null;
+    void this.loadConversations();
   };
 
   private partyRoles(c: PeerConversation): string[] {
@@ -332,44 +442,26 @@ export class PeerStore {
     return new Set(this.partyRoles(c)).size > 1;
   }
 
-  // The free-text haystack for a conversation: reference, and for every
-  // participant their name, id (external_user_id / internal_actor_id) and all
-  // metadata values (phone, vehicle, plan…), plus the last-message preview — so
-  // an agent can find a peer chat by trip reference, a participant's id, or any
-  // metadata value, not just their display name.
-  private searchHay(c: PeerConversation): string {
-    const parts: string[] = [c.reference, c.preview];
-    for (const p of c.participants) {
-      parts.push(p.name, p.id, ...Object.values(p.meta));
-    }
-    return parts.join(" ").toLowerCase();
-  }
-
-  // The conversations shown in the list, after the active role filter + free text.
+  // The list shown in the left column. Filtering (role) + free-text search run
+  // server-side (loadConversations / runSearch), so this is just the current set.
   get filtered(): PeerConversation[] {
-    const q = this.query.trim().toLowerCase();
-    return this.conversations.filter((c) => {
-      if (this.roleFilter && !this.partyRoles(c).includes(this.roleFilter)) return false;
-      if (!q) return true;
-      return this.searchHay(c).includes(q);
-    });
+    return this.conversations;
   }
 
-  // Autocomplete suggestions: one row per distinct role (+ count), and — when
-  // typing — matching conversations.
+  // Autocomplete "Filter by role" suggestions — one row per distinct role (+ count)
+  // over the loaded rows. The set of roles is small and repeats, so the loaded page
+  // surfaces them; picking one re-queries the server (pickRole).
   get roleSuggestions(): { role: string; count: number }[] {
     const q = this.query.trim().toLowerCase();
     return this.roleOrder
       .filter((r) => !q || r.toLowerCase().includes(q))
       .map((r) => ({ role: r, count: this.conversations.filter((c) => this.partyRoles(c).includes(r)).length }));
   }
+  // "Conversations" suggestions in the dropdown = the top of the current (server
+  // list or server search) results, so the dropdown always reflects server state.
   get convSuggestions(): { id: string; title: string; reference: string }[] {
-    const q = this.query.trim().toLowerCase();
-    if (!q) return [];
-    return this.conversations
-      .filter((c) => this.searchHay(c).includes(q))
-      .slice(0, 5)
-      .map((c) => ({ id: c.id, title: this.title(c), reference: c.reference }));
+    if (!this.query.trim()) return [];
+    return this.conversations.slice(0, 5).map((c) => ({ id: c.id, title: this.title(c), reference: c.reference }));
   }
 
   // Row / header title: non-agent participant names.

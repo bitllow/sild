@@ -202,8 +202,8 @@ func strptr(s string) *string { return &s }
 // peer conversation and returns its id, seeding a driver message so the widget
 // thread opens with content. Peer conversations carry no assignment.
 func ensurePeerConversation(ctx context.Context, svc *domain.Service, tenantID, riderID, reference string, riderMeta json.RawMessage) (string, error) {
-	if existing, err := svc.ListPeerConversations(ctx, tenantID); err == nil {
-		for _, cv := range existing {
+	if existing, err := svc.ListPeerConversations(ctx, tenantID, store.PeerParams{Limit: 100}); err == nil {
+		for _, cv := range existing.Conversations {
 			if cv["reference"] == reference && peerHasMember(cv, riderID) {
 				return cv["id"].(string), nil
 			}

@@ -65,12 +65,13 @@ type ConversationRepo interface {
 	UpdateStatus(ctx context.Context, tenantID, id string, status models.ConversationStatus) error
 	ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error)
 	ListArchivable(ctx context.Context, tenantID string, idleBeforeMsgID string, limit int) ([]models.Conversation, error)
-	// ListPeers returns the tenant's open conversations that carry no assignment —
-	// the peer conversations (direct chats between parties, no support agent),
-	// newest-activity first. Reads the denormalized last-activity only.
-	ListPeers(ctx context.Context, tenantID string) ([]models.Conversation, error)
-	// PeerConversationIDs returns the ids of those same peer conversations, for
-	// deriving an observing agent's realtime subscriptions (§5.2).
+	// ListPeers returns one keyset-paginated page of the tenant's peer
+	// conversations (open, no assignment), newest-activity first, with optional
+	// server-side role + free-text filtering. Mirrors the assignment queue's
+	// pagination so the peer surface has the same limits / infinite scroll / search.
+	ListPeers(ctx context.Context, tenantID string, p PeerParams) (PeerPage, error)
+	// PeerConversationIDs returns the ids of ALL peer conversations (unpaginated),
+	// for deriving an observing agent's realtime subscriptions (§5.2).
 	PeerConversationIDs(ctx context.Context, tenantID string) ([]string, error)
 	// TouchLastMessage updates the denormalized last-activity timestamp + preview
 	// used by the inbox queue ordering (see models.Conversation).
@@ -171,6 +172,32 @@ type QueuePage struct {
 type MessagePage struct {
 	Messages []models.Message
 	HasMore  bool
+}
+
+// PeerParams are the filter + keyset pagination for the peer-conversation LIST
+// (the default, no-query view — mirrors the assignment queue's ListQueue). Role
+// filters to conversations that include the given conv_role. Free-text SEARCH is
+// not here: it reuses the shared search.Backend via GET /admin/search?peer=true,
+// so id/metadata/keyword matching is identical to the support inbox's search.
+type PeerParams struct {
+	Role   string
+	Limit  int
+	Cursor *QueueCursor // keyset by (last_activity, conversation id); nil = first page
+}
+
+// PeerItem is one enriched peer-list row (conversation + active members, no
+// message history — the thread loads on open).
+type PeerItem struct {
+	Conversation models.Conversation
+	Members      []models.ConversationMember
+	LastActivity time.Time
+}
+
+// PeerPage is one page of peer conversations with the cursor for the next page.
+type PeerPage struct {
+	Items      []PeerItem
+	NextCursor *QueueCursor
+	HasMore    bool
 }
 
 type MessageRepo interface {

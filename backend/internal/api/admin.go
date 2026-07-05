@@ -277,8 +277,14 @@ func (h *Handler) closeAssignmentAdmin(c *gin.Context) {
 }
 
 func (h *Handler) adminSearch(c *gin.Context) {
+	// ?peer=true scopes the search to peer conversations — gated on peer access,
+	// mirroring the peer-list endpoint.
+	peerOnly := c.Query("peer") == "true"
+	if peerOnly && !requirePeerAccess(c) {
+		return
+	}
 	res, err := h.search.Search(c.Request.Context(), apiutil.Tenant(c),
-		c.Query("q"), middleware.Get(c).AdminID, c.Query("before"), atoiDefault(c.Query("limit"), 25))
+		c.Query("q"), middleware.Get(c).AdminID, c.Query("before"), atoiDefault(c.Query("limit"), 25), peerOnly)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return

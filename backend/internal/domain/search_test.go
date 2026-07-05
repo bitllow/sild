@@ -47,7 +47,7 @@ func TestAdminSearch(t *testing.T) {
 		{"refund status:closed", false}, // AND of keyword + filter
 	}
 	for _, tc := range cases {
-		res, err := h.Search.Search(ctx, tenant.ID, tc.q, "", "", 25)
+		res, err := h.Search.Search(ctx, tenant.ID, tc.q, "", "", 25, false)
 		if err != nil {
 			t.Fatalf("search %q: %v", tc.q, err)
 		}
@@ -76,7 +76,7 @@ func TestAdminSearchLiveJSONFallback(t *testing.T) {
 
 	// "city" is not materialized into member_search_text, but the live-JSON
 	// fallback finds it.
-	res, err := h.Search.Search(ctx, tenant.ID, "meta.city:tallinn", "", "", 25)
+	res, err := h.Search.Search(ctx, tenant.ID, "meta.city:tallinn", "", "", 25, false)
 	if err != nil {
 		t.Fatal(err)
 	}

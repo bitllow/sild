@@ -22,6 +22,10 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	op := likeOpFor(dialect)
 	b := db.Table("conversations c").Where("c.tenant_id = ?", tenantID)
 
+	if q.PeerOnly {
+		// Peer conversations: open, and carrying no assignment (the peer surface).
+		b = b.Where("c.status = ? AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.conversation_id = c.id)", "open")
+	}
 	if q.Status != nil {
 		b = b.Where("c.status = ?", *q.Status)
 	}
@@ -41,10 +45,35 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 		b = b.Where(cond, args...)
 	}
 	for _, kw := range q.Keywords {
-		cond := "(" + existsLike("messages", "msg", "msg.body", op) + " OR " + memberLikeExists("m.member_search_text", op) + ")"
-		b = b.Where(cond, like(kw), like(kw))
+		// A keyword matches a message body, OR — for any active member — the
+		// materialized member search text (configured metadata keys), the raw
+		// metadata as text (so ANY metadata value matches even without configured
+		// searchable keys), or the participant's external id. This lets an agent
+		// find a conversation by a participant id or metadata value, not just a name.
+		metaText := memberMetaText(dialect)
+		memberCond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" +
+			wrap("m.member_search_text", op) + " " + op + " ? OR " +
+			wrap(metaText, op) + " " + op + " ? OR " +
+			wrap("m.external_user_id", op) + " " + op + " ?))"
+		cond := "(" + existsLike("messages", "msg", "msg.body", op) + " OR " + memberCond + ")"
+		b = b.Where(cond, like(kw), like(kw), like(kw), like(kw))
 	}
 	return b
+}
+
+// memberMetaText is the dialect-specific expression that exposes a member's raw
+// metadata as text for a LIKE/ILIKE match — so any metadata value is searchable
+// even when the tenant hasn't declared searchable_metadata_keys (member_search_text
+// is empty then).
+func memberMetaText(d config.Driver) string {
+	switch d {
+	case config.Postgres:
+		return "m.metadata::text"
+	case config.MySQL:
+		return "CAST(m.metadata AS CHAR)"
+	default: // sqlite stores JSON as TEXT
+		return "m.metadata"
+	}
 }
 
 func like(s string) string { return "%" + strings.ToLower(s) + "%" }
@@ -60,10 +89,6 @@ func wrap(col, op string) string {
 func existsLike(table, alias, col, op string) string {
 	return "EXISTS (SELECT 1 FROM " + table + " " + alias +
 		" WHERE " + alias + ".conversation_id = c.id AND " + wrap(col, op) + " " + op + " ?)"
-}
-
-func memberLikeExists(col, op string) string {
-	return "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND " + wrap(col, op) + " " + op + " ?)"
 }
 
 // metaExists matches a member-metadata key against the materialized search text

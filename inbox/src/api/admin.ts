@@ -286,8 +286,26 @@ export const adminApi = {
   me: () => api.get<ApiMe>("/admin/me"),
 
   // ── Peer conversations (direct chats, no assignment — § peer) ──────────
-  listPeerConversations: () =>
-    api.get<{ conversations: ApiQueueConversation[] }>("/admin/peer-conversations"),
+  // Keyset-paginated list (same limits/infinite-scroll as the queue). role filters
+  // server-side; free-text search reuses the shared search endpoint (searchPeer).
+  listPeerConversations: (params?: { role?: string; cursor?: string | null; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.role) q.set("role", params.role);
+    if (params?.cursor) q.set("cursor", params.cursor);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return api.get<{
+      conversations: ApiQueueConversation[];
+      next_cursor: string | null;
+      has_more: boolean;
+    }>(`/admin/peer-conversations${qs ? `?${qs}` : ""}`);
+  },
+  // Peer free-text search reuses the shared search backend (GET /admin/search),
+  // scoped to peer conversations — same machinery as the support inbox's search.
+  searchPeer: (q: string) =>
+    api.get<{ conversations: ApiSearchHit[] }>(
+      `/admin/search?peer=true&q=${encodeURIComponent(q)}`
+    ),
   // Reading a peer thread reuses GET /conversations/:id/messages (authz admits
   // peer_access agents). Sending goes through the peer path so the first message
   // implicitly joins the operator.

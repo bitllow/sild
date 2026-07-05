@@ -40,6 +40,16 @@ test("opening a peer chat shows participants + role, no claim/close", async ({ p
   await expect(panel.getByText("Black hatchback · 118 TRE")).toBeVisible();
 });
 
+test("free-text search finds a peer chat server-side by metadata value", async ({ page }) => {
+  await openPeer(page);
+  // "Silver estate · 421 KLM" is the seeded driver's vehicle metadata — not a name
+  // or reference — so a match proves server-side metadata search (GET /admin/search
+  // ?peer=true), not just client-side name/reference filtering.
+  await page.getByTestId("peer-search").fill("Silver estate");
+  await expect(seededRow(page, "trip_9021")).toBeVisible();
+  await expect(seededRow(page, "trip_8830")).toHaveCount(0);
+});
+
 test("role autocomplete filters the list by a derived role", async ({ page }) => {
   await openPeer(page);
   // The rider↔rider chat is present before filtering.

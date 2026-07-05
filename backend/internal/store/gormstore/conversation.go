@@ -74,13 +74,67 @@ func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUs
 const peerConversationScope = `conversations.tenant_id = ? AND conversations.status = ? AND NOT EXISTS ` +
 	`(SELECT 1 FROM assignments a WHERE a.conversation_id = conversations.id)`
 
-func (r *conversationRepo) ListPeers(ctx context.Context, tenantID string) ([]models.Conversation, error) {
-	var cs []models.Conversation
-	err := r.db.WithContext(ctx).
-		Where(peerConversationScope, tenantID, models.ConversationOpen).
-		Order("COALESCE(conversations.last_message_at, conversations.created_at) desc").
-		Find(&cs).Error
-	return cs, err
+func (r *conversationRepo) ListPeers(ctx context.Context, tenantID string, p store.PeerParams) (store.PeerPage, error) {
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	// Newest activity first, conversation id as the stable tiebreak — the same
+	// keyset shape as the assignment queue (see assignmentRepo.ListQueue).
+	const sortExpr = "COALESCE(conversations.last_message_at, conversations.created_at)"
+
+	q := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where(peerConversationScope, tenantID, models.ConversationOpen)
+
+	if p.Role != "" {
+		q = q.Where("EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = conversations.id AND m.left_at IS NULL AND m.conv_role = ?)", p.Role)
+	}
+	if p.Cursor != nil {
+		q = q.Where(sortExpr+" < ? OR ("+sortExpr+" = ? AND conversations.id < ?)",
+			p.Cursor.Value, p.Cursor.Value, p.Cursor.ID)
+	}
+
+	var convs []models.Conversation
+	if err := q.Order(sortExpr + " DESC").Order("conversations.id DESC").
+		Limit(limit + 1).Find(&convs).Error; err != nil {
+		return store.PeerPage{}, err
+	}
+
+	page := store.PeerPage{}
+	if len(convs) > limit {
+		page.HasMore = true
+		convs = convs[:limit]
+	}
+	if len(convs) == 0 {
+		return page, nil
+	}
+
+	ids := make([]string, len(convs))
+	for i := range convs {
+		ids[i] = convs[i].ID
+	}
+	var members []models.ConversationMember
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND conversation_id IN ? AND left_at IS NULL", tenantID, ids).
+		Find(&members).Error; err != nil {
+		return store.PeerPage{}, err
+	}
+	byConv := make(map[string][]models.ConversationMember)
+	for _, m := range members {
+		byConv[m.ConversationID] = append(byConv[m.ConversationID], m)
+	}
+
+	page.Items = make([]store.PeerItem, 0, len(convs))
+	for i := range convs {
+		page.Items = append(page.Items, store.PeerItem{
+			Conversation: convs[i],
+			Members:      byConv[convs[i].ID],
+			LastActivity: convLastActivity(convs[i]),
+		})
+	}
+	last := page.Items[len(page.Items)-1]
+	page.NextCursor = &store.QueueCursor{Value: last.LastActivity, ID: last.Conversation.ID}
+	return page, nil
 }
 
 func (r *conversationRepo) PeerConversationIDs(ctx context.Context, tenantID string) ([]string, error) {

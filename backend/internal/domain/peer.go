@@ -29,34 +29,37 @@ func (s *Service) IsPeerConversation(ctx context.Context, tenantID, convID strin
 	return errors.Is(err, store.ErrNotFound)
 }
 
-// ListPeerConversations returns the tenant's peer conversations (open, no
-// assignment) newest-activity first, each as a conversation view with members +
-// last_message. Mirrors ListContactConversations' shape but tenant-wide and
-// assignment-less; reads the denormalized last-activity, never the messages table.
-func (s *Service) ListPeerConversations(ctx context.Context, tenantID string) ([]map[string]any, error) {
-	convs, err := s.store.Conversations().ListPeers(ctx, tenantID)
+// PeerPage is one keyset-paginated page of peer conversations for the inbox: the
+// rendered rows plus the cursor + has-more flag driving infinite scroll.
+type PeerPage struct {
+	Conversations []map[string]any
+	NextCursor    *store.QueueCursor
+	HasMore       bool
+}
+
+// ListPeerConversations returns one page of the tenant's peer conversations
+// (open, no assignment) newest-activity first, each as a conversation view with
+// members + last_message. Same pagination/limits/search contract as the
+// assignment queue — the peer surface is not a fetch-all. Members come batched
+// from the store (no per-row query); reads denormalized last-activity only.
+func (s *Service) ListPeerConversations(ctx context.Context, tenantID string, params store.PeerParams) (PeerPage, error) {
+	page, err := s.store.Conversations().ListPeers(ctx, tenantID, params)
 	if err != nil {
-		return nil, err
+		return PeerPage{}, err
 	}
-	out := make([]map[string]any, 0, len(convs))
-	for i := range convs {
-		c := &convs[i]
-		members, err := s.store.Members().ListActive(ctx, tenantID, c.ID)
-		if err != nil {
-			return nil, err
-		}
-		conv := views.Conversation(c, members, nil)
-		lastAt := c.CreatedAt
-		if c.LastMessageAt != nil {
-			lastAt = *c.LastMessageAt
-		}
-		conv["last_activity"] = lastAt
-		if c.LastMessagePreview != "" {
-			conv["last_message"] = map[string]any{"body": c.LastMessagePreview, "created_at": c.LastMessageAt}
+	out := make([]map[string]any, 0, len(page.Items))
+	for i := range page.Items {
+		it := &page.Items[i]
+		conv := views.Conversation(&it.Conversation, it.Members, nil)
+		conv["last_activity"] = it.LastActivity
+		if it.Conversation.LastMessagePreview != "" {
+			conv["last_message"] = map[string]any{
+				"body": it.Conversation.LastMessagePreview, "created_at": it.Conversation.LastMessageAt,
+			}
 		}
 		out = append(out, conv)
 	}
-	return out, nil
+	return PeerPage{Conversations: out, NextCursor: page.NextCursor, HasMore: page.HasMore}, nil
 }
 
 // PeerAgentSend posts an agent's message into a peer conversation, implicitly

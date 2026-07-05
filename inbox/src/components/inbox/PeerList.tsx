@@ -169,8 +169,14 @@ export const PeerList = observer(function PeerList() {
         </div>
       )}
 
-      {/* Rows */}
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+      {/* Rows — infinite scroll loads the next keyset page near the bottom. */}
+      <div
+        style={{ flex: 1, overflowY: "auto", minHeight: 0 }}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) void peer.loadMore();
+        }}
+      >
         {rows.map((c) => {
           const mixed = peer.isMixed(c);
           return (
@@ -245,8 +251,11 @@ export const PeerList = observer(function PeerList() {
         })}
         {peer.loaded && rows.length === 0 && (
           <div style={{ padding: "40px 24px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 13 }}>
-            No peer conversations in this view.
+            {peer.searching ? "Searching…" : "No peer conversations in this view."}
           </div>
+        )}
+        {peer.loadingMore && (
+          <div style={{ padding: "12px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 12 }}>Loading…</div>
         )}
       </div>
     </div>
