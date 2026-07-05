@@ -100,12 +100,15 @@ func (h *Handler) Mount(e *gin.Engine) {
 
 	// Admin session (inbox), §4.3.
 	admin := v1.Group("/admin", h.mw.Admin())
+	admin.GET("/me", h.adminMe)
 	admin.GET("/realtime/token", h.realtimeToken)
 	admin.GET("/assignments", h.listAssignments)
 	admin.POST("/support-requests", h.adminOpenSupportRequest)
 	admin.POST("/assignments/:id/claim", h.claimAssignment)
 	admin.POST("/assignments/:id/close", h.closeAssignmentAdmin)
 	admin.GET("/contacts/conversations", h.listContactConversations)
+	admin.GET("/peer-conversations", h.listPeerConversations)
+	admin.POST("/peer-conversations/:id/messages", h.postPeerMessage)
 	admin.GET("/search", h.adminSearch)
 
 	// Admin owner/admin only, §7.

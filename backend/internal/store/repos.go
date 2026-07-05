@@ -46,6 +46,7 @@ type AdminRepo interface {
 	List(ctx context.Context, tenantID string) ([]models.AdminUser, error)
 	SetPassword(ctx context.Context, tenantID, id, passwordHash string) error
 	SetRole(ctx context.Context, tenantID, id string, role models.PlatformRole) error
+	SetPeerAccess(ctx context.Context, tenantID, id string, peerAccess bool) error
 	CreateSession(ctx context.Context, s *models.AdminSession) error
 	GetSession(ctx context.Context, id string) (*models.AdminSession, error)
 	DeleteSession(ctx context.Context, id string) error
@@ -64,12 +65,22 @@ type ConversationRepo interface {
 	UpdateStatus(ctx context.Context, tenantID, id string, status models.ConversationStatus) error
 	ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error)
 	ListArchivable(ctx context.Context, tenantID string, idleBeforeMsgID string, limit int) ([]models.Conversation, error)
+	// ListPeers returns the tenant's open conversations that carry no assignment —
+	// the peer conversations (direct chats between parties, no support agent),
+	// newest-activity first. Reads the denormalized last-activity only.
+	ListPeers(ctx context.Context, tenantID string) ([]models.Conversation, error)
+	// PeerConversationIDs returns the ids of those same peer conversations, for
+	// deriving an observing agent's realtime subscriptions (§5.2).
+	PeerConversationIDs(ctx context.Context, tenantID string) ([]string, error)
 	// TouchLastMessage updates the denormalized last-activity timestamp + preview
 	// used by the inbox queue ordering (see models.Conversation).
 	TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error
-	// CountOpen returns the number of open conversations in the tenant — the
-	// inbox's open-conversation badge (§8).
+	// CountOpen returns the number of open conversations in the tenant.
 	CountOpen(ctx context.Context, tenantID string) (int64, error)
+	// CountOpenSupport counts open conversations that carry an assignment — the
+	// inbox's open-conversation badge (§8). Peer conversations (no assignment) are
+	// a separate surface and never counted here.
+	CountOpenSupport(ctx context.Context, tenantID string) (int64, error)
 }
 
 type MemberRepo interface {

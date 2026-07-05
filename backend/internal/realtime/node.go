@@ -119,7 +119,8 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 // queue items), and conv:<id> + conv:<id>:internal for every conversation that
 // currently carries an assignment. The agent must be a real admin in the tenant.
 func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID string) (map[string]centrifuge.SubscribeOptions, error) {
-	if _, err := st.Admins().Get(ctx, tenantID, adminID); err != nil {
+	admin, err := st.Admins().Get(ctx, tenantID, adminID)
+	if err != nil {
 		return nil, err
 	}
 	subs := map[string]centrifuge.SubscribeOptions{
@@ -133,6 +134,19 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 	for _, cid := range cids {
 		subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
 		subs[ConvInternalChannel(cid)] = centrifuge.SubscribeOptions{}
+	}
+	// Operators with peer access also observe every peer conversation (no
+	// assignment, no agent) — the conv channel only (peer chats have no
+	// agents-only internal channel). Gated on the per-user flag, so a non-peer
+	// operator's socket never carries peer messages.
+	if admin.PeerAccess {
+		peers, err := st.Conversations().PeerConversationIDs(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		for _, cid := range peers {
+			subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
+		}
 	}
 	return subs, nil
 }

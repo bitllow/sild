@@ -49,6 +49,15 @@ func (r *conversationRepo) CountOpen(ctx context.Context, tenantID string) (int6
 	return n, err
 }
 
+func (r *conversationRepo) CountOpenSupport(ctx context.Context, tenantID string) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where("tenant_id = ? AND status = ? AND EXISTS "+
+			"(SELECT 1 FROM assignments a WHERE a.conversation_id = conversations.id)",
+			tenantID, models.ConversationOpen).Count(&n).Error
+	return n, err
+}
+
 func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error) {
 	var cs []models.Conversation
 	err := r.db.WithContext(ctx).
@@ -57,6 +66,29 @@ func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUs
 		Order("conversations.created_at desc").
 		Find(&cs).Error
 	return cs, err
+}
+
+// peerConversationScope is the shared predicate for a peer conversation: open,
+// and no assignment row (never entered the support queue). Kept in one place so
+// ListPeers and PeerConversationIDs can't drift apart.
+const peerConversationScope = `conversations.tenant_id = ? AND conversations.status = ? AND NOT EXISTS ` +
+	`(SELECT 1 FROM assignments a WHERE a.conversation_id = conversations.id)`
+
+func (r *conversationRepo) ListPeers(ctx context.Context, tenantID string) ([]models.Conversation, error) {
+	var cs []models.Conversation
+	err := r.db.WithContext(ctx).
+		Where(peerConversationScope, tenantID, models.ConversationOpen).
+		Order("COALESCE(conversations.last_message_at, conversations.created_at) desc").
+		Find(&cs).Error
+	return cs, err
+}
+
+func (r *conversationRepo) PeerConversationIDs(ctx context.Context, tenantID string) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where(peerConversationScope, tenantID, models.ConversationOpen).
+		Pluck("id", &ids).Error
+	return ids, err
 }
 
 func (r *conversationRepo) ListArchivable(ctx context.Context, tenantID, idleBeforeMsgID string, limit int) ([]models.Conversation, error) {

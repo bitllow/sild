@@ -57,7 +57,7 @@ func (a *Auth) resolveAdmin(ctx context.Context, rawCookie string) (*Principal, 
 	if err != nil {
 		return nil, false
 	}
-	return &Principal{TenantID: admin.TenantID, Kind: KindAdmin, AdminID: admin.ID, Role: admin.PlatformRole}, true
+	return &Principal{TenantID: admin.TenantID, Kind: KindAdmin, AdminID: admin.ID, Role: admin.PlatformRole, PeerAccess: admin.PeerAccess}, true
 }
 
 // ── Middleware (enforce a specific credential type) ─────────────────────────

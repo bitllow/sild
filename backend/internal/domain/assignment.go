@@ -79,7 +79,7 @@ func (s *Service) ListQueue(ctx context.Context, tenantID string, p store.QueueP
 // CountOpenConversations returns the tenant's open-conversation count for the
 // inbox badge (§8).
 func (s *Service) CountOpenConversations(ctx context.Context, tenantID string) (int64, error) {
-	return s.store.Conversations().CountOpen(ctx, tenantID)
+	return s.store.Conversations().CountOpenSupport(ctx, tenantID)
 }
 
 // CountQueue returns the inbox scope-tab counters (assigned-to-me / unassigned /

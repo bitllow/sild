@@ -87,6 +87,32 @@ func main() {
 			c.JSON(200, gin.H{"token": tok, "expires_at": exp})
 		})
 
+		// Dev-only: ensure a peer (driver↔rider) conversation exists for a rider and
+		// return its id. Stands in for a host backend creating a peer chat via the
+		// API key (POST /v1/conversations, open_assignment:false). Idempotent per
+		// (reference, rider) so the demo's "Open chat" card reuses one conversation.
+		srv.Engine().GET("/v1/dev/peer-conversation", func(c *gin.Context) {
+			rider := c.Query("user_id")
+			if rider == "" {
+				rider = "u_demo"
+			}
+			reference := c.Query("reference")
+			if reference == "" {
+				reference = "trip_9021"
+			}
+			ids, err := st.Tenants().AllIDs(c.Request.Context())
+			if err != nil || len(ids) == 0 {
+				c.JSON(500, gin.H{"error": "no tenant"})
+				return
+			}
+			id, err := ensurePeerConversation(c.Request.Context(), svc, ids[0], rider, reference)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, gin.H{"conversation_id": id})
+		})
+
 		devSeed(ctx, st, svc, cfg)
 
 		// Email forwarding ingestion daemon, in-process so `make dev` exercises
@@ -142,12 +168,14 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *conf
 		return
 	}
 	_ = svc.SetAdminPassword(ctx, t.ID, admin.ID, "password123")
+	_ = svc.SetPeerAccess(ctx, t.ID, admin.ID, true) // owner sees the peer surface out of the box
 	key, _, err := svc.CreateAPIKey(ctx, t.ID, "dev")
 	if err != nil {
 		log.Printf("dev seed key: %v", err)
 		return
 	}
 	devSeedConversations(ctx, svc, t.ID, admin.ID)
+	devSeedPeerConversations(ctx, svc, t.ID, admin.ID)
 	fwd := ""
 	if ch, err := svc.GetEmailChannel(ctx, t.ID); err == nil {
 		fwd = ch.ForwardingAddress
@@ -162,6 +190,52 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *conf
 }
 
 func strptr(s string) *string { return &s }
+
+// ensurePeerConversation finds (by reference + rider) or creates a driver↔rider
+// peer conversation and returns its id, seeding a driver message so the widget
+// thread opens with content. Peer conversations carry no assignment.
+func ensurePeerConversation(ctx context.Context, svc *domain.Service, tenantID, riderID, reference string) (string, error) {
+	if existing, err := svc.ListPeerConversations(ctx, tenantID); err == nil {
+		for _, cv := range existing {
+			if cv["reference"] == reference && peerHasMember(cv, riderID) {
+				return cv["id"].(string), nil
+			}
+		}
+	}
+	driverID := "u_driver_" + reference
+	riderMeta, _ := json.Marshal(map[string]string{"name": "Rider", "role": "rider"})
+	driverMeta, _ := json.Marshal(map[string]string{
+		"name": "Toomas Vaher", "role": "driver", "vehicle": "Silver estate · 421 KLM", "phone": "+372 5987 6543",
+	})
+	conv, err := svc.CreateConversation(ctx, tenantID, domain.CreateConversationInput{
+		Reference: reference, OpenAssignment: false,
+		Members: []domain.MemberInput{
+			{UserID: riderID, ConvRole: models.ConvRole("rider"), Metadata: riderMeta},
+			{UserID: driverID, ConvRole: models.ConvRole("driver"), Metadata: driverMeta},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	_, _ = svc.SendMessage(ctx, tenantID, conv.ID, domain.SendInput{
+		SenderKind: models.SenderUser, External: &driverID, Channel: models.ChannelApp,
+		Body: "I'm at the main entrance now. Silver estate, plate 421 KLM.",
+	})
+	return conv.ID, nil
+}
+
+func peerHasMember(cv map[string]any, userID string) bool {
+	members, ok := cv["members"].([]map[string]any)
+	if !ok {
+		return false
+	}
+	for _, m := range members {
+		if m["external_user_id"] == userID {
+			return true
+		}
+	}
+	return false
+}
 
 // devSeedConversations populates the assignment queue with the sample
 // conversations from the design so the inbox shows data on first run.
@@ -269,5 +343,66 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 	if pille != nil {
 		user(pille.ID, "u_pille", "Driver was great, thank you", models.ChannelApp)
 		_ = svc.CloseConversation(ctx, tenantID, pille.ID)
+	}
+}
+
+// devSeedPeerConversations populates the peer-conversations surface with the
+// sample direct chats from the design: rider↔driver, rider↔rider, and one the
+// agent has already stepped into. These carry NO assignment, so they never enter
+// the support queue — only the peer inbox. Roles are free-form tenant strings
+// ("rider"/"driver"); the UI derives all labels/colors from them.
+func devSeedPeerConversations(ctx context.Context, svc *domain.Service, tenantID, adminID string) {
+	msg := func(convID, uid, body string) {
+		u := uid
+		_, _ = svc.SendMessage(ctx, tenantID, convID, domain.SendInput{
+			SenderKind: models.SenderUser, External: &u, Body: body, Channel: models.ChannelApp,
+		})
+	}
+	peer := func(ref string, members []domain.MemberInput) *models.Conversation {
+		conv, err := svc.CreateConversation(ctx, tenantID, domain.CreateConversationInput{
+			Reference: ref, Members: members, OpenAssignment: false,
+		})
+		if err != nil {
+			log.Printf("dev seed peer %s: %v", ref, err)
+			return nil
+		}
+		return conv
+	}
+	role := func(r string) models.ConvRole { return models.ConvRole(r) }
+
+	// Peer participants use their own ids (p_*), distinct from the support-seed
+	// contacts (u_mari/u_pille/…), so these direct chats stay a separate persona
+	// space and don't bleed into a support contact's history panel.
+
+	// 1. rider↔driver — trip in progress (default active).
+	if c := peer("trip_9021", []domain.MemberInput{
+		{UserID: "p_mari", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"rider"}`)},
+		{UserID: "p_toomas", ConvRole: role("driver"), Metadata: json.RawMessage(`{"name":"Toomas Vaher","phone":"+372 5987 6543","vehicle":"Silver estate · 421 KLM","app_version":"2.3.0","role":"driver"}`)},
+	}); c != nil {
+		msg(c.ID, "p_mari", "Hi, I'm the passenger for trip 9021 — waiting outside the north doors.")
+		msg(c.ID, "p_toomas", "Hi Mari, 1 minute away. There's construction at the north side — I'll pull up to the main entrance instead.")
+		msg(c.ID, "p_mari", "Got it, walking over now.")
+		msg(c.ID, "p_toomas", "I'm at the main entrance now. Silver estate, plate 421 KLM.")
+	}
+
+	// 2. rider↔rider — shared ride (unread).
+	if c := peer("trip_8830 · shared ride", []domain.MemberInput{
+		{UserID: "p_mari", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"rider"}`)},
+		{UserID: "p_jaan", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"rider"}`)},
+	}); c != nil {
+		msg(c.ID, "p_mari", "Hey — we're matched for the shared ride to the airport. Terminal 1 or 2?")
+		msg(c.ID, "p_jaan", "Terminal 2. I can meet you at the taxi rank if that's easier.")
+	}
+
+	// 3. rider↔driver — lost item; the agent has already stepped in ("You joined").
+	if c := peer("trip_7788 · lost item", []domain.MemberInput{
+		{UserID: "p_pille", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Pille Saar","phone":"+372 5333 9090","app_version":"2.3.0","role":"rider"}`)},
+		{UserID: "p_andres", ConvRole: role("driver"), Metadata: json.RawMessage(`{"name":"Andres Laan","phone":"+372 5661 2020","vehicle":"Black hatchback · 118 TRE","role":"driver"}`)},
+	}); c != nil {
+		msg(c.ID, "p_pille", "I think I left my scarf in the back seat.")
+		msg(c.ID, "p_andres", "Found a scarf — I can drop it at your address after my next trip.")
+		// The agent steps in (implicit join): adds the agent participant + join-note.
+		_, _ = svc.PeerAgentSend(ctx, tenantID, c.ID, adminID,
+			"Andres, please mark it as a lost-item return so the detour is covered.", nil, "")
 	}
 }

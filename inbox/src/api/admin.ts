@@ -9,7 +9,9 @@ export type ApiSenderKind = "user" | "agent" | "bot" | "system";
 export type ApiVisibility = "participants" | "internal";
 export type ApiChannel = "app" | "email";
 export type ApiMemberKind = "user" | "agent" | "bot" | "email";
-export type ApiConvRole = "dispatcher" | "client" | "driver" | "agent";
+// Conversation roles are tenant-defined free strings ("rider"/"driver"/"support"/
+// "client"/…). The UI derives all labels and colors from whatever roles appear.
+export type ApiConvRole = string;
 export type ApiPlatformRole = "owner" | "admin" | "agent";
 
 export interface ApiAssignment {
@@ -61,6 +63,8 @@ export interface ApiMessage {
   external_user_id?: string;
   internal_actor_id?: string;
   client_msg_id?: string;
+  /** Agent's display name for agent/system-authored messages (from the server). */
+  author_name?: string;
   attachments: ApiAttachment[];
 }
 
@@ -155,8 +159,21 @@ export interface ApiTeamMember {
   first_name?: string;
   last_name?: string;
   platform_role: ApiPlatformRole;
+  /** Per-user access to the peer-conversations surface (Settings → Team). */
+  peer_access: boolean;
   has_password: boolean;
   created_at: string;
+}
+
+// The signed-in operator (GET /admin/me) — drives the peer-nav gate + "You" in
+// the team list.
+export interface ApiMe {
+  id: string;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  platform_role: ApiPlatformRole;
+  peer_access: boolean;
 }
 
 export interface ApiEmailChannel {
@@ -265,10 +282,24 @@ export const adminApi = {
     api.patch<void>(`/admin/webhooks/${id}`, { active }),
   deleteWebhook: (id: string) => api.del<void>(`/admin/webhooks/${id}`),
 
+  // ── Signed-in operator ─────────────────────────────────────────────────
+  me: () => api.get<ApiMe>("/admin/me"),
+
+  // ── Peer conversations (direct chats, no assignment — § peer) ──────────
+  listPeerConversations: () =>
+    api.get<{ conversations: ApiQueueConversation[] }>("/admin/peer-conversations"),
+  // Reading a peer thread reuses GET /conversations/:id/messages (authz admits
+  // peer_access agents). Sending goes through the peer path so the first message
+  // implicitly joins the operator.
+  postPeerMessage: (id: string, body: string, attachments: AttachmentRef[] = []) =>
+    api.post<ApiMessage>(`/admin/peer-conversations/${id}/messages`, { body, attachments }),
+
   // ── Settings: team ────────────────────────────────────────────────────
   listTeam: () => api.get<ApiTeamMember[]>("/admin/team"),
   setTeamRole: (id: string, role: ApiPlatformRole) =>
     api.patch<void>(`/admin/team/${id}`, { platform_role: role }),
+  setTeamPeerAccess: (id: string, peerAccess: boolean) =>
+    api.patch<void>(`/admin/team/${id}`, { peer_access: peerAccess }),
 
   // ── Settings: channels (§6.2) ─────────────────────────────────────────
   getEmailChannel: () => api.get<ApiEmailChannel>("/admin/channels/email"),

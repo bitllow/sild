@@ -10,6 +10,7 @@ import {
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
+import { PeerStore } from "./peer";
 import {
   buildConversation,
   buildQueueRow,
@@ -205,8 +206,16 @@ export class RootStore {
   private typingTimer: ReturnType<typeof setTimeout> | null = null;
   private safetyTimer: ReturnType<typeof setInterval> | null = null;
 
+  // --- signed-in operator + peer conversations ---
+  // meId identifies the signed-in agent (Team "You" marker); peerAccess gates the
+  // peer-conversations nav. The peer surface lives in its own store, fed the shared
+  // realtime connection's events for peer conversation ids.
+  meId: string | null = null;
+  peerAccess = false;
+  peer = new PeerStore(this);
+
   constructor() {
-    makeAutoObservable(this);
+    makeAutoObservable(this, { peer: false });
     if (typeof window !== "undefined") {
       this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
       installAudioUnlock(); // prime notification audio on the agent's first gesture
@@ -214,9 +223,24 @@ export class RootStore {
   }
 
   // ─────────────────────────── session ───────────────────────────
+  // loadMe resolves the signed-in operator (id + peer access). Best-effort — a
+  // failure just leaves the peer nav hidden; it never blocks the inbox.
+  loadMe = async () => {
+    try {
+      const me = await adminApi.me();
+      runInAction(() => {
+        this.meId = me.id;
+        this.peerAccess = !!me.peer_access;
+      });
+    } catch {
+      /* leave peer surface hidden */
+    }
+  };
+
   bootstrap = async () => {
     try {
       await this.loadConversations();
+      void this.loadMe();
       runInAction(() => {
         this.session = "authed";
       });
@@ -235,6 +259,7 @@ export class RootStore {
     try {
       await adminApi.loginPassword(email, password);
       await this.loadConversations();
+      void this.loadMe();
       runInAction(() => {
         this.session = "authed";
         this.authBusy = false;
@@ -270,6 +295,9 @@ export class RootStore {
       this.activeId = null;
       this.settingsLoaded = false;
       this.inboxView = "inbox";
+      this.meId = null;
+      this.peerAccess = false;
+      this.peer.reset();
     });
   };
 
@@ -425,6 +453,10 @@ export class RootStore {
     }
   };
 
+  // requestReconnect lets the peer store pull a fresh subscription set when a new
+  // peer conversation appears (subscriptions are derived at connect time, §5.2).
+  requestReconnect = () => this.reconnectRealtime();
+
   dispose = () => {
     if (this.safetyTimer) {
       clearInterval(this.safetyTimer);
@@ -494,6 +526,13 @@ export class RootStore {
   private handleEvent = (channel: string, env: RealtimeEnvelope) => {
     if (channel.startsWith("agents:")) {
       void this.syncQueue(); // tenant-wide queue change (new/updated request)
+      if (this.peerAccess) this.peer.onTenantNudge(); // a new peer conversation may exist
+      return;
+    }
+    // Peer conversations (no assignment) live in their own store — route their
+    // conv:<id> events there rather than the assignment-based handlers below.
+    if (env.conversation_id && this.peer.owns(env.conversation_id)) {
+      this.peer.onRealtime(env);
       return;
     }
     switch (env.type) {
@@ -584,6 +623,11 @@ export class RootStore {
   // ─────────────────────────── navigation ───────────────────────────
   goInbox = () => {
     this.inboxView = "inbox";
+  };
+  goPeer = () => {
+    if (!this.peerAccess) return; // gated per-user (Settings → Team)
+    this.inboxView = "peer";
+    if (!this.peer.loaded) void this.peer.loadConversations();
   };
   goSettings = () => {
     this.inboxView = "settings";
@@ -1232,6 +1276,30 @@ export class RootStore {
       runInAction(() => {
         const t = this.team.find((x) => x.id === id);
         if (t && prev) t.role = prev;
+      });
+    }
+  };
+
+  // setPeerAccess toggles an operator's peer-conversation access (Settings → Team,
+  // per-user). Flipping your own off live-hides the peer nav and bounces you back
+  // to the inbox if you're viewing it.
+  setPeerAccess = async (id: string, value: boolean) => {
+    const prev = this.team.find((t) => t.id === id)?.peerAccess;
+    runInAction(() => {
+      const t = this.team.find((x) => x.id === id);
+      if (t) t.peerAccess = value;
+      if (id === this.meId) {
+        this.peerAccess = value;
+        if (!value && this.inboxView === "peer") this.inboxView = "inbox";
+      }
+    });
+    try {
+      await adminApi.setTeamPeerAccess(id, value);
+    } catch {
+      runInAction(() => {
+        const t = this.team.find((x) => x.id === id);
+        if (t && prev !== undefined) t.peerAccess = prev;
+        if (id === this.meId && prev !== undefined) this.peerAccess = prev;
       });
     }
   };

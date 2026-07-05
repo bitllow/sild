@@ -87,6 +87,13 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	// surface host-created support requests in the inbox queue live (§8)
 	if assignment != nil {
 		s.emit(ctx, realtime.Target{Tenant: tenantID}, realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
+	} else {
+		// A peer conversation (no assignment): nudge the tenant agents channel so
+		// any open peer inbox refreshes its list. peer_access operators already
+		// hold this conversation's conv channel from their next connect; this event
+		// just tells them a new one exists.
+		s.emit(ctx, realtime.Target{Tenant: tenantID}, realtime.EventMemberAdded, conv.ID,
+			map[string]any{"peer": true, "conversation_id": conv.ID})
 	}
 	return conv, nil
 }
@@ -101,17 +108,24 @@ func (s *Service) buildMember(ctx context.Context, tenantID, convID string, mi M
 		kind = models.MemberUser
 	}
 	st, _ := s.searchText(ctx, tenantID, mi.Metadata)
-	uid := mi.UserID
-	return &models.ConversationMember{
+	id := mi.UserID
+	m := &models.ConversationMember{
 		TenantID:         tenantID,
 		ConversationID:   convID,
 		MemberKind:       kind,
-		ExternalUserID:   &uid,
 		ConvRole:         mi.ConvRole,
 		Metadata:         datatypes.JSON(mi.Metadata),
 		MemberSearchText: st,
 		JoinedAt:         s.now(),
-	}, nil
+	}
+	// Exactly one identity column is set, keyed by kind: an agent member carries
+	// the admin_users.id in internal_actor_id; everyone else is external.
+	if kind == models.MemberAgent {
+		m.InternalActorID = &id
+	} else {
+		m.ExternalUserID = &id
+	}
+	return m, nil
 }
 
 // GetConversation loads a conversation with members and current assignment.

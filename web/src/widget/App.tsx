@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { BrandConfig, PendingAttachment, WidgetState } from "../core/types";
+import type { BrandConfig, PendingAttachment, WidgetConversation, WidgetState } from "../core/types";
 import type { WidgetClient } from "../core/client";
 import { LAUNCHER_ICON, parseTopics, type WidgetMode } from "./theme";
 
@@ -122,9 +122,13 @@ export interface AppProps {
   mode?: WidgetMode;
   /** In preview, which screen to show (driven by the settings Home/Conversation toggle). */
   previewView?: "home" | "chat";
+  /** Imperative open request from the host (e.g. an "Open chat" card): opening the
+   *  panel and, if given, navigating straight to a conversation. The seq changes
+   *  on each request so the effect re-fires. */
+  command?: { seq: number; conversationId?: string };
 }
 
-export function App({ client, config, conversationId, name, mode = "live", previewView = "home" }: AppProps) {
+export function App({ client, config, conversationId, name, mode = "live", previewView = "home", command }: AppProps) {
   const preview = mode === "preview";
   const [open, setOpen] = useState(preview);
   const started = useRef(false);
@@ -141,9 +145,23 @@ export function App({ client, config, conversationId, name, mode = "live", previ
     }
   };
 
+  // Host-driven open (e.g. the "Your driver is on the way" card): open the panel
+  // and navigate to the requested conversation, starting the client if needed.
+  useEffect(() => {
+    if (!command || preview) return;
+    setOpen(true);
+    if (!started.current) {
+      started.current = true;
+      void client.start(command.conversationId);
+    } else if (command.conversationId) {
+      void client.openConversation(command.conversationId);
+    }
+  }, [command?.seq]);
+
   const iconSize = LAUNCHER_ICON[config.launcherSize] || 27;
   const guestThreadOnly = !!conversationId;
   const inThread = preview ? previewView === "chat" : !!state.activeId || draft;
+  const activeConv = state.conversations.find((c) => c.id === state.activeId);
   const onBack = () => (draft ? setDraft(false) : client.backToList());
   const panelOpen = preview || open;
 
@@ -151,16 +169,23 @@ export function App({ client, config, conversationId, name, mode = "live", previ
     <>
       {panelOpen && (
         <div class="panel" role="dialog" aria-label="Support chat">
-          {!preview && (
-            <button class="mobile-close" aria-label="Close chat" onClick={() => setOpen(false)}>
-              <CloseIcon />
-            </button>
-          )}
+          {/* One panel-level control cluster, pinned top-right and shared across
+              every screen (home / support thread / peer thread) so the sound +
+              close icons never shift position between views. */}
+          <div class="wpanel-controls">
+            <SoundToggle on={state.soundOn} onToggle={() => client.toggleSound()} size={20} />
+            {!preview && (
+              <button class="wpanel-close" aria-label="Close chat" onClick={() => setOpen(false)}>
+                <CloseIcon />
+              </button>
+            )}
+          </div>
           {inThread ? (
             <Thread
               client={client}
               config={config}
               state={state}
+              activeConv={activeConv}
               preview={preview}
               guestThreadOnly={guestThreadOnly}
               draft={draft && !state.activeId}
@@ -233,7 +258,7 @@ function Home({
               name && <div class="brandname">{name}</div>
             )}
           </span>
-          <SoundToggle on={state.soundOn} onToggle={() => client.toggleSound()} size={22} />
+          {/* sound + close live in the shared panel-level cluster now */}
         </div>
         {config.showTeam && <TeamHeader />}
         <h1>{config.heading}</h1>
@@ -259,7 +284,7 @@ function Home({
         )}
         {state.conversations.length > 0 && <div class="eyebrow">Recent</div>}
         {state.conversations.map((c) => {
-          const rowName = c.agentName || agentName;
+          const rowName = c.title || c.agentName || agentName;
           const rowInitial = (rowName.trim()[0] || "S").toUpperCase();
           return (
           <div class="row" key={c.id} onClick={() => void client.openConversation(c.id)}>
@@ -282,6 +307,7 @@ function Thread({
   client,
   config,
   state,
+  activeConv,
   preview,
   guestThreadOnly,
   draft,
@@ -291,6 +317,7 @@ function Thread({
   client: WidgetClient;
   config: BrandConfig;
   state: WidgetState;
+  activeConv?: WidgetConversation;
   preview: boolean;
   guestThreadOnly: boolean;
   draft: boolean;
@@ -313,7 +340,11 @@ function Thread({
   // Prefer the real agent's first name (learned from incoming messages) over the
   // generic "Support"; fall back to a friendly default before any reply arrives.
   const agentName = state.agentName || (config.showTeam ? "Eva" : "Support");
-  const agentInitial = (agentName.trim()[0] || "S").toUpperCase();
+  // A peer conversation (rider↔driver) has no agent framing: the header shows the
+  // other party + "Direct chat · <ref>" instead of the support agent.
+  const peer = !!activeConv?.peer;
+  const headName = peer ? activeConv?.title || "Direct chat" : agentName;
+  const headInitial = (headName.trim()[0] || "S").toUpperCase();
 
   const onFiles = (e: Event) => {
     const input = e.currentTarget as HTMLInputElement;
@@ -354,23 +385,24 @@ function Thread({
             <BackIcon />
           </button>
         )}
-        {config.showTeam ? (
-          <span class="av" style={{ background: "#7C9CF5" }}>{agentInitial}</span>
+        {config.showTeam && !peer ? (
+          <span class="av" style={{ background: "#7C9CF5" }}>{headInitial}</span>
         ) : (
-          <span class="av">{agentInitial}</span>
+          <span class="av">{headInitial}</span>
         )}
         <div>
-          <div class="name">{agentName}</div>
+          <div class="name">{headName}</div>
           <div class="sub">
-            {draft
-              ? "Type your message to start"
-              : state.connection === "connected" || preview
-                ? "Replies in a few minutes"
-                : "Connecting…"}
+            {peer
+              ? activeConv?.subtitle || "Direct chat"
+              : draft
+                ? "Type your message to start"
+                : state.connection === "connected" || preview
+                  ? "Replies in a few minutes"
+                  : "Connecting…"}
           </div>
         </div>
         <div style={{ flex: 1 }} />
-        <SoundToggle on={state.soundOn} onToggle={() => client.toggleSound()} size={20} />
       </div>
       <div class="body" ref={scroller}>
         {state.loadingThread && <div class="note">Loading…</div>}

@@ -59,6 +59,17 @@
         pin on your trip, or search a new address. If anything looks off, our team is one tap away.
       </p>
       <p class="hint">Still stuck? Chat with us using the button in the corner. →</p>
+
+      <!-- Direct entry point into a peer chat (rider↔driver): opens the widget
+           straight into the driver conversation, no launcher / recent list. -->
+      <div id="driver-card" style="margin-top:32px;display:none;align-items:center;gap:15px;padding:16px 18px;border:1px solid var(--border);border-radius:14px;background:#fff;box-shadow:0 6px 20px rgba(20,24,31,.06);max-width:520px">
+        <span style="width:44px;height:44px;flex:none;border-radius:50%;background:#7C9CF5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">T</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:15px;font-weight:700;color:var(--slate-900)">Your driver is on the way</div>
+          <div style="font-size:13px;color:var(--slate-600);margin-top:2px">Toomas · silver estate · arriving in 2 min</div>
+        </div>
+        <button id="open-chat" style="flex:none;height:40px;padding:0 16px;border:0;border-radius:10px;background:var(--brand);color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer">Open chat</button>
+      </div>
     </main>
 
     <!-- Demo session controls (dev only). -->
@@ -140,16 +151,32 @@
             .then(function (d) { return d.token; });
         }
 
+        var widget;
         if (mode === "guest") {
           // Guest = single thread (§9): ensure a conversation exists (carrying the
           // metadata), then open the widget directly to it.
           ensureGuestConversation().then(function (convId) {
-            window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, conversationId: convId, metadata: metadata });
+            widget = window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, conversationId: convId, metadata: metadata, userId: uid });
           });
         } else {
           // Real user = conversation list; metadata is attached when they open a
-          // new request from the widget.
-          window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, metadata: metadata });
+          // new request from the widget. userId lets the widget tell the visitor's
+          // own messages from the other party's in a peer (driver) chat.
+          widget = window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, metadata: metadata, userId: uid });
+        }
+
+        // "Your driver is on the way" card — peer chat entry point (user mode only:
+        // a peer conversation needs an identified rider). Ensures a driver↔rider
+        // conversation exists (the dev server stands in for the host backend that
+        // would create it), then opens the widget straight into it.
+        var driverCard = document.getElementById("driver-card");
+        if (mode === "user") {
+          driverCard.style.display = "flex";
+          document.getElementById("open-chat").addEventListener("click", function () {
+            fetch(BASE + "/v1/dev/peer-conversation?user_id=" + encodeURIComponent(uid))
+              .then(function (r) { return r.json(); })
+              .then(function (d) { if (widget && d.conversation_id) widget.open(d.conversation_id); });
+          });
         }
 
         // Create (once) and remember a guest's support-request conversation so the

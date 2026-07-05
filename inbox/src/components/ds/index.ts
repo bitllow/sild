@@ -1,5 +1,7 @@
 export { Avatar } from "./Avatar";
 export type { AvatarProps, AvatarSize, Presence } from "./Avatar";
+export { AvatarStack } from "./AvatarStack";
+export type { AvatarStackProps, AvatarStackPerson } from "./AvatarStack";
 export { Badge } from "./Badge";
 export type { BadgeProps, BadgeVariant } from "./Badge";
 export { Banner } from "./Banner";

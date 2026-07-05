@@ -39,6 +39,14 @@ class SildWidgetElement extends HTMLElement {
   private mount?: HTMLDivElement;
   private brand: BrandConfig = DEFAULT_BRAND;
   private name?: string;
+  private cmd?: { seq: number; conversationId?: string };
+
+  // openConversation is the host-facing imperative: open the panel (optionally
+  // straight to a conversation), e.g. from a "Your driver is on the way" card.
+  openConversation(conversationId?: string) {
+    this.cmd = { seq: (this.cmd?.seq || 0) + 1, conversationId };
+    this.paint();
+  }
 
   connectedCallback() {
     const cfg = this.config!;
@@ -80,6 +88,7 @@ class SildWidgetElement extends HTMLElement {
         conversationId={this.config?.conversationId}
         name={this.name}
         mode="live"
+        command={this.cmd}
       />,
       this.mount
     );
@@ -111,7 +120,12 @@ const Sild = {
     const el = document.createElement("sild-widget") as SildWidgetElement;
     el.config = { ...config, baseUrl: config.baseUrl || SELF_ORIGIN };
     document.body.appendChild(el);
-    return { destroy: () => el.remove() };
+    return {
+      destroy: () => el.remove(),
+      // Open the widget (optionally straight to a conversation) on demand — used
+      // by host entry points like the "Your driver is on the way" card.
+      open: (conversationId?: string) => el.openConversation(conversationId),
+    };
   },
 
   // preview mounts the REAL widget (in preview geometry, backed by a no-network

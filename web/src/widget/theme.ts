@@ -262,14 +262,24 @@ ${autoDark ? `@media (prefers-color-scheme: dark) { :host { ${paletteVars(DARK)}
 .note { font-size: 12px; color: var(--text-tertiary); text-align: center; padding: 8px 16px; }
 .banner { margin: 0 0 4px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 12px; border-radius: var(--r-btn); padding: 8px 10px; text-align: center; }
 
-.mobile-close {
-  display: none;
-  position: absolute; top: 10px; ${side === "left" ? "left" : "right"}: 10px; z-index: 1;
-  width: 36px; height: 36px; border: 0; border-radius: 10px;
-  background: rgba(255,255,255,.16); color: #fff; cursor: pointer;
-  align-items: center; justify-content: center;
+/* One panel-level control cluster (sound + close), pinned top-right and shared
+   by every screen so the icons never shift position between home and threads. */
+.wpanel-controls {
+  /* Always top-right, independent of launcher position: the thread Back button
+     lives top-left, so a launcher-following (left) cluster would sit on top of it. */
+  position: absolute; top: 13px; right: 13px; z-index: 6;
+  display: flex; align-items: center; gap: 2px;
+  /* Only the buttons capture clicks — the cluster box never blocks controls
+     beneath it. */
+  pointer-events: none;
 }
-.mobile-close:hover { background: rgba(255,255,255,.26); }
+.wpanel-controls > button { pointer-events: auto; }
+.wpanel-close {
+  display: none;
+  border: 0; background: transparent; color: #fff; cursor: pointer;
+  padding: 4px; border-radius: 8px; align-items: center; justify-content: center;
+}
+.wpanel-close:hover { background: rgba(255,255,255,.15); }
 ${preview ? "" : `
 @media (max-width: 480px) {
   .launcher { ${side}: 16px; bottom: 16px; }
@@ -280,7 +290,7 @@ ${preview ? "" : `
     border-radius: 0;
     transform-origin: bottom center;
   }
-  .mobile-close { display: flex; }
+  .wpanel-close { display: flex; }
 }`}
 `;
 }

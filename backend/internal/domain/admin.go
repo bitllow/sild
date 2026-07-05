@@ -80,6 +80,18 @@ func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, ro
 	return mapStoreErr(s.store.Admins().SetRole(ctx, tenantID, adminID, role))
 }
 
+// SetPeerAccess toggles an operator's access to peer conversations (Settings →
+// Team). Per-user, independent of platform role.
+func (s *Service) SetPeerAccess(ctx context.Context, tenantID, adminID string, peerAccess bool) error {
+	return mapStoreErr(s.store.Admins().SetPeerAccess(ctx, tenantID, adminID, peerAccess))
+}
+
+// GetAdmin loads a single admin user (Settings → Team, /admin/me).
+func (s *Service) GetAdmin(ctx context.Context, tenantID, adminID string) (*models.AdminUser, error) {
+	a, err := s.store.Admins().Get(ctx, tenantID, adminID)
+	return a, mapStoreErr(err)
+}
+
 // Logout revokes the session behind a raw cookie value.
 func (s *Service) Logout(ctx context.Context, raw string) error {
 	return s.store.Admins().DeleteSession(ctx, auth.HashSessionToken(raw))

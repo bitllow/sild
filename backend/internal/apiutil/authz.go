@@ -72,8 +72,12 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, convID string) b
 		if p.Role == models.PlatformOwner || p.Role == models.PlatformAdmin {
 			return true
 		}
-		// agent: limited to support conversations (§7).
+		// agent: limited to support conversations (§7)…
 		if svc.HasAssignment(ctx, t, convID) || svc.IsArchived(ctx, t, convID) {
+			return true
+		}
+		// …or, with peer access, an assignment-less peer conversation (observe/step in).
+		if p.PeerAccess && svc.IsPeerConversation(ctx, t, convID) {
 			return true
 		}
 		httpx.Forbidden(c, "agents may only access support conversations")
