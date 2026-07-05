@@ -18,6 +18,7 @@ func TestAdminSearch(t *testing.T) {
 	ctx := context.Background()
 
 	conv, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
+		OpenAssignment: true,
 		Members: []domain.MemberInput{{
 			UserID: "u_driver", ConvRole: models.RoleDriver,
 			Metadata: json.RawMessage(`{"phone":"+3725512345"}`),
@@ -37,12 +38,12 @@ func TestAdminSearch(t *testing.T) {
 		q    string
 		want bool
 	}{
-		{"refund", true},          // keyword in body
-		{"5512", true},            // keyword in member metadata (member_search_text)
-		{"status:open", true},     // structured filter matches
-		{"status:closed", false},  // structured filter excludes
-		{"role:driver", true},     // member role filter
-		{"role:client", false},    // wrong role
+		{"refund", true},         // keyword in body
+		{"5512", true},           // keyword in member metadata (member_search_text)
+		{"status:open", true},    // structured filter matches
+		{"status:closed", false}, // structured filter excludes
+		{"role:driver", true},    // member role filter
+		{"role:client", false},   // wrong role
 		{"refund role:driver", true},
 		{"refund status:closed", false}, // AND of keyword + filter
 	}
@@ -66,6 +67,7 @@ func TestAdminSearchLiveJSONFallback(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
+		OpenAssignment: true,
 		Members: []domain.MemberInput{{
 			UserID: "u_driver", ConvRole: models.RoleDriver,
 			Metadata: json.RawMessage(`{"phone":"+3725512345","city":"Tallinn"}`),

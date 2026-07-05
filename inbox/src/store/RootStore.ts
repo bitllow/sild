@@ -564,6 +564,11 @@ export class RootStore {
     const conv = this.convs.find((c) => c.id === cid);
     if (!conv) {
       void this.syncQueue();
+      // Might be a peer conversation the peer store doesn't have loaded (beyond the
+      // first page, or while a search replaced the list) — peer-access agents are
+      // subscribed to ALL peer channels, so refresh the peer list to surface/reorder
+      // it rather than dropping the message.
+      if (this.peerAccess) this.peer.onTenantNudge();
       return;
     }
     const m = env.data as ApiMessage;

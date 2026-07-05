@@ -210,8 +210,8 @@ func TestPeerSearchByIdAndMetadata(t *testing.T) {
 	// A support conversation that must NOT appear in peer search.
 	mkSupport(t, h, tenant.ID, "support")
 
-	search := func(q string) []string {
-		res, err := h.Search.Search(ctx, tenant.ID, q, "", "", 25, true)
+	search := func(q string, peerOnly bool) []string {
+		res, err := h.Search.Search(ctx, tenant.ID, q, "", "", 25, peerOnly)
 		if err != nil {
 			t.Fatalf("search %q: %v", q, err)
 		}
@@ -222,15 +222,23 @@ func TestPeerSearchByIdAndMetadata(t *testing.T) {
 		return ids
 	}
 
-	if got := search("p_zorro"); len(got) != 1 { // by participant id
+	if got := search("p_zorro", true); len(got) != 1 { // by participant id
 		t.Fatalf("search by id: got %d hits, want 1 (%v)", len(got), got)
 	}
-	if got := search("platinum"); len(got) != 1 { // by metadata value (no configured keys)
+	if got := search("platinum", true); len(got) != 1 { // by metadata value (no configured keys)
 		t.Fatalf("search by metadata: got %d hits, want 1 (%v)", len(got), got)
 	}
-	// A term that only matches the support conversation returns nothing (peer scope).
-	if got := search("u_support"); len(got) != 0 {
+	// A term that only matches the support conversation returns nothing under peer scope.
+	if got := search("u_support", true); len(got) != 0 {
 		t.Fatalf("peer search leaked a support conversation: %v", got)
+	}
+	// And critically: the DEFAULT (non-peer) search must NOT surface the peer
+	// conversation — otherwise a non-peer-access agent could recover peer content.
+	if got := search("platinum", false); len(got) != 0 {
+		t.Fatalf("default search leaked a peer conversation by metadata: %v", got)
+	}
+	if got := search("p_zorro", false); len(got) != 0 {
+		t.Fatalf("default search leaked a peer conversation by id: %v", got)
 	}
 }
 

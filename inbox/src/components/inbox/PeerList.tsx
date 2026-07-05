@@ -44,8 +44,8 @@ export const PeerList = observer(function PeerList() {
           </span>
         </div>
         <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
-          Direct chats between parties — no support agent required. No assignment; you're here to observe, or step in
-          if needed.
+          Direct chats between parties — no support agent required. No assignment; you&apos;re here to observe, or step
+          in if needed.
         </p>
       </div>
 

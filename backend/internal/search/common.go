@@ -25,6 +25,13 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	if q.PeerOnly {
 		// Peer conversations: open, and carrying no assignment (the peer surface).
 		b = b.Where("c.status = ? AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.conversation_id = c.id)", "open")
+	} else {
+		// Default (support) search must EXCLUDE peer conversations — otherwise a
+		// non-peer-access agent could recover peer message/metadata content via the
+		// shared search even though the peer list + message endpoints are gated. The
+		// complement of the peer scope: keep conversations that are closed OR carry
+		// an assignment (i.e. every support conversation), drop open+assignment-less.
+		b = b.Where("c.status != ? OR EXISTS (SELECT 1 FROM assignments a WHERE a.conversation_id = c.id)", "open")
 	}
 	if q.Status != nil {
 		b = b.Where("c.status = ?", *q.Status)

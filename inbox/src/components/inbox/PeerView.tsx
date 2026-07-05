@@ -74,7 +74,7 @@ export const PeerView = observer(function PeerView() {
       <div style={{ flex: "none", padding: "12px 18px 16px", background: "var(--surface-card)", borderTop: "1px solid var(--border-default)" }}>
         {!active.joined && (
           <div style={{ fontSize: 12, color: "var(--text-tertiary)", padding: "0 2px 8px", lineHeight: 1.5 }}>
-            You're observing. Sending a message adds you to the conversation — both parties will see you.
+            You&apos;re observing. Sending a message adds you to the conversation — both parties will see you.
           </div>
         )}
         <PeerComposer active={active} />

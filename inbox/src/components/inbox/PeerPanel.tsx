@@ -62,7 +62,7 @@ export const PeerPanel = observer(function PeerPanel() {
             <Badge variant="neutral">{peer.kindLabel(active)}</Badge>
           </div>
           <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
-            No assignment — you're here to observe, or step in if needed.
+            No assignment — you&apos;re here to observe, or step in if needed.
           </div>
         </div>
 
