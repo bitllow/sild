@@ -1,0 +1,57 @@
+name: android-sdk
+
+on:
+  push:
+    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+  pull_request:
+    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+
+jobs:
+  # Build the Android SDK (core JAR + ui AAR + sample APK) and run the pure-JVM
+  # core tests against a live sild-dev — the same zero-infra backend the web e2e
+  # boots. No emulator: the wire contract is covered by JVM tests, the UI by
+  # a successful assemble.
+  sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: sdks/kotlin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Boot sild-dev (SQLite + in-memory broker) so the core integration tests
+      # have a backend at :8080; wait for /healthz before running them.
+      - name: Start sild-dev
+        working-directory: backend
+        run: |
+          DB_DRIVER=sqlite DB_DSN=/tmp/sild-android-ci.db SILD_BROKER=memory \
+            STORAGE_BACKEND=local SILD_ENV=development \
+            go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/healthz && break
+            sleep 1
+          done
+
+      - name: Core tests (against sild-dev)
+        env:
+          SILD_BASE_URL: http://localhost:8080
+        run: ./gradlew :core:test
+
+      - name: Assemble SDK (ui AAR + sample APK)
+        run: ./gradlew :ui:assembleRelease :sample:assembleDebug
+
+      - name: Publish artifacts to Maven local (smoke test packaging)
+        run: ./gradlew :core:publishToMavenLocal :ui:publishToMavenLocal
