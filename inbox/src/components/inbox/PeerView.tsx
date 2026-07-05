@@ -143,20 +143,20 @@ const PeerComposer = observer(function PeerComposer() {
   const fileRef = useRef<HTMLInputElement>(null);
   return (
     <>
-      {(peer.pendingAtts.length > 0 || peer.uploading > 0) && (
+      {(peer.atts.pending.length > 0 || peer.atts.uploading > 0) && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-          {peer.pendingAtts.map((a, i) => (
+          {peer.atts.pending.map((a, i) => (
             <span
               key={i}
               style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 220, fontSize: 12, color: "var(--text-secondary)", background: "var(--surface-sunken)", border: "1px solid var(--border-default)", borderRadius: 8, padding: "5px 8px" }}
             >
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.filename}</span>
-              <button onClick={() => peer.removePendingAtt(i)} aria-label="Remove attachment" style={{ border: 0, background: "transparent", cursor: "pointer", color: "var(--text-tertiary)", padding: 0, display: "flex", lineHeight: 1 }}>
+              <button onClick={() => peer.atts.remove(i)} aria-label="Remove attachment" style={{ border: 0, background: "transparent", cursor: "pointer", color: "var(--text-tertiary)", padding: 0, display: "flex", lineHeight: 1 }}>
                 ✕
               </button>
             </span>
           ))}
-          {peer.uploading > 0 && <span style={{ fontSize: 12, color: "var(--text-tertiary)", alignSelf: "center" }}>Uploading…</span>}
+          {peer.atts.uploading > 0 && <span style={{ fontSize: 12, color: "var(--text-tertiary)", alignSelf: "center" }}>Uploading…</span>}
         </div>
       )}
       <input
@@ -167,7 +167,7 @@ const PeerComposer = observer(function PeerComposer() {
         onChange={(e) => {
           const files = Array.from(e.target.files || []);
           e.target.value = "";
-          if (files.length) peer.attachFiles(files);
+          if (files.length) peer.atts.attach(files);
         }}
       />
       <ComposerBar
@@ -176,8 +176,8 @@ const PeerComposer = observer(function PeerComposer() {
         onSend={() => void peer.send()}
         onAttach={() => fileRef.current?.click()}
         placeholder="Message everyone in this conversation…"
-        canSendEmpty={peer.pendingAtts.length > 0}
-        disabled={peer.uploading > 0}
+        canSendEmpty={peer.atts.pending.length > 0}
+        disabled={peer.atts.uploading > 0}
       />
     </>
   );

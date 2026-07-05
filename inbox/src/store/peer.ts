@@ -2,8 +2,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { adminApi, type ApiMember, type ApiMessage, type ApiQueueConversation } from "@/api/admin";
 import type { RealtimeEnvelope } from "@/api/realtime";
 import type { MessageAttachment, Presence } from "@/components/ds";
-import { uploadFile } from "@/api/upload";
-import type { PendingAttachment } from "./types";
+import { AttachmentQueue } from "./attachments";
 import { clockTime, mapAttachments, relativeTime } from "./map";
 
 // Peer conversations are direct chats between end-user parties with no support
@@ -109,12 +108,8 @@ export class PeerStore {
   loadingThread = false;
   composer = "";
   sending = false;
-  // Files uploaded and queued to attach to the next message, plus in-flight upload
-  // count (Send waits for uploads). uploadGen invalidates uploads that land after a
-  // conversation switch — same shape as the support composer (see RootStore).
-  pendingAtts: PendingAttachment[] = [];
-  uploading = 0;
-  private uploadGen = 0;
+  // Files queued for the next message — the shared composer attachment queue.
+  atts = new AttachmentQueue();
   // Search-with-autocomplete state (the peer list uses this instead of tabs).
   query = "";
   searchOpen = false;
@@ -133,7 +128,7 @@ export class PeerStore {
   private searchSeq = 0;
 
   constructor(private root: PeerRoot) {
-    makeAutoObservable(this, { owns: false });
+    makeAutoObservable(this, { owns: false, atts: false });
   }
 
   reset() {
@@ -147,6 +142,7 @@ export class PeerStore {
     this.cursor = null;
     this.hasMore = false;
     this.composer = "";
+    this.atts.reset();
     this.unreadByConv.clear();
   }
 
@@ -278,39 +274,11 @@ export class PeerStore {
   setActive = async (id: string) => {
     this.activeId = id;
     this.composer = "";
-    this.pendingAtts = [];
-    this.uploading = 0;
-    this.uploadGen += 1; // discard any upload still in flight for the previous conv
+    this.atts.reset(); // discard any upload still in flight for the previous conv
     this.unreadByConv.set(id, 0);
     const conv = this.conversations.find((c) => c.id === id);
     if (conv) conv.unread = 0;
     await this.loadMessages(id);
-  };
-
-  // attachFiles uploads each file (shared uploadFile helper) and queues a reference
-  // for the next peer message — same flow as the support composer.
-  attachFiles = (files: File[]) => {
-    const gen = this.uploadGen;
-    for (const file of files) {
-      runInAction(() => {
-        this.uploading += 1;
-      });
-      void uploadFile(file)
-        .then((att) =>
-          runInAction(() => {
-            if (this.uploadGen === gen) this.pendingAtts.push(att);
-          })
-        )
-        .catch(() => {})
-        .finally(() =>
-          runInAction(() => {
-            if (this.uploadGen === gen) this.uploading -= 1;
-          })
-        );
-    }
-  };
-  removePendingAtt = (i: number) => {
-    this.pendingAtts.splice(i, 1);
   };
 
   loadMessages = async (id: string) => {
@@ -343,18 +311,14 @@ export class PeerStore {
   send = async () => {
     const id = this.activeId;
     const body = this.composer.trim();
-    const atts = this.pendingAtts.slice();
-    if (!id || (!body && atts.length === 0) || this.sending || this.uploading > 0) return;
+    if (!id || (!body && this.atts.pending.length === 0) || this.sending || this.atts.isUploading) return;
     this.sending = true;
     this.composer = "";
-    this.pendingAtts = [];
+    const refs = this.atts.refs();
     try {
-      const msg = await adminApi.postPeerMessage(
-        id,
-        body,
-        atts.map((a) => ({ object_key: a.objectKey, disposition: a.disposition }))
-      );
+      const msg = await adminApi.postPeerMessage(id, body, refs);
       runInAction(() => {
+        this.atts.clear();
         const conv = this.conversations.find((c) => c.id === id);
         if (conv) {
           this.appendMessage(conv, msg);

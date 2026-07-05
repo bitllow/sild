@@ -10,7 +10,7 @@ import {
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
-import { uploadFile } from "@/api/upload";
+import { AttachmentQueue } from "./attachments";
 import { PeerStore } from "./peer";
 import {
   buildConversation,
@@ -29,7 +29,6 @@ import type {
   Conversation,
   EmailChannel,
   InboxFilter,
-  PendingAttachment,
   InboxView,
   PlatformRole,
   SessionState,
@@ -152,13 +151,9 @@ export class RootStore {
   private contactSeq = 0;
   composer = "";
   internal = false;
-  // Files uploaded and queued to attach to the next outgoing message, plus a
-  // count of uploads still in flight (the composer disables Send while > 0).
-  // uploadGen bumps whenever the active conversation changes, so an upload that
-  // finishes after a switch is discarded rather than leaking into another thread.
-  pendingAtts: PendingAttachment[] = [];
-  uploading = 0;
-  private uploadGen = 0;
+  // Files queued for the next outgoing message — the shared composer attachment
+  // queue (uploads, in-flight count, conversation-switch guard). See AttachmentQueue.
+  atts = new AttachmentQueue((msg) => runInAction(() => (this.convError = msg)));
   loadingConvs = false;
   // pagination (cursor-based, scroll-loading)
   nextCursor: string | null = null;
@@ -216,7 +211,7 @@ export class RootStore {
   peer = new PeerStore(this);
 
   constructor() {
-    makeAutoObservable(this, { peer: false });
+    makeAutoObservable(this, { peer: false, atts: false });
     if (typeof window !== "undefined") {
       this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
       installAudioUnlock(); // prime notification audio on the agent's first gesture
@@ -652,10 +647,7 @@ export class RootStore {
     this.activeId = id;
     this.composer = "";
     this.internal = false;
-    // Abandon the previous conversation's attachment queue + any in-flight uploads.
-    this.pendingAtts = [];
-    this.uploading = 0;
-    this.uploadGen += 1;
+    this.atts.reset(); // abandon the previous conversation's uploads + in-flight ones
     const conv = this.convs.find((c) => c.id === id) || this.contactHistory.find((c) => c.id === id);
     if (conv) conv.unread = 0;
     void this.refreshActiveMessages();
@@ -888,57 +880,18 @@ export class RootStore {
     this.internal = v;
   };
 
-  // attachFiles uploads each file direct-to-bucket (§11) and queues a reference
-  // for the next message. Uploads are bound to the current conversation via
-  // uploadGen, so a completion that lands after a conversation switch is dropped
-  // (it must never appear in — or be sent from — a different conversation).
-  attachFiles = (files: File[]) => {
-    const gen = this.uploadGen;
-    for (const file of files) {
-      runInAction(() => {
-        this.uploading += 1;
-      });
-      void this.uploadOne(file, gen);
-    }
-  };
-  private uploadOne = async (file: File, gen: number) => {
-    try {
-      const att = await uploadFile(file);
-      runInAction(() => {
-        if (this.uploadGen !== gen) return; // conversation changed — discard
-        this.pendingAtts.push(att);
-      });
-    } catch (e) {
-      runInAction(() => {
-        if (this.uploadGen === gen) this.convError = e instanceof ApiError ? e.message : `Could not upload ${file.name}.`;
-      });
-    } finally {
-      runInAction(() => {
-        if (this.uploadGen === gen) this.uploading -= 1;
-      });
-    }
-  };
-  removePendingAtt = (i: number) => {
-    this.pendingAtts.splice(i, 1);
-  };
-
   sendMessage = async () => {
     const conv = this.active;
     const text = this.composer.trim();
-    const atts = this.pendingAtts.slice();
-    if (!conv || (!text && atts.length === 0) || this.sending || this.uploading > 0) return;
+    if (!conv || (!text && this.atts.pending.length === 0) || this.sending || this.atts.isUploading) return;
     const internal = this.internal;
     this.sending = true;
+    const refs = this.atts.refs();
     try {
-      await adminApi.postMessage(
-        conv.id,
-        text,
-        internal ? "internal" : "participants",
-        atts.map((a) => ({ object_key: a.objectKey, disposition: a.disposition }))
-      );
+      await adminApi.postMessage(conv.id, text, internal ? "internal" : "participants", refs);
       runInAction(() => {
         this.composer = "";
-        this.pendingAtts = [];
+        this.atts.clear();
       });
       await this.refreshActiveMessages();
     } catch (e) {
