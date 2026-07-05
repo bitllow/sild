@@ -24,3 +24,6 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code local config (skills, settings, session state)
+.claude/
