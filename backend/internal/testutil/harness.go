@@ -192,7 +192,7 @@ func (h *Harness) SeedAPIKey(tenantID string) string {
 // SeedAdmin creates an admin_user and returns it.
 func (h *Harness) SeedAdmin(tenantID, email string, role models.PlatformRole) *models.AdminUser {
 	h.T.Helper()
-	a, err := h.Svc.InviteAgent(context.Background(), tenantID, email, role)
+	a, err := h.Svc.InviteAgent(context.Background(), tenantID, email, "", "", role)
 	if err != nil {
 		h.T.Fatalf("seed admin: %v", err)
 	}

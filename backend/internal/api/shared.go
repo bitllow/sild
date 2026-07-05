@@ -112,7 +112,13 @@ func (h *Handler) postMessage(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, views.Message(msg, h.attachmentURL(c)))
+	out := views.Message(msg, h.attachmentURL(c))
+	if msg.InternalActorID != nil {
+		if name := h.svc.AgentDisplayName(c.Request.Context(), apiutil.Tenant(c), *msg.InternalActorID); name != "" {
+			out["author_name"] = name
+		}
+	}
+	c.JSON(http.StatusCreated, out)
 }
 
 // listMessages: GET /v1/conversations/:id/messages?before=&after=&limit= (§4.2).
@@ -141,7 +147,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 			apiutil.Fail(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"messages": renderMessages(msgs, urlFn)})
+		c.JSON(http.StatusOK, gin.H{"messages": h.renderMessagesAuthored(c, msgs, urlFn)})
 		return
 	}
 	limit := atoiDefault(c.Query("limit"), 50)
@@ -150,7 +156,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messages": renderMessages(page.Messages, urlFn), "has_more": page.HasMore})
+	c.JSON(http.StatusOK, gin.H{"messages": h.renderMessagesAuthored(c, page.Messages, urlFn), "has_more": page.HasMore})
 }
 
 // markRead: POST /v1/conversations/:id/read (§4.2).
@@ -243,6 +249,31 @@ func renderMessages(msgs []models.Message, urlFn views.URLFunc) []map[string]any
 	out := make([]map[string]any, 0, len(msgs))
 	for i := range msgs {
 		out = append(out, views.Message(&msgs[i], urlFn))
+	}
+	return out
+}
+
+// renderMessagesAuthored renders a page of messages and stamps agent-authored
+// ones with the operator's display name (author_name), so the web widget shows a
+// real first name in place of "Support". Names are resolved once per distinct
+// actor per page.
+func (h *Handler) renderMessagesAuthored(c *gin.Context, msgs []models.Message, urlFn views.URLFunc) []map[string]any {
+	out := renderMessages(msgs, urlFn)
+	tenant := apiutil.Tenant(c)
+	cache := make(map[string]string)
+	for i := range msgs {
+		if msgs[i].InternalActorID == nil {
+			continue
+		}
+		id := *msgs[i].InternalActorID
+		name, ok := cache[id]
+		if !ok {
+			name = h.svc.AgentDisplayName(c.Request.Context(), tenant, id)
+			cache[id] = name
+		}
+		if name != "" {
+			out[i]["author_name"] = name
+		}
 	}
 	return out
 }

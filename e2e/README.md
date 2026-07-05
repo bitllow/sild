@@ -15,8 +15,11 @@ product works together after any change.
   `admin@sild.local` / `password123`, and 5 sample conversations. In-memory
   broker, in-process worker/SMTP — no Postgres/Redis/Docker.
 - **Inbox** — `next dev` on :3000, proxying `/v1/*` and `/widget.js` to :8080.
-- **Widget bundle** — rebuilt in `global-setup` so the embedded `/widget.js` is
-  current.
+- **Widget bundle** — rebuilt as the first step of the backend command (before
+  `go run` compiles and `//go:embed`s it), so the embedded `/widget.js` reflects
+  the current `web/` source. `globalSetup` can't do this: Playwright starts
+  `webServer` before `globalSetup`. Skipped when `SILD_E2E_SKIP_BUILD=1` (CI
+  pre-builds) or when `SILD_E2E_BACKEND_CMD` points at a prebuilt binary.
 
 Test isolation is by **unique ids** (each test creates its own conversation),
 not by resetting the shared DB.

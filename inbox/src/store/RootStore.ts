@@ -40,6 +40,74 @@ import type {
 // Queue page size for the inbox list + scroll-loading (§4.3).
 const PAGE_SIZE = 30;
 
+// ─────────────────────────── notification sound ───────────────────────────
+// A single shared AudioContext, reused across chimes. Browsers start an
+// AudioContext suspended until a user gesture (autoplay policy); realtime events
+// aren't gestures, so a fresh context per chime would stay silent. We create one
+// lazily and resume it on the first user interaction (and on each chime), so
+// event-driven chimes actually sound. Module-level so it stays out of MobX.
+let audioCtx: AudioContext | null = null;
+let audioUnlockBound = false;
+
+function ensureAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return null;
+  if (!audioCtx) {
+    try {
+      audioCtx = new Ctx();
+    } catch {
+      return null;
+    }
+  }
+  return audioCtx;
+}
+
+// Bind this ONCE at startup (not lazily on the first chime): browsers only let an
+// AudioContext leave the "suspended" state in response to a user gesture, and a
+// realtime message isn't one. Priming on the agent's earlier clicks means the
+// context is already running by the time a message arrives and we chime.
+function installAudioUnlock(): void {
+  if (audioUnlockBound || typeof window === "undefined") return;
+  audioUnlockBound = true;
+  const unlock = () => void ensureAudioContext()?.resume().catch(() => {});
+  window.addEventListener("pointerdown", unlock);
+  window.addEventListener("keydown", unlock);
+}
+
+// playChime sounds a short ascending two-tone notification on the shared context.
+// Tones are scheduled off ctx.currentTime, so they must fire while the context
+// is running — if it's suspended, we resume FIRST and play in the callback (a
+// suspended context advances no time, so scheduling into it would be silent).
+function playChime(): void {
+  const ac = ensureAudioContext();
+  if (!ac) return;
+  const fire = () => {
+    const tone = (freq: number, at: number) => {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      const t = ac.currentTime + at;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      osc.start(t);
+      osc.stop(t + 0.22);
+    };
+    try {
+      tone(660, 0);
+      tone(880, 0.14);
+    } catch {
+      /* audio unavailable — silent */
+    }
+  };
+  if (ac.state === "suspended") ac.resume().then(fire).catch(() => {});
+  else fire();
+}
+
 export class RootStore {
   // --- session ---
   session: SessionState = "loading";
@@ -54,13 +122,32 @@ export class RootStore {
   convs: Conversation[] = [];
   activeId: string | null = null;
   filter: InboxFilter = "all";
+  // "Show closed" — closed conversations are hidden from every scope until this
+  // is on (the old "Closed" tab, now a toggle next to the open count).
+  showClosed = false;
   // Sort the queue by last activity (default), date started, or waiting since,
   // with an asc/desc toggle. Applied server-side (§4.3).
   sortBy: QueueSort = "last_activity";
   sortDir: QueueOrder = "desc";
-  // Open-conversation count for the inbox header badge (§8).
+  // Open-conversation count for the inbox header badge (§8), plus the live
+  // scope-tab counters (assigned to me / unassigned) and the closed count for the
+  // "Show closed · N" toggle — all tenant-wide, refreshed from the queue endpoint.
   openCount = 0;
+  youCount = 0;
+  unassignedCount = 0;
+  closedCount = 0;
   panelOpen = true;
+  // New-message sound: chimes on inbound messages when on; the header toggle
+  // mutes it (persisted). Starts muted-safe: read the saved preference on init.
+  soundOn = true;
+  // Contact drill-down: the active contact's other threads (Details-panel
+  // "Earlier from …" list), and — when the agent clicks "View all" — a name +
+  // external id that scopes the whole list to that contact via a dismissible chip.
+  contactHistory: Conversation[] = [];
+  authorFilter: string | null = null;
+  // Generation token for contact-history fetches: bumped on each request so a
+  // slow response for a previously-active contact can't overwrite a newer one.
+  private contactSeq = 0;
   composer = "";
   internal = false;
   // Files uploaded and queued to attach to the next outgoing message, plus a
@@ -120,6 +207,10 @@ export class RootStore {
 
   constructor() {
     makeAutoObservable(this);
+    if (typeof window !== "undefined") {
+      this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
+      installAudioUnlock(); // prime notification audio on the agent's first gesture
+    }
   }
 
   // ─────────────────────────── session ───────────────────────────
@@ -188,18 +279,22 @@ export class RootStore {
   // last message per row, not history.
   private get queueParams(): QueueParams {
     const base: QueueParams = { sort: this.sortBy, order: this.sortDir, limit: PAGE_SIZE };
+    // Hide closed conversations server-side too whenever the client hides them —
+    // otherwise a closed row (Close conversation works on queued/assigned rows and
+    // doesn't touch the assignment) would consume a page slot and then vanish
+    // client-side, shrinking the visible page.
     switch (this.filter) {
       case "unassigned":
-        return { ...base, status: "queued" };
-      case "closed":
-        return { ...base, status: "closed" };
+        // A closed queued conversation isn't "unassigned" in the UI (its derived
+        // status is closed), so it's always excluded here.
+        return { ...base, status: "queued", excludeClosed: true };
       case "you":
-        // "You" = conversations I'm actively handling: assigned (not queued, not
-        // closed) and assigned to me. Closing keeps assignee_actor_id set, so we
-        // must constrain on status too or closed ones leak into this view.
-        return { ...base, status: "assigned", assignee: "me" };
+        // "You" = assigned to me (closing keeps assignee_actor_id set). Show
+        // closed reveals my closed threads; otherwise they're excluded.
+        return { ...base, assignee: "me", status: "assigned", excludeClosed: !this.showClosed };
       default:
-        return base;
+        // "All" — everything, minus closed unless "Show closed" is on.
+        return this.showClosed ? base : { ...base, excludeClosed: true };
     }
   }
 
@@ -219,7 +314,7 @@ export class RootStore {
         this.convs = built;
         this.nextCursor = page.next_cursor;
         this.hasMore = page.has_more;
-        this.openCount = page.open_count;
+        this.applyCounts(page);
         if (!this.activeId || !built.some((c) => c.id === this.activeId)) {
           this.activeId = built[0]?.id ?? null;
         }
@@ -227,7 +322,10 @@ export class RootStore {
       // Queue rows carry no history (messages: []); load the auto-selected
       // conversation's thread now rather than waiting for the websocket — REST
       // works even when realtime doesn't.
-      if (this.activeId) await this.refreshActiveMessages();
+      if (this.activeId) {
+        await this.refreshActiveMessages();
+        void this.refreshContactHistory();
+      }
     } finally {
       if (seq === this.queueSeq) {
         runInAction(() => {
@@ -277,8 +375,13 @@ export class RootStore {
       ]);
       const rebuilt = buildConversation(conv, page);
       runInAction(() => {
-        const i = this.convs.findIndex((c) => c.id === id);
-        if (i >= 0) this.convs[i] = rebuilt;
+        // The open thread may live in the queue, in search results, or in the
+        // contact-history list — refresh it wherever it is.
+        for (const list of [this.convs, this.searchResults, this.contactHistory]) {
+          if (!list) continue;
+          const i = list.findIndex((c) => c.id === id);
+          if (i >= 0) list[i] = rebuilt;
+        }
       });
     } catch {
       /* transient; next tick retries */
@@ -288,6 +391,10 @@ export class RootStore {
   // ─────────────────────────── realtime (§5) ───────────────────────────
   connectRealtime = () => {
     if (this.rt || typeof window === "undefined") return;
+    // We arrive here right after a login/bootstrap gesture — a good moment to
+    // create + resume the notification AudioContext so it's already running when
+    // the first realtime chime fires (autoplay policy allows resume post-gesture).
+    void ensureAudioContext()?.resume().catch(() => {});
     this.rt = createRealtime({
       onState: (s) => {
         runInAction(() => {
@@ -353,7 +460,7 @@ export class RootStore {
       const page = await adminApi.listAssignments(this.queueParams);
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop the merge
       runInAction(() => {
-        this.openCount = page.open_count;
+        this.applyCounts(page);
         const byId = new Map(this.convs.map((c) => [c.id, c]));
         let added = false;
         for (const it of page.items) {
@@ -374,7 +481,10 @@ export class RootStore {
           }
         }
         if (!this.activeId && this.convs.length) this.activeId = this.convs[0].id;
-        if (added) this.reconnectRealtime();
+        if (added) {
+          this.reconnectRealtime();
+          this.chime(); // a new request landed in the queue
+        }
       });
     } catch {
       /* transient; the next event or the safety reconcile retries */
@@ -421,7 +531,12 @@ export class RootStore {
         conv.preview = msg.body;
         conv.time = relativeTime(m.created_at);
         conv.lastActivity = m.created_at; // bumps it to the top of the desc-sorted list
-        if (cid !== this.activeId && msg.dir === "in") conv.unread += 1;
+        if (msg.dir === "in") {
+          // Sound on any inbound message — a reply in the open thread as well as
+          // one in a background conversation; only background ones bump unread.
+          if (cid !== this.activeId) conv.unread += 1;
+          this.chime();
+        }
       }
     });
   };
@@ -486,9 +601,10 @@ export class RootStore {
     this.pendingAtts = [];
     this.uploading = 0;
     this.uploadGen += 1;
-    const conv = this.convs.find((c) => c.id === id);
+    const conv = this.convs.find((c) => c.id === id) || this.contactHistory.find((c) => c.id === id);
     if (conv) conv.unread = 0;
     void this.refreshActiveMessages();
+    void this.refreshContactHistory();
   };
   setFilter = (f: InboxFilter) => {
     if (this.filter === f) return;
@@ -513,6 +629,11 @@ export class RootStore {
     this.hasMore = false;
     void this.loadConversations();
   };
+  // "Show closed" changes the server-side scope (§4.3) → reload page 1.
+  toggleClosed = () => {
+    this.showClosed = !this.showClosed;
+    this.reloadQueue();
+  };
   newRequest = () => {
     this.setFilter("unassigned");
   };
@@ -520,19 +641,104 @@ export class RootStore {
     this.panelOpen = !this.panelOpen;
   };
 
+  // Apply the tenant-wide badge counts from a queue page response.
+  private applyCounts = (page: { open_count: number; you_count: number; unassigned_count: number; closed_count: number }) => {
+    this.openCount = page.open_count;
+    this.youCount = page.you_count;
+    this.unassignedCount = page.unassigned_count;
+    this.closedCount = page.closed_count;
+  };
+
+  // Conversations with unread inbound messages — drives the coral attention badge
+  // on the nav-rail inbox icon.
+  get attentionCount(): number {
+    return this.convs.filter((c) => c.unread > 0).length;
+  }
+
+  // ─────────────────────────── sound (§8) ───────────────────────────
+  toggleSound = () => {
+    this.soundOn = !this.soundOn;
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("sild_inbox_sound", this.soundOn ? "on" : "off");
+    }
+    if (this.soundOn) this.chime(); // confirm audibly on unmute
+  };
+
+  // chime plays the two-tone notification when unmuted (no-op otherwise). The
+  // Web Audio plumbing + autoplay unlock live at module scope (see playChime).
+  private chime = () => {
+    if (this.soundOn) playChime();
+  };
+
+  // ─────────────────────────── contact history (§4.3) ───────────────────────
+  // The active conversation's client contact (external id + display name), used
+  // to fetch that contact's other threads.
+  get activeContact(): { extId: string; name: string } | null {
+    const a = this.active;
+    if (!a) return null;
+    const client = a.members.find((m) => m.extId);
+    if (!client?.extId) return null;
+    return { extId: client.extId, name: client.name || a.name };
+  }
+
+  // The contact's OTHER threads (excludes the one currently open) — the Details
+  // panel's "Earlier from …" list.
+  get contactEarlier(): Conversation[] {
+    return this.contactHistory.filter((c) => c.id !== this.activeId);
+  }
+
+  // Load every thread for the active conversation's contact. Cheap (denormalized
+  // previews, no history) and keyed to the active contact so the "Earlier from"
+  // list and the "View all" drill-down share one fetch.
+  private refreshContactHistory = async () => {
+    const seq = ++this.contactSeq;
+    const contact = this.activeContact;
+    if (!contact) {
+      runInAction(() => {
+        if (seq === this.contactSeq) this.contactHistory = [];
+      });
+      return;
+    }
+    try {
+      const { conversations } = await adminApi.contactConversations(contact.extId);
+      const built = conversations.map(buildQueueRow);
+      runInAction(() => {
+        // Drop a response that a newer active-contact switch has superseded.
+        if (seq === this.contactSeq) this.contactHistory = built;
+      });
+    } catch {
+      /* transient */
+    }
+  };
+
+  // "View all" — scope the whole list to the active contact (dismissible chip).
+  viewAllFromActive = () => {
+    const contact = this.activeContact;
+    if (!contact) return;
+    this.authorFilter = contact.name;
+    this.searchQuery = "";
+    this.searchResults = null;
+  };
+  clearAuthorFilter = () => {
+    this.authorFilter = null;
+  };
+  get authorCount(): number {
+    return this.contactHistory.length;
+  }
+
   get filteredConvs(): Conversation[] {
     // The server already scopes the list to the filter; this client filter only
     // mirrors status-based views so realtime transitions (e.g. a claimed request
     // leaving "Unassigned") drop out immediately without a refetch.
     const wantStatus: UiStatus | null =
-      this.filter === "unassigned"
-        ? "queued"
-        : this.filter === "closed"
-          ? "closed"
-          : this.filter === "you"
-            ? "assigned"
-            : null;
-    const rows = this.convs.filter((c) => !wantStatus || c.status === wantStatus);
+      this.filter === "unassigned" ? "queued" : this.filter === "you" ? "assigned" : null;
+    const rows = this.convs.filter((c) => {
+      // "Show closed" off hides closed rows from every scope.
+      if (!this.showClosed && c.status === "closed") return false;
+      // "You" with closed shown includes my closed threads alongside assigned.
+      if (this.filter === "you") return c.status === "assigned" || (this.showClosed && c.status === "closed");
+      return !wantStatus || c.status === wantStatus;
+    });
     // Re-sort by the active key (carried per row) so realtime arrivals and
     // last-activity bumps land in the right place without a refetch — matching
     // the server's ordering for whichever sort is active.
@@ -549,15 +755,19 @@ export class RootStore {
     return (
       this.convs.find((c) => c.id === this.activeId) ||
       this.searchResults?.find((c) => c.id === this.activeId) ||
+      this.contactHistory.find((c) => c.id === this.activeId) ||
       this.convs[0] ||
       null
     );
   }
 
-  // The list shown in the left column: search results when a query is active,
-  // otherwise the filtered assignment queue.
+  // The list shown in the left column, in priority order: search results while a
+  // query is active; else the contact drill-down when "View all from" is on; else
+  // the filtered assignment queue.
   get listConvs(): Conversation[] {
-    return this.searchResults !== null ? this.searchResults : this.filteredConvs;
+    if (this.searchResults !== null) return this.searchResults;
+    if (this.authorFilter) return this.contactHistory;
+    return this.filteredConvs;
   }
 
   // ─────────────────────────── search (§4.3) ───────────────────────────
@@ -717,6 +927,7 @@ export class RootStore {
           if (!c.convClosed) c.status = "assigned";
         }
       });
+      void this.syncQueue(); // scope moved (unassigned → you): refresh the counters
     } catch (e) {
       runInAction(() => {
         this.convError = e instanceof ApiError ? e.message : "Claim failed.";
@@ -742,6 +953,7 @@ export class RootStore {
           c.preview = "Conversation closed";
         }
       });
+      void this.syncQueue(); // it left the open scope + bumped closed: refresh counters
     } catch (e) {
       runInAction(() => {
         this.convError = e instanceof ApiError ? e.message : "Close failed.";

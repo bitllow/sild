@@ -97,6 +97,19 @@ type AssignmentRepo interface {
 	// carries an assignment (unpaginated) — used to compute an agent's realtime
 	// channel subscription set (§5.2).
 	ConversationIDs(ctx context.Context, tenantID string) ([]string, error)
+	// CountQueue returns the per-scope queue counts (assigned-to-me / unassigned /
+	// closed) for the inbox scope-tab counters + "Show closed" toggle. Computed
+	// over the representative (latest) assignment per conversation, matching
+	// ListQueue's semantics.
+	CountQueue(ctx context.Context, tenantID, actorID string) (QueueCounts, error)
+}
+
+// QueueCounts are the inbox scope-tab counters. You = assigned to the calling
+// agent; Unassigned = queued; Closed = closed assignments.
+type QueueCounts struct {
+	You        int64
+	Unassigned int64
+	Closed     int64
 }
 
 // QueueSort selects the ordering key for the inbox queue.
@@ -119,10 +132,13 @@ type QueueCursor struct {
 type QueueParams struct {
 	Status   *models.AssignmentStatus
 	Assignee *string
-	Sort     QueueSort
-	Desc     bool
-	Limit    int
-	Cursor   *QueueCursor // nil for the first page
+	// ExcludeClosed drops closed assignments from the page — the "All" scope with
+	// the "Show closed" toggle off (Status is nil there, so a != filter is needed).
+	ExcludeClosed bool
+	Sort          QueueSort
+	Desc          bool
+	Limit         int
+	Cursor        *QueueCursor // nil for the first page
 }
 
 // QueueItem is one enriched queue row.

@@ -134,6 +134,10 @@ func (h *Handler) listAssignments(c *gin.Context) {
 		}
 		p.Assignee = &a
 	}
+	// "Show closed" off (the default for the All scope) drops closed assignments.
+	if c.Query("exclude_closed") == "true" {
+		p.ExcludeClosed = true
+	}
 	switch store.QueueSort(c.Query("sort")) {
 	case store.QueueSortCreated:
 		p.Sort = store.QueueSortCreated
@@ -154,13 +158,20 @@ func (h *Handler) listAssignments(c *gin.Context) {
 	}
 
 	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
-	// The open-conversation badge is independent of the page, so compute it
-	// concurrently with the queue query rather than adding a serial round-trip.
-	// Buffered so the goroutine never blocks if ListQueue errors out below.
+	actor := middleware.Get(c).AdminID
+	// The badges (open count + the You/Unassigned/Closed scope counters) are
+	// independent of the page, so compute them concurrently with the queue query
+	// rather than adding serial round-trips. Buffered so the goroutines never
+	// block if ListQueue errors out below.
 	openCh := make(chan int64, 1)
 	go func() {
 		n, _ := h.svc.CountOpenConversations(ctx, tenant)
 		openCh <- n
+	}()
+	countsCh := make(chan store.QueueCounts, 1)
+	go func() {
+		cnt, _ := h.svc.CountQueue(ctx, tenant, actor)
+		countsCh <- cnt
 	}()
 
 	page, err := h.svc.ListQueue(ctx, tenant, p)
@@ -172,18 +183,39 @@ func (h *Handler) listAssignments(c *gin.Context) {
 	for i := range page.Items {
 		items = append(items, views.QueueRow(&page.Items[i]))
 	}
+	counts := <-countsCh
 	c.JSON(http.StatusOK, gin.H{
-		"items":       items,
-		"next_cursor": encodeQueueCursor(page.NextCursor),
-		"has_more":    page.HasMore,
-		"open_count":  <-openCh,
+		"items":            items,
+		"next_cursor":      encodeQueueCursor(page.NextCursor),
+		"has_more":         page.HasMore,
+		"open_count":       <-openCh,
+		"you_count":        counts.You,
+		"unassigned_count": counts.Unassigned,
+		"closed_count":     counts.Closed,
 	})
+}
+
+// listContactConversations: GET /v1/admin/contacts/conversations?external_user_id=…
+// returns every thread the contact takes part in (Details-panel history + the
+// "View all from" contact filter, §4.3).
+func (h *Handler) listContactConversations(c *gin.Context) {
+	ext := c.Query("external_user_id")
+	if ext == "" {
+		httpx.BadRequest(c, "external_user_id is required")
+		return
+	}
+	convs, err := h.svc.ListContactConversations(c.Request.Context(), apiutil.Tenant(c), ext)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"conversations": convs})
 }
 
 // queueCursorDTO is the wire form of a keyset cursor, base64(JSON).
 type queueCursorDTO struct {
-	V time.Time `json:"v"`
-	ID string   `json:"id"`
+	V  time.Time `json:"v"`
+	ID string    `json:"id"`
 }
 
 func encodeQueueCursor(c *store.QueueCursor) any {
@@ -355,6 +387,7 @@ func (h *Handler) listTeam(c *gin.Context) {
 		a := &admins[i]
 		out = append(out, map[string]any{
 			"id": a.ID, "email": a.Email, "platform_role": a.PlatformRole,
+			"first_name": a.FirstName, "last_name": a.LastName,
 			"has_password": a.PasswordHash != nil, "created_at": a.CreatedAt,
 		})
 	}
@@ -394,16 +427,18 @@ func (h *Handler) updateAgent(c *gin.Context) {
 func (h *Handler) inviteAgent(c *gin.Context) {
 	var req struct {
 		Email        string              `json:"email"`
+		FirstName    string              `json:"first_name"`
+		LastName     string              `json:"last_name"`
 		PlatformRole models.PlatformRole `json:"platform_role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "invalid body")
 		return
 	}
-	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.PlatformRole)
+	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.FirstName, req.LastName, req.PlatformRole)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "platform_role": a.PlatformRole})
+	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "first_name": a.FirstName, "last_name": a.LastName, "platform_role": a.PlatformRole})
 }

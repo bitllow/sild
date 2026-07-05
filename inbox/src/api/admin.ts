@@ -98,6 +98,11 @@ export interface ApiQueuePage {
   has_more: boolean;
   // Count of open conversations in the tenant — the inbox open badge (§8).
   open_count: number;
+  // Scope-tab counters + "Show closed" toggle count. you = assigned to me,
+  // unassigned = queued, closed = closed assignments.
+  you_count: number;
+  unassigned_count: number;
+  closed_count: number;
 }
 
 // last_activity (default), created = date started, waiting_since = queued-since.
@@ -107,6 +112,8 @@ export type QueueOrder = "asc" | "desc";
 export interface QueueParams {
   status?: ApiAssignmentStatus;
   assignee?: string;
+  /** Drop closed assignments (the All scope with "Show closed" off). */
+  excludeClosed?: boolean;
   sort?: QueueSort;
   order?: QueueOrder;
   limit?: number;
@@ -145,6 +152,8 @@ export interface ApiSearchHit {
 export interface ApiTeamMember {
   id: string;
   email: string;
+  first_name?: string;
+  last_name?: string;
   platform_role: ApiPlatformRole;
   has_password: boolean;
   created_at: string;
@@ -213,6 +222,7 @@ export const adminApi = {
     const q = new URLSearchParams();
     if (params?.status) q.set("status", params.status);
     if (params?.assignee) q.set("assignee", params.assignee);
+    if (params?.excludeClosed) q.set("exclude_closed", "true");
     if (params?.sort) q.set("sort", params.sort);
     if (params?.order) q.set("order", params.order);
     if (params?.limit) q.set("limit", String(params.limit));
@@ -220,6 +230,12 @@ export const adminApi = {
     const qs = q.toString();
     return api.get<ApiQueuePage>(`/admin/assignments${qs ? `?${qs}` : ""}`);
   },
+  // Every thread a contact takes part in — the Details-panel history + the
+  // "View all from" contact filter. Returns queue-row-shaped items.
+  contactConversations: (externalUserId: string) =>
+    api.get<{ conversations: ApiQueueItem[] }>(
+      `/admin/contacts/conversations?external_user_id=${encodeURIComponent(externalUserId)}`
+    ),
   getConversation: (id: string) => api.get<ApiConversation>(`/conversations/${id}`),
   listMessages: (id: string) => api.get<ApiMessagesPage>(`/conversations/${id}/messages?limit=100`),
   postMessage: (

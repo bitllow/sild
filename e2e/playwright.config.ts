@@ -23,6 +23,15 @@ const isCI = !!process.env.CI;
 // Opt-in browser-code coverage (inbox client JS) via monocart. See fixtures.
 const COVERAGE = process.env.E2E_COVERAGE === "1";
 
+// The widget bundle is embedded into the Go backend at COMPILE time
+// (`//go:embed widget.js`), so it must be rebuilt BEFORE `go run` compiles.
+// Playwright starts `webServer` plugins before `globalSetup`, so the build
+// can't live in globalSetup — it would run after the backend was already
+// compiled, serving the previous run's bundle. So it's the first step of the
+// backend command below. CI pre-builds and sets SILD_E2E_SKIP_BUILD=1; a
+// prebuilt SILD_E2E_BACKEND_CMD also skips it (the bundle is baked into it).
+const SKIP_BUILD = process.env.SILD_E2E_SKIP_BUILD === "1";
+
 const reporters: import("@playwright/test").ReporterDescription[] = [["html", { open: "never" }]];
 reporters.push(isCI ? ["line"] : ["list"]);
 if (COVERAGE) {
@@ -46,9 +55,9 @@ if (COVERAGE) {
 
 export default defineConfig({
   testDir: "./specs",
-  // globalSetup builds the widget bundle so the embedded /widget.js is current
-  // before `go run` compiles the backend.
-  globalSetup: require.resolve("./global-setup"),
+  // The widget bundle is (re)built as the first step of the backend command
+  // (see SKIP_BUILD above) — it has to happen before `go run` compiles, which
+  // is earlier than any globalSetup could run.
   globalTeardown: require.resolve("./global-teardown"),
   // One shared backend + DB; isolation is by unique per-test ids, not DB reset.
   fullyParallel: true,
@@ -101,8 +110,14 @@ export default defineConfig({
       // Zero-infra dev backend: SQLite (fresh temp file) + in-memory broker +
       // in-process worker/SMTP. NOT `make dev` (that uses Postgres/Redis).
       // Override the command via SILD_E2E_BACKEND_CMD (e.g. a prebuilt binary)
-      // if `go run` is unavailable locally.
-      command: process.env.SILD_E2E_BACKEND_CMD || "go run ./cmd/sild-dev",
+      // if `go run` is unavailable locally. The widget bundle is rebuilt first
+      // (unless SKIP_BUILD) so `go run` embeds the current web/ source; the
+      // build runs in ../web then `go run` in this cwd (../backend).
+      command:
+        process.env.SILD_E2E_BACKEND_CMD ||
+        (SKIP_BUILD
+          ? "go run ./cmd/sild-dev"
+          : "(cd ../web && node build.mjs) && go run ./cmd/sild-dev"),
       cwd: "../backend",
       url: `${BACKEND_URL}/sild-demo`,
       reuseExistingServer: !isCI,

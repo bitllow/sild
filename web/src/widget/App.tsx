@@ -60,6 +60,35 @@ const ClipIcon = () => (
     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
   </svg>
 );
+const SpeakerIcon = ({ s = 20 }: { s?: number }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 4.7 6 9H2v6h4l5 4.3z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" />
+  </svg>
+);
+const SpeakerOffIcon = ({ s = 20 }: { s?: number }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 4.7 6 9H2v6h4l5 4.3z" />
+    <path d="m22 9-6 6M16 9l6 6" />
+  </svg>
+);
+
+// SoundToggle is the shared reply-notification control rendered in both widget
+// headers (home + thread); muted swaps to the slashed-speaker glyph. Icon stays
+// white — the brand-colored header already carries the emphasis.
+function SoundToggle({ on, onToggle, size = 20 }: { on: boolean; onToggle: () => void; size?: number }) {
+  return (
+    <button
+      class="wsound"
+      aria-pressed={on}
+      aria-label={on ? "Turn off reply notifications" : "Turn on reply notifications"}
+      title={on ? "Turn off reply notifications" : "Turn on reply notifications"}
+      onClick={onToggle}
+    >
+      {on ? <SpeakerIcon s={size} /> : <SpeakerOffIcon s={size} />}
+    </button>
+  );
+}
 
 // LauncherGlyph renders the configured launcher icon (preset or custom upload).
 function LauncherGlyph({ config, size }: { config: BrandConfig; size: number }) {
@@ -187,6 +216,8 @@ function Home({
   onNew: () => void;
 }) {
   const topics = parseTopics(config.topics);
+  const agentName = state.agentName || "Support";
+  const agentInitial = (agentName.trim()[0] || "S").toUpperCase();
   const startTopic = () => {
     if (preview) return;
     onNew();
@@ -195,11 +226,14 @@ function Home({
     <>
       <div class="brandhead">
         <div class="toprow">
-          {config.logoUrl || config.logo ? (
-            <img class="logo" src={config.logoUrl || config.logo} alt={name || "Logo"} />
-          ) : (
-            name && <div class="brandname">{name}</div>
-          )}
+          <span class="brandhead-left">
+            {config.logoUrl || config.logo ? (
+              <img class="logo" src={config.logoUrl || config.logo} alt={name || "Logo"} />
+            ) : (
+              name && <div class="brandname">{name}</div>
+            )}
+          </span>
+          <SoundToggle on={state.soundOn} onToggle={() => client.toggleSound()} size={22} />
         </div>
         {config.showTeam && <TeamHeader />}
         <h1>{config.heading}</h1>
@@ -224,16 +258,20 @@ function Home({
           </div>
         )}
         {state.conversations.length > 0 && <div class="eyebrow">Recent</div>}
-        {state.conversations.map((c) => (
+        {state.conversations.map((c) => {
+          const rowName = c.agentName || agentName;
+          const rowInitial = (rowName.trim()[0] || "S").toUpperCase();
+          return (
           <div class="row" key={c.id} onClick={() => void client.openConversation(c.id)}>
-            <span class="av" style={{ background: "var(--brand)", color: "#fff" }}>S</span>
+            <span class="av" style={{ background: "var(--brand)", color: "#fff" }}>{rowInitial}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div class="name">Support</div>
+              <div class="name">{rowName}</div>
               <div class="prev">{c.preview}</div>
             </div>
             <span class="time">{c.time}</span>
           </div>
-        ))}
+          );
+        })}
         {state.error && <div class="note">{state.error}</div>}
       </div>
     </>
@@ -272,7 +310,10 @@ function Thread({
 
   const closed = !draft && state.conversations.find((c) => c.id === state.activeId)?.closed;
   const canSend = (!!text.trim() || atts.length > 0) && !closed && uploading === 0;
-  const agentName = config.showTeam ? "Eva" : "Support";
+  // Prefer the real agent's first name (learned from incoming messages) over the
+  // generic "Support"; fall back to a friendly default before any reply arrives.
+  const agentName = state.agentName || (config.showTeam ? "Eva" : "Support");
+  const agentInitial = (agentName.trim()[0] || "S").toUpperCase();
 
   const onFiles = (e: Event) => {
     const input = e.currentTarget as HTMLInputElement;
@@ -314,12 +355,12 @@ function Thread({
           </button>
         )}
         {config.showTeam ? (
-          <span class="av" style={{ background: "#7C9CF5" }}>{agentName.charAt(0)}</span>
+          <span class="av" style={{ background: "#7C9CF5" }}>{agentInitial}</span>
         ) : (
-          <span class="av">S</span>
+          <span class="av">{agentInitial}</span>
         )}
         <div>
-          <div class="name">{config.showTeam ? agentName : "Sild support"}</div>
+          <div class="name">{agentName}</div>
           <div class="sub">
             {draft
               ? "Type your message to start"
@@ -328,6 +369,8 @@ function Thread({
                 : "Connecting…"}
           </div>
         </div>
+        <div style={{ flex: 1 }} />
+        <SoundToggle on={state.soundOn} onToggle={() => client.toggleSound()} size={20} />
       </div>
       <div class="body" ref={scroller}>
         {state.loadingThread && <div class="note">Loading…</div>}

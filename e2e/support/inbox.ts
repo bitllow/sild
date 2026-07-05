@@ -15,10 +15,21 @@ export const navSettings = (page: Page): Locator => page.getByRole("button", { n
 export const navSignOut = (page: Page): Locator => page.getByRole("button", { name: "Sign out" });
 
 // ── Conversation list ────────────────────────────────────────────────────────
-export const filterTab = (page: Page, key: "you" | "unassigned" | "closed" | "all"): Locator =>
+export const filterTab = (page: Page, key: "you" | "unassigned" | "all"): Locator =>
   page.getByTestId(`filter-${key}`);
 export const searchInput = (page: Page): Locator => page.getByPlaceholder(/Search/);
 export const openCount = (page: Page): Locator => page.getByTestId("open-count");
+// "Show closed · N" / "Hide closed" toggle next to the open count.
+export const showClosedToggle = (page: Page): Locator => page.getByTestId("toggle-closed");
+// New-conversation sound toggle in the list header.
+export const soundToggle = (page: Page): Locator => page.getByTestId("sound-toggle");
+// Coral attention badge overlaying the nav-rail inbox icon.
+export const navAttention = (page: Page): Locator => page.getByTestId("nav-attention");
+// Details-panel contact history: the "View all" link + the earlier-thread rows,
+// and the dismissible chip shown in the list header while a contact is filtered.
+export const contactViewAll = (page: Page): Locator => page.getByTestId("contact-view-all");
+export const contactHistoryRows = (page: Page): Locator => page.getByTestId("contact-history-row");
+export const contactFilterChip = (page: Page): Locator => page.getByTestId("contact-filter-chip");
 export const conversationRow = (page: Page, id: string): Locator =>
   page.locator(`[data-conversation="${id}"]`);
 export const allRows = (page: Page): Locator => page.getByTestId("conversation-row");

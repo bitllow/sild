@@ -21,6 +21,8 @@ export interface WidgetClient {
   send(text: string, attachments?: PendingAttachment[]): void | Promise<void>;
   backToList(): void;
   upload(file: File): Promise<PendingAttachment>;
+  /** Toggle the reply-notification sound (shared across the home + thread headers). */
+  toggleSound(): void;
 }
 
 interface ApiAttachment {
@@ -39,6 +41,8 @@ interface ApiMessage {
   visibility: "participants" | "internal";
   body: string;
   created_at: string;
+  /** The agent's display name for agent-authored messages (from the server). */
+  author_name?: string;
   attachments?: ApiAttachment[];
 }
 
@@ -66,6 +70,87 @@ function uuid(): string {
   }
 }
 
+// A single shared AudioContext, reused across chimes and resumed on the first
+// user gesture — browsers start it suspended (autoplay policy), and realtime
+// events aren't gestures, so a fresh per-chime context would stay silent.
+let audioCtx: AudioContext | null = null;
+let audioUnlockBound = false;
+
+function ensureAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return null;
+  if (!audioCtx) {
+    try {
+      audioCtx = new Ctx();
+    } catch {
+      return null;
+    }
+  }
+  return audioCtx;
+}
+
+// Bind once at startup: an AudioContext only resumes on a user gesture, and an
+// incoming reply isn't one — so prime it on the visitor's earlier interactions
+// (opening the launcher, typing) and it's running by the time a reply chimes.
+function installAudioUnlock(): void {
+  if (audioUnlockBound || typeof window === "undefined") return;
+  audioUnlockBound = true;
+  const unlock = () => void ensureAudioContext()?.resume().catch(() => {});
+  window.addEventListener("pointerdown", unlock);
+  window.addEventListener("keydown", unlock);
+}
+
+// chime plays a short ascending two-tone notification. Tones schedule off
+// ctx.currentTime, so resume a suspended context FIRST and play in the callback
+// (a suspended context advances no time → scheduling into it is silent). No-op
+// where audio is unavailable (SSR, no Web Audio).
+function chime(): void {
+  const ac = ensureAudioContext();
+  if (!ac) return;
+  const fire = () => {
+    const tone = (freq: number, at: number) => {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      const t = ac.currentTime + at;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      osc.start(t);
+      osc.stop(t + 0.22);
+    };
+    try {
+      tone(660, 0);
+      tone(880, 0.14);
+    } catch {
+      /* audio unavailable — silent */
+    }
+  };
+  if (ac.state === "suspended") ac.resume().then(fire).catch(() => {});
+  else fire();
+}
+
+// The most recent agent's display name in a thread, for the header + bubbles.
+function agentNameOf(msgs: WidgetMessage[]): string | undefined {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].direction === "in" && !msgs[i].system && msgs[i].author) return msgs[i].author;
+  }
+  return undefined;
+}
+
+function initialSoundOn(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem("sild_widget_sound") !== "off";
+  } catch {
+    return true;
+  }
+}
+
 function mapMessage(m: ApiMessage): WidgetMessage {
   const system = m.sender_kind === "system";
   const out = m.sender_kind === "user";
@@ -73,7 +158,7 @@ function mapMessage(m: ApiMessage): WidgetMessage {
     id: m.id,
     direction: out ? "out" : "in",
     system,
-    author: system ? undefined : out ? undefined : "Support",
+    author: system ? undefined : out ? undefined : m.author_name || "Support",
     time: clock(m.created_at),
     body: m.body,
     attachments: (m.attachments || []).map((a) => ({
@@ -104,12 +189,25 @@ export class SildClient implements WidgetClient {
     activeId: null,
     messages: [],
     loadingThread: false,
+    soundOn: initialSoundOn(),
   };
 
   constructor(cfg: SildConfig) {
     this.base = (cfg.baseUrl || "").replace(/\/$/, "");
     this.tokenProvider = cfg.tokenProvider;
     this.metadata = cfg.metadata || {};
+    installAudioUnlock(); // prime reply-notification audio on the first gesture
+  }
+
+  toggleSound() {
+    const soundOn = !this.state.soundOn;
+    try {
+      window.localStorage.setItem("sild_widget_sound", soundOn ? "on" : "off");
+    } catch {
+      /* storage unavailable */
+    }
+    this.patch({ soundOn });
+    if (soundOn) chime(); // confirm audibly on unmute
   }
 
   subscribe(fn: () => void): () => void {
@@ -205,7 +303,11 @@ export class SildClient implements WidgetClient {
     if (env.type === "message.created" && env.conversation_id === this.state.activeId) {
       const msg = mapMessage(env.data as ApiMessage);
       if (this.state.messages.some((m) => m.id === msg.id)) return; // dedupe own echo
-      this.patch({ messages: [...this.state.messages, msg] });
+      const patch: Partial<WidgetState> = { messages: [...this.state.messages, msg] };
+      if (msg.direction === "in" && !msg.system && msg.author) patch.agentName = msg.author;
+      this.patch(patch);
+      // An agent reply arrived while the thread is open — chime if not muted.
+      if (msg.direction === "in" && !msg.system && this.state.soundOn) chime();
     } else if (env.type === "conversation.closed" && env.conversation_id === this.state.activeId) {
       const conv = this.state.conversations.find((c) => c.id === env.conversation_id);
       if (conv) conv.closed = true;
@@ -224,9 +326,12 @@ export class SildClient implements WidgetClient {
         preview: last.body || "No messages yet",
         time: last.created_at ? clock(last.created_at) : "",
         closed: (c.status as string) === "closed" || assignment?.status === "closed",
+        agentName: (c.agent_name as string) || undefined,
       };
     });
-    this.patch({ conversations: convs });
+    // Seed a header fallback name from any conversation that already has an agent.
+    const named = convs.find((c) => c.agentName)?.agentName;
+    this.patch({ conversations: convs, ...(named ? { agentName: named } : {}) });
   }
 
   async openConversation(id: string) {
@@ -240,7 +345,7 @@ export class SildClient implements WidgetClient {
         .slice()
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .map(mapMessage);
-      this.patch({ messages, loadingThread: false });
+      this.patch({ messages, loadingThread: false, agentName: agentNameOf(messages) });
     } catch (e) {
       this.patch({ loadingThread: false, error: e instanceof Error ? e.message : "Failed to load" });
     }
@@ -336,6 +441,8 @@ export class SildClient implements WidgetClient {
 // seeded with a sample thread so the real <App> renders realistic content
 // (bubbles, header, composer) without touching the backend.
 export class PreviewClient implements WidgetClient {
+  private listeners = new Set<() => void>();
+
   state: WidgetState = {
     ready: true,
     error: null,
@@ -343,21 +450,28 @@ export class PreviewClient implements WidgetClient {
     conversations: [],
     activeId: "preview",
     loadingThread: false,
+    soundOn: true,
+    agentName: "Eva",
     messages: [
-      { id: "p1", direction: "in", body: "Hi! How can we help with your trip today?", time: "" },
+      { id: "p1", direction: "in", author: "Eva", body: "Hi! How can we help with your trip today?", time: "" },
       { id: "p2", direction: "out", body: "How do I change my pickup address?", time: "" },
-      { id: "p3", direction: "in", body: "Open your trip, tap the pickup pin, and drag it to a new spot.", time: "" },
+      { id: "p3", direction: "in", author: "Eva", body: "Open your trip, tap the pickup pin, and drag it to a new spot.", time: "" },
     ],
   };
 
-  subscribe(): () => void {
-    return () => {};
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
   }
   start(): void {}
   openConversation(): void {}
   openSupportRequest(): void {}
   send(): void {}
   backToList(): void {}
+  toggleSound(): void {
+    this.state = { ...this.state, soundOn: !this.state.soundOn };
+    for (const l of this.listeners) l();
+  }
   async upload(file: File): Promise<PendingAttachment> {
     return { objectKey: "", disposition: "attachment", mimeType: file.type, filename: file.name };
   }

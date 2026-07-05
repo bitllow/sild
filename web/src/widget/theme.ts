@@ -181,6 +181,7 @@ ${autoDark ? `@media (prefers-color-scheme: dark) { :host { ${paletteVars(DARK)}
 
 .brandhead { background: var(--brand); color: #fff; padding: ${headPad}; flex: none; }
 .brandhead .toprow { display: flex; align-items: center; justify-content: space-between; min-height: 22px; }
+.brandhead .brandhead-left { display: flex; align-items: center; min-width: 0; }
 .brandhead .logo { height: 28px; max-width: 150px; object-fit: contain; display: block; }
 .brandhead .brandname { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
 .brandhead h1 { margin: 14px 0 0; font-size: ${fsH1}px; font-weight: 800; letter-spacing: -.02em; line-height: 1.2; }
@@ -196,6 +197,8 @@ ${autoDark ? `@media (prefers-color-scheme: dark) { :host { ${paletteVars(DARK)}
 .threadhead .sub { font-size: 12px; color: rgba(255,255,255,.8); }
 .iconbtn { border: 0; background: transparent; color: #fff; cursor: pointer; display: flex; padding: 4px; border-radius: 8px; }
 .iconbtn:hover { background: rgba(255,255,255,.15); }
+.wsound { border: 0; background: transparent; color: #fff; cursor: pointer; display: flex; padding: 4px; border-radius: 8px; flex: none; }
+.wsound:hover { background: rgba(255,255,255,.15); }
 .av { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex: none; }
 
 .body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--surface-page); }

@@ -4,6 +4,11 @@ import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { Avatar, Badge, CloseIcon, StatusPill, Tag } from "@/components/ds";
 
+// First word of a contact's name for the "Earlier from …" heading.
+function contactFirstName(name?: string): string {
+  return (name || "this contact").trim().split(/\s+/)[0];
+}
+
 const sectionLabel: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
@@ -31,8 +36,10 @@ export const MemberPanel = observer(function MemberPanel() {
     >
       <div
         style={{
-          padding: "14px 16px",
-          borderBottom: "1px solid var(--border-subtle)",
+          height: 64,
+          flex: "none",
+          padding: "0 16px",
+          borderBottom: "1px solid var(--border-default)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -72,6 +79,44 @@ export const MemberPanel = observer(function MemberPanel() {
             <Tag mono>{store.activeChannelTag}</Tag>
           </div>
         </div>
+
+        {/* Contact history — the active contact's earlier threads */}
+        {store.contactEarlier.length > 0 && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ ...sectionLabel, marginBottom: 0 }}>
+                Earlier from {contactFirstName(store.activeContact?.name)} ({store.contactEarlier.length})
+              </span>
+              <button
+                data-testid="contact-view-all"
+                onClick={store.viewAllFromActive}
+                style={{ border: 0, background: "transparent", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 600, color: "var(--brand)", padding: 0 }}
+              >
+                View all
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {store.contactEarlier.map((h) => (
+                <button
+                  key={h.id}
+                  data-testid="contact-history-row"
+                  onClick={() => store.setActive(h.id)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "9px 10px", border: "1px solid var(--border-default)", borderRadius: 10, background: "var(--white)", cursor: "pointer" }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {h.preview || h.subject || "Conversation"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                      {h.reference} · {h.time}
+                    </div>
+                  </div>
+                  <StatusPill status={h.status} />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Members */}
         <div>

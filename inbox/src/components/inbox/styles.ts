@@ -21,6 +21,10 @@ export function navStyle(active: boolean): CSSProperties {
 export function filterStyle(active: boolean): CSSProperties {
   return {
     flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     border: 0,
     cursor: "pointer",
     fontFamily: "var(--font-sans)",
@@ -32,6 +36,59 @@ export function filterStyle(active: boolean): CSSProperties {
     background: active ? "#fff" : "transparent",
     color: active ? "var(--text-primary)" : "var(--text-secondary)",
     boxShadow: active ? "var(--shadow-xs)" : "none",
+  };
+}
+
+// Neutral count pill shown inline in the You/Unassigned scope tabs.
+export function tabCountStyle(): CSSProperties {
+  return {
+    minWidth: 18,
+    height: 18,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 5px",
+    borderRadius: 9,
+    background: "rgba(0,0,0,.06)",
+    fontSize: 11,
+    fontWeight: 700,
+  };
+}
+
+// "Show closed · N" / "Hide closed" pill next to the open count.
+export function closedToggleStyle(active: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    height: 22,
+    padding: "0 10px",
+    borderRadius: 999,
+    border: `1px solid ${active ? "var(--border-focus)" : "var(--border-default)"}`,
+    background: active ? "var(--brand-subtle)" : "var(--white)",
+    color: active ? "var(--brand)" : "var(--text-secondary)",
+    fontFamily: "var(--font-sans)",
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+}
+
+// 32px square sound toggle in the inbox header; muted turns coral.
+export function soundBtnStyle(soundOn: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 32,
+    height: 32,
+    flex: "none",
+    borderRadius: 8,
+    border: `1px solid ${soundOn ? "var(--border-default)" : "var(--coral-500)"}`,
+    background: "var(--white)",
+    color: soundOn ? "var(--text-secondary)" : "var(--coral-500)",
+    cursor: "pointer",
   };
 }
 

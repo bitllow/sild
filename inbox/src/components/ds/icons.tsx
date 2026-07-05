@@ -88,6 +88,20 @@ export const KeyIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const SpeakerIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M11 4.7 6 9H2v6h4l5 4.3z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" />
+  </Icon>
+);
+
+export const SpeakerOffIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M11 4.7 6 9H2v6h4l5 4.3z" />
+    <path d="m22 9-6 6M16 9l6 6" />
+  </Icon>
+);
+
 export const GoogleMark = (p: React.SVGProps<SVGSVGElement>) => (
   <svg width="18" height="18" viewBox="0 0 24 24" {...p}>
     <path fill="#4285F4" d="M22.5 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-1.9 3.2-4.8 3.2-7.9z" />

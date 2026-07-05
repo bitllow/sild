@@ -89,9 +89,12 @@
         <!-- Nav rail -->
         <div style="width:64px;flex:none;background:var(--surface-card);border-right:1px solid var(--border-default);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:6px">
           <img src="assets/sild-mark-tile.svg" width="34" alt="Sild" style="border-radius:10px;margin-bottom:8px" />
-          <button onClick="{{ onGoInbox }}" aria-label="Inbox" style="{{ navInboxStyle }}">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg>
-          </button>
+          <div style="position:relative">
+            <button onClick="{{ onGoInbox }}" aria-label="Inbox" style="{{ navInboxStyle }}">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg>
+            </button>
+            <sc-if value="{{ hasAttention }}"><span style="position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;background:var(--coral-500);color:#fff;font-family:var(--font-sans);font-size:11px;font-weight:700;line-height:1;border-radius:9px;border:2px solid var(--surface-card);pointer-events:none">{{ attentionCount }}</span></sc-if>
+          </div>
           <button onClick="{{ onGoSettings }}" aria-label="Settings" style="{{ navSettingsStyle }}">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           </button>
@@ -110,20 +113,34 @@
             <div style="padding:16px 16px 12px">
               <div style="display:flex;align-items:center;justify-content:space-between">
                 <h2 style="font-size:18px">Inbox</h2>
-                <x-import component-from-global-scope="SildDesignSystem_a95234.Button" size="sm" onClick="{{ onNewRequest }}" hint-size="auto,32px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="margin-right:5px"><path d="M5 12h14M12 5v14"></path></svg>New request</x-import>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <button onClick="{{ onToggleSound }}" aria-label="{{ soundLabel }}" title="{{ soundLabel }}" style="{{ soundBtnStyle }}">
+                    <sc-if value="{{ soundOn }}" hint-placeholder-val="{{ true }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"></path></svg></sc-if>
+                    <sc-if value="{{ soundOff }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="m22 9-6 6M16 9l6 6"></path></svg></sc-if>
+                  </button>
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.Button" size="sm" onClick="{{ onNewRequest }}" hint-size="auto,32px"><span style="display:inline-flex;align-items:center;gap:5px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5v14"></path></svg>New request</span></x-import>
+                </div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;height:34px;background:var(--white);border:1px solid var(--border-default);border-radius:8px;padding:0 10px;margin-top:12px">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
                 <input placeholder="Search — try status:open or a phone number" style="flex:1;border:0;outline:none;background:transparent;font-family:var(--font-sans);font-size:13px;color:var(--text-primary);min-width:0" />
               </div>
               <div style="display:flex;gap:4px;margin-top:12px;background:var(--surface-sunken);padding:3px;border-radius:8px">
-                <button onClick="{{ onFilterYou }}" style="{{ filterYou }}">You</button>
-                <button onClick="{{ onFilterUn }}" style="{{ filterUn }}">Unassigned</button>
-                <button onClick="{{ onFilterClosed }}" style="{{ filterClosed }}">Closed</button>
+                <button onClick="{{ onFilterYou }}" style="{{ filterYou }}">You<sc-if value="{{ youHasCount }}"><span style="min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.06);font-size:11px;font-weight:700">{{ youCount }}</span></sc-if></button>
+                <button onClick="{{ onFilterUn }}" style="{{ filterUn }}">Unassigned<sc-if value="{{ unHasCount }}"><span style="min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.06);font-size:11px;font-weight:700">{{ unCount }}</span></sc-if></button>
                 <button onClick="{{ onFilterAll }}" style="{{ filterAll }}">All</button>
               </div>
+              <sc-if value="{{ authorActive }}">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding:7px 10px;background:var(--brand-subtle);border:1px solid var(--border-focus);border-radius:8px">
+                <span style="font-size:12px;color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">All from <strong>{{ authorFilter }}</strong> ({{ authorCount }})</span>
+                <button onClick="{{ onClearAuthor }}" aria-label="Clear contact filter" style="display:flex;align-items:center;gap:4px;border:0;background:transparent;cursor:pointer;color:var(--brand);font-family:var(--font-sans);font-size:12px;font-weight:600;flex:none">Clear<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+              </div>
+              </sc-if>
               <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;position:relative">
-                <span style="font-size:12px;color:var(--text-tertiary)">{{ openCount }} open</span>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0">
+                  <span style="font-size:12px;color:var(--text-tertiary);white-space:nowrap">{{ openCount }} open</span>
+                  <sc-if value="{{ hasClosed }}"><button onClick="{{ onToggleClosed }}" style="{{ closedToggleStyle }}">{{ closedToggleLabel }}</button></sc-if>
+                </div>
                 <div style="display:flex;align-items:center;gap:6px">
                 <button onClick="{{ onToggleSort }}" aria-label="Sort conversations" style="{{ sortBtnStyle }}">
                   <span>{{ sortLabel }}</span>
@@ -203,7 +220,7 @@
           <!-- Member panel -->
           <sc-if value="{{ panelOpen }}">
           <div style="width:320px;flex:none;border-left:1px solid var(--border-default);background:var(--surface-card);display:flex;flex-direction:column">
-            <div style="padding:14px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between">
+            <div style="height:64px;flex:none;padding:0 16px;border-bottom:1px solid var(--border-default);display:flex;align-items:center;justify-content:space-between">
               <span style="font-size:13px;font-weight:700;letter-spacing:-.01em">Details</span>
               <button onClick="{{ onTogglePanel }}" aria-label="Close panel" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;border-radius:6px;cursor:pointer;color:var(--text-secondary)">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
@@ -245,6 +262,25 @@
                   </sc-for>
                 </div>
               </div>
+              <sc-if value="{{ hasHistory }}">
+              <div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                  <span style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary)">Earlier from {{ contactFirst }} ({{ histCount }})</span>
+                  <button onClick="{{ onAuthorDrill }}" style="border:0;background:transparent;cursor:pointer;font-family:var(--font-sans);font-size:12px;font-weight:600;color:var(--brand);padding:0">View all</button>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <sc-for list="{{ contactHistory }}" as="h" hint-placeholder-count="2">
+                    <button onClick="{{ h.onClick }}" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 10px;border:1px solid var(--border-default);border-radius:10px;background:var(--white);cursor:pointer" style-hover="background:var(--surface-hover)">
+                      <div style="flex:1;min-width:0">
+                        <div style="font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ h.title }}</div>
+                        <div style="font-size:11px;color:var(--text-tertiary);font-family:var(--font-mono);margin-top:2px">{{ h.reference }} · {{ h.time }}</div>
+                      </div>
+                      {{ h.pill }}
+                    </button>
+                  </sc-for>
+                </div>
+              </div>
+              </sc-if>
             </div>
           </div>
           </sc-if>
@@ -779,6 +815,10 @@
         <div style="display:flex;flex-direction:column;height:100%">
           <div style="background:var(--brand);color:#fff;padding:22px 22px 26px;position:relative">
             <button onClick="{{ onLauncher }}" aria-label="Close chat" class="sild-mobile-close" style="position:absolute;top:14px;right:14px;border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+            <button onClick="{{ onWToggleSound }}" aria-label="{{ wSoundLabel }}" title="{{ wSoundLabel }}" style="position:absolute;top:14px;right:48px;border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px">
+              <sc-if value="{{ wSoundOn }}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"></path></svg></sc-if>
+              <sc-if value="{{ wSoundOff }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="m22 9-6 6M16 9l6 6"></path></svg></sc-if>
+            </button>
             <img src="assets/sild-mark-tile.svg" width="34" alt="Sild" style="border-radius:10px;box-shadow:0 0 0 2px rgba(255,255,255,.25)" />
             <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:14px">Hi there.</div>
             <div style="font-size:15px;color:rgba(255,255,255,.85);margin-top:4px">How can we help? We typically reply in a few minutes.</div>
@@ -807,7 +847,13 @@
             <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="Eva Sild" presence="online" size="{{ av36 }}" hint-size="36px,36px"></x-import>
             <div>
               <div style="font-size:15px;font-weight:700;letter-spacing:-.01em">Eva · Sild</div>
+              <div style="font-size:12px;color:rgba(255,255,255,.8)">Online · replies in a few min</div>
+            </div>
             <div style="flex:1"></div>
+            <button onClick="{{ onWToggleSound }}" aria-label="{{ wSoundLabel }}" title="{{ wSoundLabel }}" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px;display:flex">
+              <sc-if value="{{ wSoundOn }}" hint-placeholder-val="{{ true }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"></path></svg></sc-if>
+              <sc-if value="{{ wSoundOff }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="m22 9-6 6M16 9l6 6"></path></svg></sc-if>
+            </button>
             <button onClick="{{ onLauncher }}" aria-label="Close chat" class="sild-mobile-close" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
           </div>
           <div style="flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px;background:var(--surface-page)" data-autoscroll="{{ wMsgKey }}">
@@ -985,6 +1031,9 @@ class Component extends DCLogic {
       emailSpamFilter: true,
       activeId: 'c_8842',
       filter: 'all',
+      showClosed: false,
+      soundOn: true,
+      authorFilter: null,
       sort: 'activity',
       sortDir: 'desc',
       sortOpen: false,
@@ -1001,7 +1050,7 @@ class Component extends DCLogic {
       apProfiles: this.cloneProfiles(this.seedProfiles()),
       apProfileId: 'p1', apMenuOpen: false, apDirty: false, apPreview: 'home',
       // widget
-      wOpen: true, wView: 'home', wMsgs: this.seedWidget(), wText: '',
+      wOpen: true, wView: 'home', wMsgs: this.seedWidget(), wText: '', wSoundOn: true,
       // app
       aView: 'host', aActiveId: 'a1', aConvs: this.seedApp(), aText: '',
       ready: false,
@@ -1048,6 +1097,18 @@ class Component extends DCLogic {
       { id:'c_2014', name:'Pille Saar', presence:'offline', channel:'app', reference:'trip_2014', status:'closed', unread:0, time:'Yesterday', preview:'Conversation closed',
         members:[ {name:'Pille Saar',role:'client',meta:{phone:'+372 5333 9090',role:'client'}} ],
         messages:[ {id:1,dir:'in',author:'Pille Saar',time:'Yesterday',body:'Driver was great, thank you'}, {id:2,system:true,body:'Conversation closed by Liis Mägi'} ] },
+      { id:'c_8790', name:'Mari Tamm', presence:'offline', channel:'app', reference:'trip_8790', status:'closed', unread:0, time:'3d', preview:'Lost phone in the vehicle',
+        members:[ {name:'Mari Tamm',role:'client',meta:{phone:'+372 5123 4567',app_version:'2.3.1',role:'client'}} ],
+        messages:[ {id:1,dir:'in',author:'Mari Tamm',time:'Mon 9:12 AM',body:'I left my phone in the car — trip 8790.'}, {id:2,dir:'out',author:'You',time:'Mon 9:40 AM',body:'Driver found it, arranging return to your address.'}, {id:3,system:true,body:'Conversation closed by Karl Sepp'} ] },
+      { id:'c_8461', name:'Mari Tamm', presence:'offline', channel:'app', reference:'trip_8461', status:'closed', unread:0, time:'2w', preview:'Fare looked too high',
+        members:[ {name:'Mari Tamm',role:'client',meta:{phone:'+372 5123 4567',app_version:'2.3.0',role:'client'}} ],
+        messages:[ {id:1,dir:'in',author:'Mari Tamm',time:'17 Jun',body:'The fare for trip 8461 seems higher than quoted.'}, {id:2,dir:'out',author:'You',time:'17 Jun',body:'Refunded the surge difference — sorry about that.'}, {id:3,system:true,body:'Conversation closed by You'} ] },
+      { id:'c_5480', name:'support@acme.com', presence:'offline', channel:'email', reference:'order_5480', status:'closed', unread:0, time:'1w', preview:'Invoice VAT question',
+        members:[ {name:'support@acme.com',role:'client',meta:{email:'support@acme.com',role:'email contact'}} ],
+        messages:[ {id:1,dir:'in',author:'support@acme.com',channel:'email',time:'26 Jun',body:'Can you re-send the invoice with VAT itemised?'}, {id:2,system:true,body:'Conversation closed by Liis Mägi'} ] },
+      { id:'c_7650', name:'Jaan Kask', presence:'offline', channel:'app', reference:'trip_7650', status:'closed', unread:0, time:'5d', preview:'App crash on Android 14',
+        members:[ {name:'Jaan Kask',role:'client',meta:{phone:'+372 5444 1212',app_version:'2.2.8',role:'client'}} ],
+        messages:[ {id:1,dir:'in',author:'Jaan Kask',time:'Sat',body:'App crashes on launch after the update.'}, {id:2,dir:'out',author:'You',time:'Sat',body:'Fixed in 2.2.9 — please update.'}, {id:3,system:true,body:'Conversation closed by You'} ] },
     ];
   }
   seedKeys(){
@@ -1097,7 +1158,7 @@ class Component extends DCLogic {
   // ---------- style helpers ----------
   segStyle(a){ return { border:0, cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight:600, padding:'7px 14px', borderRadius:'7px', whiteSpace:'nowrap', transition:'all .12s', background:a?'#fff':'transparent', color:a?'var(--text-primary)':'var(--text-secondary)', boxShadow:a?'var(--shadow-xs)':'none' }; }
   navStyle(a){ return { width:'44px', height:'44px', display:'flex', alignItems:'center', justifyContent:'center', borderRadius:'8px', border:0, cursor:'pointer', background:a?'var(--brand-subtle)':'transparent', color:a?'var(--brand)':'var(--slate-400)' }; }
-  filterStyle(a){ return { flex:1, border:0, cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight:600, padding:'6px 0', borderRadius:'6px', transition:'all .12s', background:a?'#fff':'transparent', color:a?'var(--text-primary)':'var(--text-secondary)', boxShadow:a?'var(--shadow-xs)':'none' }; }
+  filterStyle(a){ return { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:'6px', border:0, cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight:600, padding:'6px 0', borderRadius:'6px', transition:'all .12s', background:a?'#fff':'transparent', color:a?'var(--text-primary)':'var(--text-secondary)', boxShadow:a?'var(--shadow-xs)':'none' }; }
   channelRowStyle(a){ return { display:'flex', alignItems:'center', gap:'12px', width:'100%', textAlign:'left', padding:'12px 14px', border:'1px solid '+(a?'var(--border-focus)':'var(--border-default)'), borderRadius:'10px', background:a?'var(--brand-subtle)':'var(--white)', cursor:'pointer', boxShadow:a?'var(--ring)':'var(--shadow-xs)', transition:'all .12s' }; }
   tabStyle(a){ return { border:0, background:'transparent', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'14px', fontWeight:600, padding:'0 0 12px', borderBottom:'2px solid', borderBottomColor:a?'var(--brand)':'transparent', color:a?'var(--brand)':'var(--text-secondary)' }; }
   panelStyle(a){ return { width:'36px', height:'36px', display:'flex', alignItems:'center', justifyContent:'center', borderRadius:'8px', cursor:'pointer', color:a?'var(--brand)':'var(--text-secondary)', border:a?'1px solid var(--border-default)':'1px solid transparent', background:a?'var(--white)':'transparent' }; }
@@ -1116,6 +1177,18 @@ class Component extends DCLogic {
   fwdAddress = () => 'acme-rides.a8f3c1@inbound.sild.email';
   setActive = (id) => this.setState({ activeId: id, composer: '', internal: false });
   setFilter = (f) => this.setState({ filter: f });
+  toggleShowClosed = () => this.setState(s => ({ showClosed: !s.showClosed }));
+  toggleSound = () => this.setState(s => { const on = !s.soundOn; if (on) this.playBeep(); return { soundOn: on }; });
+  playBeep = () => {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      this._ac = this._ac || new AC();
+      const t = this._ac.currentTime, o = this._ac.createOscillator(), g = this._ac.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(660, t); o.frequency.setValueAtTime(880, t + 0.09);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.connect(g); g.connect(this._ac.destination); o.start(t); o.stop(t + 0.24);
+    } catch (e) {}
+  };
   setSort = (k) => this.setState({ sort: k, sortOpen: false });
   toggleSortDir = () => this.setState(s => ({ sortDir: s.sortDir==='desc' ? 'asc' : 'desc' }));
   toggleSort = () => this.setState(s => ({ sortOpen: !s.sortOpen }));
@@ -1173,6 +1246,7 @@ class Component extends DCLogic {
   apMenuRow(a){ return { display:'flex', alignItems:'center', gap:'9px', width:'100%', padding:'9px 10px', border:0, background:a?'var(--brand-subtle)':'transparent', borderRadius:'7px', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight:600, color:a?'var(--brand)':'var(--text-primary)' }; }
   // widget
   toggleLauncher = () => this.setState(s => ({ wOpen: !s.wOpen }));
+  wToggleSound = () => this.setState(s => { const on = !s.wSoundOn; if (on) this.playBeep(); return { wSoundOn: on }; });
   wHome = () => this.setState({ wView:'home' });
   wOpenThread = () => this.setState({ wView:'thread', wMsgs:this.seedWidget() });
   wStart = () => this.setState({ wView:'thread', wMsgs:[] });
@@ -1296,11 +1370,16 @@ class Component extends DCLogic {
     const isInbox = s.surface==='inbox', isWidget = s.surface==='widget', isApp = s.surface==='app';
 
     // inbox list
-    const filtered = s.convs.filter(c =>
-      s.filter==='all' ? true :
+    const inScope = c =>
       s.filter==='unassigned' ? c.status==='queued' :
-      s.filter==='closed' ? c.status==='closed' :
-      c.status!=='closed');
+      s.filter==='you' ? c.status==='assigned' :
+      true;
+    const filtered = s.authorFilter
+      ? s.convs.filter(c => c.name===s.authorFilter)
+      : s.convs.filter(c => inScope(c) && (s.showClosed || c.status!=='closed'));
+    const youCount = s.convs.filter(c => c.status==='assigned').length;
+    const unCount = s.convs.filter(c => c.status==='queued').length;
+    const closedCount = s.convs.filter(c => c.status==='closed').length;
     const meta = (c) => this._sortMeta[c.id] || { activity:0, created:0, waiting:0 };
     const sorted = [...filtered].sort((a,b) => {
       const base =
@@ -1320,6 +1399,12 @@ class Component extends DCLogic {
     const active = s.convs.find(c => c.id===s.activeId) || s.convs[0];
     const activeMessages = active.messages.map(m => ({ direction:m.dir, author:m.author, time:m.time, body:m.body, channel:m.channel, internal:m.internal, system:m.system, readReceipt:m.read }));
     const activeMembers = active.members.map(m => ({ name:m.name, role:m.role, metaList: Object.entries(m.meta).map(([k,v]) => ({ k, v })) }));
+    const histAll = s.convs.filter(c => c.name===active.name && c.id!==active.id);
+    const contactHistory = histAll.map(c => ({
+      title: c.preview, reference: c.reference, time: c.time,
+      onClick: () => this.setActive(c.id),
+      pill: NS.StatusPill ? React.createElement(NS.StatusPill, { status: c.status }) : null,
+    }));
 
     // settings (per-row handlers)
     const keys = s.keys.map(k => ({ ...k, onRevoke: () => this.revokeKey(k.id) }));
@@ -1353,8 +1438,22 @@ class Component extends DCLogic {
       navInboxStyle: this.navStyle(s.inboxView==='inbox'), navSettingsStyle: this.navStyle(s.inboxView==='settings'),
       onSignIn: this.signIn, onSignOut: this.signOut, onGoInbox: this.goInbox, onGoSettings: this.goSettings,
       convRows, noConvs: filtered.length===0,
-      filterYou: this.filterStyle(s.filter==='you'), filterUn: this.filterStyle(s.filter==='unassigned'), filterClosed: this.filterStyle(s.filter==='closed'), filterAll: this.filterStyle(s.filter==='all'),
-      onFilterYou: () => this.setFilter('you'), onFilterUn: () => this.setFilter('unassigned'), onFilterClosed: () => this.setFilter('closed'), onFilterAll: () => this.setFilter('all'),
+      filterYou: this.filterStyle(s.filter==='you'), filterUn: this.filterStyle(s.filter==='unassigned'), filterAll: this.filterStyle(s.filter==='all'),
+      onFilterYou: () => this.setFilter('you'), onFilterUn: () => this.setFilter('unassigned'), onFilterAll: () => this.setFilter('all'),
+      youCount, unCount, youHasCount: youCount>0, unHasCount: unCount>0,
+      hasClosed: closedCount>0,
+      closedToggleLabel: s.showClosed ? 'Hide closed' : ('Show closed · ' + closedCount),
+      closedToggleStyle: { display:'inline-flex', alignItems:'center', gap:'5px', height:'22px', padding:'0 10px', borderRadius:'999px', border:'1px solid '+(s.showClosed?'var(--border-focus)':'var(--border-default)'), background:s.showClosed?'var(--brand-subtle)':'var(--white)', color:s.showClosed?'var(--brand)':'var(--text-secondary)', fontFamily:'var(--font-sans)', fontSize:'11px', fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' },
+      onToggleClosed: this.toggleShowClosed,
+      contactHistory, hasHistory: histAll.length>0, histCount: histAll.length,
+      contactFirst: String(active.name||'').split(/[\s@]/)[0],
+      authorActive: !!s.authorFilter, authorFilter: s.authorFilter, authorCount: s.authorFilter ? filtered.length : 0,
+      onAuthorDrill: () => this.setState({ authorFilter: active.name }),
+      onClearAuthor: () => this.setState({ authorFilter: null }),
+      attentionCount: s.convs.filter(c => c.unread>0).length, hasAttention: s.convs.some(c => c.unread>0),
+      soundOn: s.soundOn, soundOff: !s.soundOn, onToggleSound: this.toggleSound,
+      soundLabel: s.soundOn ? 'Mute new-conversation sounds' : 'Unmute new-conversation sounds',
+      soundBtnStyle: { display:'flex', alignItems:'center', justifyContent:'center', width:'32px', height:'32px', borderRadius:'8px', border:'1px solid '+(s.soundOn?'var(--border-default)':'var(--coral-500)'), background:'var(--white)', color:s.soundOn?'var(--text-secondary)':'var(--coral-500)', cursor:'pointer' },
       openCount, sortLabel: sortLabels[s.sort], sortOpen: s.sortOpen, onToggleSort: this.toggleSort, onCloseSort: this.closeSort,
       sortBtnStyle: { display:'flex', alignItems:'center', gap:'6px', height:'30px', padding:'0 10px', borderRadius:'8px', border:'1px solid '+(s.sortOpen?'var(--border-focus)':'var(--border-default)'), background:'var(--white)', boxShadow:s.sortOpen?'var(--ring)':'none', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight:600, color:'var(--text-primary)' },
       onSortActivity: () => this.setSort('activity'), onSortCreated: () => this.setSort('created'), onSortWaiting: () => this.setSort('waiting'),
@@ -1399,6 +1498,8 @@ class Component extends DCLogic {
       wOpen: s.wOpen, wClosed: !s.wOpen, launcherOpenClass: s.wOpen ? 'is-open' : '', wIsHome: s.wView==='home', wIsThread: s.wView==='thread', wMsgs, wMsgKey: s.wMsgs.length,
       launcherStyle: { position:'absolute', right:'24px', bottom:'24px', width:'60px', height:'60px', borderRadius:'50%', border:0, background:'var(--brand)', color:'#fff', cursor:'pointer', boxShadow:'var(--shadow-launcher)', display:'flex', alignItems:'center', justifyContent:'center', transition:'transform var(--duration-base) var(--ease-spring, ease)', transform: s.wOpen ? 'scale(0.92)' : 'scale(1)' },
       onLauncher: this.toggleLauncher, onWStart: this.wStart, onWOpenThread: this.wOpenThread, onWBack: this.wHome,
+      wSoundOn: s.wSoundOn, wSoundOff: !s.wSoundOn, onWToggleSound: this.wToggleSound,
+      wSoundLabel: s.wSoundOn ? 'Turn off reply notifications' : 'Turn on reply notifications',
       wText: s.wText, onWChange: this.wOnChange, onWSend: this.wSend,
 
       // app

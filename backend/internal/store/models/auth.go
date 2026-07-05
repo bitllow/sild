@@ -36,6 +36,11 @@ type AdminUser struct {
 	ID           string       `gorm:"primaryKey;size:40"`
 	TenantID     string       `gorm:"size:40;not null;uniqueIndex:idx_admin_tenant_email"`
 	Email        string       `gorm:"size:320;not null;uniqueIndex:idx_admin_tenant_email"`
+	// FirstName/LastName are the operator's display name (Settings → Team). The
+	// first name is surfaced to end-users on the messenger surfaces (web widget +
+	// SDK) as the agent's reply name, in place of the generic "Support".
+	FirstName    string       `gorm:"size:120"`
+	LastName     string       `gorm:"size:120"`
 	PlatformRole PlatformRole `gorm:"size:16;not null"`
 	// PasswordHash is set when the admin uses email/password login (§2.4
 	// alternative to Google OIDC); nil for OIDC-only admins.

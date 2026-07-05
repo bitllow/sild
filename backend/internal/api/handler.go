@@ -105,6 +105,7 @@ func (h *Handler) Mount(e *gin.Engine) {
 	admin.POST("/support-requests", h.adminOpenSupportRequest)
 	admin.POST("/assignments/:id/claim", h.claimAssignment)
 	admin.POST("/assignments/:id/close", h.closeAssignmentAdmin)
+	admin.GET("/contacts/conversations", h.listContactConversations)
 	admin.GET("/search", h.adminSearch)
 
 	// Admin owner/admin only, §7.

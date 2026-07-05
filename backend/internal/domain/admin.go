@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/auth"
@@ -84,19 +85,38 @@ func (s *Service) Logout(ctx context.Context, raw string) error {
 	return s.store.Admins().DeleteSession(ctx, auth.HashSessionToken(raw))
 }
 
-// InviteAgent adds an admin_user to the tenant (Settings → Team, §8).
-func (s *Service) InviteAgent(ctx context.Context, tenantID, email string, role models.PlatformRole) (*models.AdminUser, error) {
+// InviteAgent adds an admin_user to the tenant (Settings → Team, §8). first/last
+// are optional display-name parts; the first name is what end-users see as the
+// agent's reply name on the messenger surfaces.
+func (s *Service) InviteAgent(ctx context.Context, tenantID, email, first, last string, role models.PlatformRole) (*models.AdminUser, error) {
 	if email == "" {
 		return nil, invalid("email is required")
 	}
 	if role == "" {
 		role = models.PlatformAgent
 	}
-	a := &models.AdminUser{TenantID: tenantID, Email: email, PlatformRole: role, CreatedAt: s.now()}
+	a := &models.AdminUser{TenantID: tenantID, Email: email, FirstName: first, LastName: last, PlatformRole: role, CreatedAt: s.now()}
 	if err := s.store.Admins().Create(ctx, a); err != nil {
 		return nil, err
 	}
 	return a, nil
+}
+
+// AgentDisplayName resolves an agent actor id to a short display name for
+// end-user–facing surfaces (the widget shows this instead of "Support"). Falls
+// back to the email local-part, then "" when the actor can't be resolved.
+func (s *Service) AgentDisplayName(ctx context.Context, tenantID, actorID string) string {
+	a, err := s.store.Admins().Get(ctx, tenantID, actorID)
+	if err != nil || a == nil {
+		return ""
+	}
+	if a.FirstName != "" {
+		return a.FirstName
+	}
+	if i := strings.IndexByte(a.Email, '@'); i > 0 {
+		return a.Email[:i]
+	}
+	return a.Email
 }
 
 // ListAdmins returns the tenant's admin users (Settings → Team, §8).

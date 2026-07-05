@@ -82,6 +82,12 @@ func (s *Service) CountOpenConversations(ctx context.Context, tenantID string) (
 	return s.store.Conversations().CountOpen(ctx, tenantID)
 }
 
+// CountQueue returns the inbox scope-tab counters (assigned-to-me / unassigned /
+// closed) for the calling agent (§4.3).
+func (s *Service) CountQueue(ctx context.Context, tenantID, actorID string) (store.QueueCounts, error) {
+	return s.store.Assignments().CountQueue(ctx, tenantID, actorID)
+}
+
 // ClaimAssignment assigns a queued assignment to the calling agent (§4.3).
 // State: queued → assigned.
 func (s *Service) ClaimAssignment(ctx context.Context, tenantID, assignmentID, agentActorID string) (*models.Assignment, error) {

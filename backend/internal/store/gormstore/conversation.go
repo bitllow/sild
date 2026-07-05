@@ -184,6 +184,51 @@ func (r *assignmentRepo) Update(ctx context.Context, a *models.Assignment) error
 	return r.db.WithContext(ctx).Save(a).Error
 }
 
+// CountQueue counts the representative (latest) assignment per conversation,
+// joined to its conversation, then folds the groups into the three scope
+// counters. Uses the same NOT EXISTS "latest per conversation" reduction as
+// ListQueue so the counters agree with the paged results. "Closed" keys off the
+// CONVERSATION status (matching the UI + ExcludeClosed), so a closed thread
+// whose assignment is still assigned/queued counts as closed — never toward
+// You/Unassigned — which is exactly what the (closed-hidden) list shows.
+func (r *assignmentRepo) CountQueue(ctx context.Context, tenantID, actorID string) (store.QueueCounts, error) {
+	type grp struct {
+		ConvStatus string
+		Status     string
+		Assignee   *string
+		N          int64
+	}
+	var rows []grp
+	err := r.db.WithContext(ctx).Table("assignments AS a").
+		Select("c.status AS conv_status, a.status AS status, a.assignee_actor_id AS assignee, COUNT(*) AS n").
+		Joins("JOIN conversations c ON c.id = a.conversation_id").
+		Where("a.tenant_id = ?", tenantID).
+		Where(`NOT EXISTS (SELECT 1 FROM assignments a2
+			WHERE a2.conversation_id = a.conversation_id
+			  AND (a2.created_at > a.created_at OR (a2.created_at = a.created_at AND a2.id > a.id)))`).
+		Group("c.status, a.status, a.assignee_actor_id").
+		Scan(&rows).Error
+	if err != nil {
+		return store.QueueCounts{}, err
+	}
+	var out store.QueueCounts
+	for _, g := range rows {
+		if models.ConversationStatus(g.ConvStatus) == models.ConversationClosed {
+			out.Closed += g.N
+			continue
+		}
+		switch models.AssignmentStatus(g.Status) {
+		case models.AssignmentQueued:
+			out.Unassigned += g.N
+		case models.AssignmentAssigned:
+			if g.Assignee != nil && *g.Assignee == actorID {
+				out.You += g.N
+			}
+		}
+	}
+	return out, nil
+}
+
 func (r *assignmentRepo) ConversationIDs(ctx context.Context, tenantID string) ([]string, error) {
 	var ids []string
 	err := r.db.WithContext(ctx).Model(&models.Assignment{}).
@@ -246,6 +291,13 @@ func (r *assignmentRepo) ListQueue(ctx context.Context, tenantID string, p store
 			  AND (a2.created_at > a.created_at OR (a2.created_at = a.created_at AND a2.id > a.id)))`)
 	if p.Status != nil {
 		q = q.Where("a.status = ?", *p.Status)
+	}
+	if p.ExcludeClosed {
+		// "Closed" in the inbox means the CONVERSATION is closed (the "Close
+		// conversation" action; closing an assignment is a separate, API-only
+		// state). Filter on conversation status so the list matches the UI's
+		// notion of closed — and the scope counters below.
+		q = q.Where("c.status != ?", models.ConversationClosed)
 	}
 	if p.Assignee != nil {
 		q = q.Where("a.assignee_actor_id = ?", *p.Assignee)

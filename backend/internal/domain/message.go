@@ -77,6 +77,13 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	_ = applyMessageActivity(ctx, s.store, msg)
 
 	data := views.Message(msg, s.attachmentURLFunc())
+	// Surface the agent's display name so end-user surfaces (the web widget)
+	// render the operator's first name instead of a generic "Support".
+	if msg.InternalActorID != nil {
+		if name := s.AgentDisplayName(ctx, tenantID, *msg.InternalActorID); name != "" {
+			data["author_name"] = name
+		}
+	}
 	if in.Visibility == models.VisibilityInternal {
 		// internal notes go ONLY to the agents-only channel (§5.6) — never
 		// webhooked/pushed/emailed.

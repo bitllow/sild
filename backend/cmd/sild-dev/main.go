@@ -136,7 +136,7 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *conf
 		log.Printf("dev seed: %v", err)
 		return
 	}
-	admin, err := svc.InviteAgent(ctx, t.ID, "admin@sild.local", models.PlatformOwner)
+	admin, err := svc.InviteAgent(ctx, t.ID, "admin@sild.local", "Eva", "Marleen", models.PlatformOwner)
 	if err != nil {
 		log.Printf("dev seed admin: %v", err)
 		return
@@ -156,7 +156,7 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *conf
 	log.Printf("│ tenant_id : %s", t.ID)
 	log.Printf("│ admin     : admin@sild.local / password123  (POST /v1/admin/auth/password)")
 	log.Printf("│ api key   : %s", key)
-	log.Printf("│ inbox     : 5 sample support requests seeded")
+	log.Printf("│ inbox     : sample support requests + contact history seeded")
 	log.Printf("│ email in  : forward to %s (SMTP %s)", fwd, cfg.Email.SMTPListenAddr)
 	log.Printf("└───────────────────────────────────────────────────────")
 }
@@ -198,9 +198,33 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 		}
 	}
 
+	mariMeta := json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"client"}`)
+
+	// Mari's earlier, resolved threads — seed real contact history so the Details
+	// panel's "Earlier from Mari" list (and the "View all from" filter) has data.
+	past1 := create("trip_8109", nil, []domain.MemberInput{
+		{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: mariMeta},
+	})
+	if past1 != nil {
+		user(past1.ID, "u_mari", "I was charged twice for last night's ride.", models.ChannelApp)
+		agent(past1.ID, "You're right — I've refunded the duplicate charge. It'll land in 3–5 days.")
+		user(past1.ID, "u_mari", "Perfect, thanks!", models.ChannelApp)
+		claim(past1)
+		_ = svc.CloseConversation(ctx, tenantID, past1.ID)
+	}
+	past2 := create("trip_7640", nil, []domain.MemberInput{
+		{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: mariMeta},
+	})
+	if past2 != nil {
+		user(past2.ID, "u_mari", "Can I get a receipt for my trip to the airport?", models.ChannelApp)
+		agent(past2.ID, "Sent it to your email just now.")
+		claim(past2)
+		_ = svc.CloseConversation(ctx, tenantID, past2.ID)
+	}
+
 	// 1. Mari Tamm — claimed (assigned), client + driver, internal note.
 	mari := create("trip_8842", json.RawMessage(`{"kind":"ride"}`), []domain.MemberInput{
-		{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"client"}`)},
+		{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: mariMeta},
 		{UserID: "u_driver9", ConvRole: models.RoleDriver, Metadata: json.RawMessage(`{"name":"Driver 9","phone":"+372 5987 6543","app_version":"2.3.0","role":"driver"}`)},
 	})
 	if mari != nil {

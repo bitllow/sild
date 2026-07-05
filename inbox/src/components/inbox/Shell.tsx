@@ -32,9 +32,38 @@ export const Shell = observer(function Shell() {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/assets/sild-mark-tile.svg" width={34} alt="Sild" style={{ borderRadius: 10, marginBottom: 8 }} />
-        <button onClick={store.goInbox} aria-label="Inbox" style={navStyle(isList)}>
-          <InboxIcon size={22} />
-        </button>
+        <div style={{ position: "relative" }}>
+          <button onClick={store.goInbox} aria-label="Inbox" style={navStyle(isList)}>
+            <InboxIcon size={22} />
+          </button>
+          {store.attentionCount > 0 && (
+            <span
+              data-testid="nav-attention"
+              style={{
+                position: "absolute",
+                top: -3,
+                right: -3,
+                minWidth: 18,
+                height: 18,
+                padding: "0 5px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "var(--coral-500)",
+                color: "#fff",
+                fontFamily: "var(--font-sans)",
+                fontSize: 11,
+                fontWeight: 700,
+                lineHeight: 1,
+                borderRadius: 9,
+                border: "2px solid var(--surface-card)",
+                pointerEvents: "none",
+              }}
+            >
+              {store.attentionCount}
+            </span>
+          )}
+        </div>
         <button onClick={store.goSettings} aria-label="Settings" style={navStyle(!isList)}>
           <SettingsIcon size={22} />
         </button>

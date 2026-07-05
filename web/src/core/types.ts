@@ -108,6 +108,8 @@ export interface WidgetConversation {
   preview: string;
   time: string;
   closed: boolean;
+  /** The handling agent's display name (first name), if one is assigned. */
+  agentName?: string;
 }
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "disconnected";
@@ -120,4 +122,11 @@ export interface WidgetState {
   activeId: string | null;
   messages: WidgetMessage[];
   loadingThread: boolean;
+  /** Reply-notification sound: chimes on incoming agent messages when true.
+   *  Toggled from either header (home + thread), so it lives in shared state. */
+  soundOn: boolean;
+  /** The support agent's display name (their first name), learned from incoming
+   *  messages — shown in the thread header + on incoming bubbles instead of the
+   *  generic "Support". */
+  agentName?: string;
 }

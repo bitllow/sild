@@ -2,12 +2,14 @@
 
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Button, CloseIcon, ConversationRow, SearchIcon, Select, StatusPill } from "@/components/ds";
+import { Button, CloseIcon, ConversationRow, SearchIcon, Select, SpeakerIcon, SpeakerOffIcon, StatusPill } from "@/components/ds";
 import type { QueueSort } from "@/api/admin";
-import { filterStyle } from "./styles";
+import { closedToggleStyle, filterStyle, soundBtnStyle, tabCountStyle } from "./styles";
 
+// Passed via Button's `iconLeft` so it's a separate flex child (gap-spaced,
+// vertically centered) rather than sharing the label's inline text run.
 const PlusInline = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 5 }}>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
     <path d="M5 12h14M12 5v14" />
   </svg>
 );
@@ -51,17 +53,23 @@ export const ConversationList = observer(function ConversationList() {
       }}
     >
       <div style={{ padding: "16px 16px 12px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <h2 style={{ fontSize: 18 }}>Inbox</h2>
-            <span data-testid="open-count" style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-              {store.openCount} open
-            </span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <h2 style={{ fontSize: 18 }}>Inbox</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+            <button
+              data-testid="sound-toggle"
+              aria-pressed={store.soundOn}
+              aria-label={store.soundOn ? "Mute new-conversation sounds" : "Unmute new-conversation sounds"}
+              title={store.soundOn ? "Mute new-conversation sounds" : "Unmute new-conversation sounds"}
+              onClick={store.toggleSound}
+              style={soundBtnStyle(store.soundOn)}
+            >
+              {store.soundOn ? <SpeakerIcon size={18} /> : <SpeakerOffIcon size={18} />}
+            </button>
+            <Button size="sm" onClick={store.newRequest} iconLeft={<PlusInline />}>
+              New request
+            </Button>
           </div>
-          <Button size="sm" onClick={store.newRequest}>
-            <PlusInline />
-            New request
-          </Button>
         </div>
         <div
           style={{
@@ -114,17 +122,59 @@ export const ConversationList = observer(function ConversationList() {
         >
           <button data-testid="filter-you" aria-pressed={store.filter === "you"} onClick={() => store.setFilter("you")} style={filterStyle(store.filter === "you")}>
             You
+            {store.youCount > 0 && <span style={tabCountStyle()}>{store.youCount}</span>}
           </button>
           <button data-testid="filter-unassigned" aria-pressed={store.filter === "unassigned"} onClick={() => store.setFilter("unassigned")} style={filterStyle(store.filter === "unassigned")}>
             Unassigned
-          </button>
-          <button data-testid="filter-closed" aria-pressed={store.filter === "closed"} onClick={() => store.setFilter("closed")} style={filterStyle(store.filter === "closed")}>
-            Closed
+            {store.unassignedCount > 0 && <span style={tabCountStyle()}>{store.unassignedCount}</span>}
           </button>
           <button data-testid="filter-all" aria-pressed={store.filter === "all"} onClick={() => store.setFilter("all")} style={filterStyle(store.filter === "all")}>
             All
           </button>
         </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
+          <span data-testid="open-count" style={{ fontSize: 12, color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>
+            {store.openCount} open
+          </span>
+          {store.closedCount > 0 && (
+            <button
+              data-testid="toggle-closed"
+              aria-pressed={store.showClosed}
+              onClick={store.toggleClosed}
+              style={closedToggleStyle(store.showClosed)}
+            >
+              {store.showClosed ? "Hide closed" : `Show closed · ${store.closedCount}`}
+            </button>
+          )}
+        </div>
+        {store.authorFilter && (
+          <div
+            data-testid="contact-filter-chip"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              marginTop: 10,
+              padding: "7px 10px",
+              background: "var(--brand-subtle)",
+              border: "1px solid var(--border-focus)",
+              borderRadius: 8,
+            }}
+          >
+            <span style={{ fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              All from <strong>{store.authorFilter}</strong> ({store.authorCount})
+            </span>
+            <button
+              onClick={store.clearAuthorFilter}
+              aria-label="Clear contact filter"
+              style={{ display: "flex", alignItems: "center", gap: 4, border: 0, background: "transparent", cursor: "pointer", color: "var(--brand)", fontFamily: "var(--font-sans)", fontSize: 12, fontWeight: 600, flex: "none" }}
+            >
+              Clear
+              <CloseIcon size={13} />
+            </button>
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
           <span style={{ fontSize: 12, color: "var(--text-tertiary)", flex: "none" }}>Sort</span>
           <div style={{ flex: 1, minWidth: 0 }}>
