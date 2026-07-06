@@ -86,5 +86,26 @@ Run the sample against a local backend: start `sild-dev` (`cd backend && make de
 or `go run ./cmd/sild-dev`), then run the `:sample` app. On the Android emulator the
 backend's `localhost:8080` is reached at `10.0.2.2:8080` (see `DevBackend.kt`).
 
-CI (`.github/workflows/android-sdk.yml`) boots `sild-dev`, runs the core tests
-against it, and assembles the AAR + sample APK on every change under `sdks/kotlin`.
+### End-to-end (emulator)
+
+`SildMessengerE2ETest` launches the sample and round-trips messages through a live
+`sild-dev` — a smoke test for launch crashes, the wire contract, and Compose
+rendering. Two flows: **support** (open a request, send, assert it lands) and **peer**
+(open the trip's driver chat; a driver-side `core` client receives the rider's UI
+message, then replies and the reply renders in the rider's Compose thread — a
+two-sided realtime round-trip on-device). It needs a running emulator/device and
+backend:
+
+```bash
+# 1. backend (separate shell): reachable from the emulator at 10.0.2.2:8080
+cd backend && make dev
+
+# 2. an emulator or device attached (`adb devices` lists it), then:
+cd sdks/kotlin
+./gradlew :sample:connectedDebugAndroidTest
+```
+
+CI (`.github/workflows/android-sdk.yml`) runs two jobs on every change under
+`sdks/kotlin`: `sdk` boots `sild-dev`, runs the core tests against it, and assembles
+the AAR + sample APK; `e2e` boots `sild-dev` and runs the instrumented test above on
+a hardware-accelerated emulator (free on `ubuntu-latest`).

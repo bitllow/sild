@@ -1,7 +1,9 @@
 package io.sild.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,15 +11,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +29,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,17 +41,15 @@ import coil.compose.AsyncImage
 import io.sild.core.Attachment
 import io.sild.core.Direction
 import io.sild.core.Message
+import io.sild.core.PendingAttachment
 
 private val AVATAR_PALETTE = listOf(
     0xFF3D63FF, 0xFFFF7A45, 0xFF18A957, 0xFF7C5CFF, 0xFF0EA5A5, 0xFFE0599B, 0xFFD9881A, 0xFF2440B8,
 )
 
-private fun initials(name: String): String {
-    val parts = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    if (parts.isEmpty()) return "?"
-    if (parts.size == 1) return parts[0].take(2).uppercase()
-    return "${parts.first().first()}${parts.last().first()}".uppercase()
-}
+// A single uppercase initial — the web widget's rowInitial/headInitial (first char).
+private fun initials(name: String): String =
+    name.trim().firstOrNull()?.uppercase() ?: "?"
 
 private fun colorFor(name: String): Color {
     var h = 0
@@ -64,10 +67,18 @@ fun SildAvatar(name: String, size: Int = 36, bg: Color? = null) {
     }
 }
 
-// SildHeader is the brand-colored thread/list top bar: optional back button, an
-// avatar, and a title + subtitle (peer chats show "Direct chat · <ref>").
+// SildHeader is the brand-colored thread top bar: optional back button, an avatar,
+// a title + subtitle (peer chats show "Direct chat · <ref>"), and an optional
+// trailing action (the sound toggle) pinned right — mirroring the web widget's
+// shared header control cluster.
 @Composable
-fun SildHeader(title: String, subtitle: String?, onBack: (() -> Unit)?, avatarName: String? = null) {
+fun SildHeader(
+    title: String,
+    subtitle: String?,
+    onBack: (() -> Unit)?,
+    avatarName: String? = null,
+    action: (@Composable () -> Unit)? = null,
+) {
     val colors = LocalSildColors.current
     Row(
         Modifier.fillMaxWidth().background(colors.brand).padding(horizontal = 12.dp, vertical = 12.dp),
@@ -76,7 +87,7 @@ fun SildHeader(title: String, subtitle: String?, onBack: (() -> Unit)?, avatarNa
     ) {
         if (onBack != null) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.onBrand)
+                Icon(SildIcons.Back, contentDescription = "Back", tint = colors.onBrand)
             }
         }
         if (avatarName != null) SildAvatar(avatarName, size = 36)
@@ -85,6 +96,35 @@ fun SildHeader(title: String, subtitle: String?, onBack: (() -> Unit)?, avatarNa
             if (!subtitle.isNullOrEmpty()) {
                 Text(subtitle, color = colors.onBrand.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+        if (action != null) action()
+    }
+}
+
+// SildSoundToggle mirrors the web widget's reply-notification control: a speaker
+// glyph that swaps to the slashed variant when muted. White to sit on the brand header.
+@Composable
+fun SildSoundToggle(on: Boolean, onToggle: () -> Unit) {
+    val colors = LocalSildColors.current
+    IconButton(onClick = onToggle) {
+        Icon(
+            if (on) SildIcons.Speaker else SildIcons.SpeakerOff,
+            contentDescription = if (on) "Turn off reply notifications" else "Turn on reply notifications",
+            tint = colors.onBrand,
+        )
+    }
+}
+
+// SildHeaderControls is the web widget's shared top-right cluster (sound + close),
+// rendered on every screen so the icons never shift position. Close dismisses the
+// messenger (finishes the activity) — the native equivalent of closing the panel.
+@Composable
+fun SildHeaderControls(soundOn: Boolean, onToggleSound: () -> Unit, onClose: () -> Unit) {
+    val colors = LocalSildColors.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SildSoundToggle(on = soundOn, onToggle = onToggleSound)
+        IconButton(onClick = onClose) {
+            Icon(SildIcons.Close, contentDescription = "Close", tint = colors.onBrand)
         }
     }
 }
@@ -107,8 +147,18 @@ fun SildMessageBubble(message: Message, onOpenUrl: (String) -> Unit) {
         Modifier.fillMaxWidth(),
         horizontalAlignment = if (out) Alignment.End else Alignment.Start,
     ) {
-        if (!out && message.author != null) {
-            Text(message.author!!, color = colors.sub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
+        // Meta row above the bubble (web parity): author + time. Own messages are
+        // labelled "You"; incoming show the sender's name. Time sits here, not below.
+        val label = if (out) "You" else message.author
+        if (label != null || message.time.isNotEmpty()) {
+            Row(
+                Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (label != null) Text(label, color = colors.sub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                if (message.time.isNotEmpty()) Text(message.time, color = colors.tertiary, fontSize = 11.sp)
+            }
         }
         message.attachments.filter { it.isInlineImage }.forEach { att ->
             AsyncImage(
@@ -130,9 +180,6 @@ fun SildMessageBubble(message: Message, onOpenUrl: (String) -> Unit) {
         message.attachments.filter { !it.isInlineImage }.forEach { att ->
             FileChip(att, onOpenUrl)
         }
-        if (message.time.isNotEmpty()) {
-            Text(message.time, color = colors.tertiary, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp))
-        }
     }
 }
 
@@ -152,41 +199,93 @@ private fun FileChip(att: Attachment, onOpenUrl: (String) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Icon(Icons.Filled.AttachFile, contentDescription = null, tint = colors.tertiary, modifier = Modifier.size(16.dp))
+        Icon(SildIcons.Clip, contentDescription = null, tint = colors.tertiary, modifier = Modifier.size(16.dp))
         Text(att.filename.ifEmpty { "attachment" }, color = colors.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-// SildComposer is the message input row: an attach button, the text field, and a
-// send button (enabled when there is text). Attachments picked externally flow
-// through onSend; this first cut wires text send + an attach hook.
+// SildComposer is the message input row: a pending-attachment tray, an attach
+// button, the text field, and a send button — mirroring the web widget. Picked
+// files show as removable chips (plus an "Uploading…" chip while in flight) and
+// are sent together with the text; send is disabled until an upload settles.
 @Composable
-fun SildComposer(onSend: (String) -> Unit, onAttach: (() -> Unit)? = null, enabled: Boolean = true) {
+fun SildComposer(
+    pending: List<PendingAttachment>,
+    uploading: Int,
+    onSend: (String) -> Unit,
+    onAttach: () -> Unit,
+    onRemove: (Int) -> Unit,
+    enabled: Boolean = true,
+) {
     val colors = LocalSildColors.current
+    val radii = LocalSildRadii.current
     var text by remember { mutableStateOf("") }
-    Row(
-        Modifier.fillMaxWidth().background(colors.card).padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (onAttach != null) {
-            IconButton(onClick = onAttach, enabled = enabled) {
-                Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file", tint = colors.tertiary)
+    val canSend = enabled && uploading == 0 && (text.isNotBlank() || pending.isNotEmpty())
+    // .composer: card surface with a top hairline border.
+    Column(Modifier.fillMaxWidth().background(colors.card)) {
+        HorizontalDivider(color = colors.border)
+        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp)) {
+            // .pending — removable chips + an "Uploading…" chip while in flight.
+            if (pending.isNotEmpty() || uploading > 0) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    pending.forEachIndexed { i, att ->
+                        Row(
+                            Modifier.clip(RoundedCornerShape(radii.btn.dp)).background(colors.sunken)
+                                .border(1.dp, colors.border, RoundedCornerShape(radii.btn.dp))
+                                .padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(att.filename.ifEmpty { "attachment" }, color = colors.sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
+                            Box(Modifier.size(18.dp).clip(CircleShape).clickable { onRemove(i) }, contentAlignment = Alignment.Center) {
+                                Icon(SildIcons.Close, contentDescription = "Remove attachment", tint = colors.tertiary, modifier = Modifier.size(13.dp))
+                            }
+                        }
+                    }
+                    if (uploading > 0) {
+                        Text("Uploading…", color = colors.tertiary, fontSize = 12.sp)
+                    }
+                }
             }
-        }
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("Write a message…") },
-            enabled = enabled,
-            maxLines = 4,
-        )
-        IconButton(
-            onClick = { if (text.isNotBlank()) { onSend(text.trim()); text = "" } },
-            enabled = enabled && text.isNotBlank(),
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = colors.brand)
+            // .inputwrap — one rounded, bordered pill holding attach + field + send.
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(radii.card.dp))
+                    .border(1.dp, colors.border, RoundedCornerShape(radii.card.dp))
+                    .padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    Modifier.size(34.dp).clip(RoundedCornerShape(radii.btn.dp)).clickable(enabled = enabled, onClick = onAttach),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(SildIcons.Clip, contentDescription = "Attach a file", tint = colors.tertiary, modifier = Modifier.size(20.dp))
+                }
+                Box(Modifier.weight(1f).padding(vertical = 6.dp), contentAlignment = Alignment.CenterStart) {
+                    if (text.isEmpty()) Text("Message…", color = colors.tertiary, fontSize = 14.sp)
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        enabled = enabled,
+                        textStyle = TextStyle(color = colors.text, fontSize = 14.sp, lineHeight = 21.sp),
+                        cursorBrush = SolidColor(colors.brand),
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Message input" },
+                    )
+                }
+                Box(
+                    Modifier.size(34.dp).clip(RoundedCornerShape(radii.btn.dp))
+                        .background(if (canSend) colors.brand else colors.brand.copy(alpha = 0.4f))
+                        .clickable(enabled = canSend) { onSend(text.trim()); text = "" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(SildIcons.Send, contentDescription = "Send", tint = colors.onBrand, modifier = Modifier.size(18.dp))
+                }
+            }
         }
     }
 }

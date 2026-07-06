@@ -78,8 +78,12 @@ internal class SildApi(private val cfg: SildConfig) {
 
     // ── endpoints ────────────────────────────────────────────────────────────
 
-    /** GET /v1/me/brand → { name, config }. The SDK is authed, so it uses /me/brand. */
-    suspend fun fetchBrand(): BrandResponse = json.decodeFromString(api("GET", "/me/brand"))
+    /** GET /v1/me/brand → { name, config }. The SDK is authed, so it uses /me/brand.
+     *  The logo URL is re-based onto our base so it loads from any host (see rebaseLocalUrl). */
+    suspend fun fetchBrand(): BrandResponse {
+        val res: BrandResponse = json.decodeFromString(api("GET", "/me/brand"))
+        return res.copy(config = res.config.copy(logoUrl = rebaseLocalUrl(cfg.base, res.config.logoUrl)))
+    }
 
     /** GET /v1/me/conversations → array of conversations (members + assignment + last_message). */
     suspend fun listConversations(): List<ApiConversation> =
@@ -126,9 +130,7 @@ internal class SildApi(private val cfg: SildConfig) {
         val grant: ApiUploadGrant = json.decodeFromString(api("POST", "/uploads", grantBody.toString()))
         // Local dev returns an absolute public-origin URL; re-base its /v1 path onto
         // our own base so the PUT works from any host. Real cloud signed URLs pass through.
-        val marker = "/v1/uploads/local/"
-        val i = grant.uploadUrl.indexOf(marker)
-        val putUrl = if (i >= 0) cfg.base + grant.uploadUrl.substring(i) else grant.uploadUrl
+        val putUrl = rebaseLocalUrl(cfg.base, grant.uploadUrl)!!
         withContext(Dispatchers.IO) {
             val req = Request.Builder().url(putUrl)
                 .put(bytes.toRequestBody(mime.toMediaType()))

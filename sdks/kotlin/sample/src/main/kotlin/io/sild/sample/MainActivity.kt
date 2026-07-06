@@ -63,7 +63,7 @@ private fun AcmeRidesScreen() {
                     Text("Toomas · Silver estate · 421 KLM", color = slate, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
                     Text("Arriving in 2 min", color = Color(0xFF5B6472), fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
                     OutlinedButton(
-                        onClick = { scope.launch { SildMessenger.openConversation(ctx, DevBackend.ensureDriverConversation("trip_9021")) } },
+                        onClick = { scope.launch { SildMessenger.openConversation(ctx, DevBackend.ensureDriverConversation(DevBackend.DRIVER_TRIP_REF)) } },
                         modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                     ) { Text("Message driver") }
                 }

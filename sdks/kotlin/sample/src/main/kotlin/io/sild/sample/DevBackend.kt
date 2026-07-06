@@ -20,18 +20,26 @@ object DevBackend {
     const val BASE = "http://10.0.2.2:8080"
     const val USER_ID = "u_demo_android"
 
+    // The trip whose driver↔rider peer chat the "Message driver" card opens. sild-dev
+    // derives the driver's id deterministically as "u_driver_<reference>", so the E2E
+    // test can act as the driver to round-trip a message against the rider's UI.
+    const val DRIVER_TRIP_REF = "trip_9021"
+
     private val http = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** A TokenProvider hitting the dev token-mint endpoint (host stand-in). */
-    val tokenProvider = TokenProvider {
+    /** A TokenProvider minting a dev token for [userId] (host backend stand-in). */
+    fun tokenProviderFor(userId: String) = TokenProvider {
         withContext(Dispatchers.IO) {
-            val req = Request.Builder().url("$BASE/v1/dev/widget-token?user_id=$USER_ID").build()
+            val req = Request.Builder().url("$BASE/v1/dev/widget-token?user_id=$userId").build()
             http.newCall(req).execute().use {
                 json.parseToJsonElement(it.body!!.string()).jsonObject.getValue("token").jsonPrimitive.content
             }
         }
     }
+
+    /** A TokenProvider hitting the dev token-mint endpoint (host stand-in). */
+    val tokenProvider = tokenProviderFor(USER_ID)
 
     /** Ensure the trip's driver↔rider peer conversation exists; return its id. */
     suspend fun ensureDriverConversation(reference: String): String = withContext(Dispatchers.IO) {

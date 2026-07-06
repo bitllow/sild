@@ -18,3 +18,16 @@ internal fun clock(iso: String?): String {
 /** Read a member metadata object's "name" field, or null. */
 internal fun JsonObject?.name(): String? =
     this?.get("name")?.let { runCatching { it.jsonPrimitive.content }.getOrNull() }
+
+// rebaseLocalUrl re-bases a server URL that points at local-dev object storage
+// (contains "/v1/uploads/local/") onto [base], so images/files the backend hands
+// back (brand logo, message attachments) are reachable from wherever the SDK runs
+// — e.g. an emulator, where the server's "localhost:8080" is actually 10.0.2.2.
+// Real cloud URLs (no marker) pass through unchanged. This is the incoming-URL
+// counterpart of the rewrite SildApi.upload already applies to signed PUT URLs.
+internal fun rebaseLocalUrl(base: String, url: String?): String? {
+    if (url == null) return null
+    val marker = "/v1/uploads/local/"
+    val i = url.indexOf(marker)
+    return if (i >= 0) base + url.substring(i) else url
+}

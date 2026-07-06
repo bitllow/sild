@@ -75,16 +75,20 @@ class SildClient(
 
     /** Open a conversation and load its (last 100) messages. */
     fun openConversation(id: String) {
-        scope.launch {
-            activeNames = _state.value.conversations.firstOrNull { it.id == id }?.names ?: emptyMap()
-            _state.update { it.copy(activeId = id, loadingThread = true, messages = emptyList()) }
-            runCatching { api.listMessages(id) }
-                .onSuccess { page ->
-                    val msgs = page.messages.sortedBy { it.createdAt }.map { mapMessage(it) }
-                    _state.update { it.copy(messages = msgs, loadingThread = false, agentName = agentNameOf(msgs) ?: it.agentName) }
-                }
-                .onFailure { e -> _state.update { it.copy(loadingThread = false, error = e.message) } }
-        }
+        scope.launch { loadThread(id) }
+    }
+
+    /** Set [id] active and load its thread. Suspends until the page is applied so a
+     *  caller can safely send afterwards without the load clobbering the new message. */
+    private suspend fun loadThread(id: String) {
+        activeNames = _state.value.conversations.firstOrNull { it.id == id }?.names ?: emptyMap()
+        _state.update { it.copy(activeId = id, loadingThread = true, messages = emptyList()) }
+        runCatching { api.listMessages(id) }
+            .onSuccess { page ->
+                val msgs = page.messages.sortedBy { it.createdAt }.map { mapMessage(it) }
+                _state.update { it.copy(messages = msgs, loadingThread = false, agentName = agentNameOf(msgs) ?: it.agentName) }
+            }
+            .onFailure { e -> _state.update { it.copy(loadingThread = false, error = e.message) } }
     }
 
     /** Create a support request, open it, then reconnect so its channel is covered. */
@@ -93,7 +97,9 @@ class SildClient(
             runCatching {
                 val id = api.openSupportRequest()
                 loadConversations()
-                openConversation(id)
+                // Await the initial thread load: a send() fired from onOpened must not
+                // race the in-flight listMessages, which would overwrite the new message.
+                loadThread(id)
                 realtime.reconnect()
                 onOpened(id)
             }.onFailure { e -> _state.update { it.copy(error = e.message) } }
@@ -209,7 +215,7 @@ class SildClient(
             time = clock(m.createdAt),
             body = m.body,
             attachments = m.attachments.map {
-                Attachment(it.url, it.disposition, it.mimeType, it.filename, it.sizeBytes)
+                Attachment(rebaseLocalUrl(cfg.base, it.url), it.disposition, it.mimeType, it.filename, it.sizeBytes)
             },
         )
     }

@@ -8,6 +8,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import io.sild.core.SildClient
@@ -69,19 +72,24 @@ class SildMessengerActivity : ComponentActivity() {
         tone = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60) }.getOrNull()
         client = SildClient(config, lifecycleScope, onChime = { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 150) })
 
-        when (val target = intent.getStringExtra(SildMessenger.EXTRA_TARGET) ?: SildMessenger.TARGET_LIST) {
-            SildMessenger.TARGET_LIST -> client.start()
-            SildMessenger.TARGET_SUPPORT -> { client.start(); client.openSupportRequest() }
-            else -> client.start(target.removePrefix(SildMessenger.CONV_PREFIX))
-        }
+        // TARGET_LIST/TARGET_SUPPORT both land on Home (welcome + New conversation +
+        // Recent), like the web launcher — the support request is created lazily on
+        // the first message. A conv: target opens that thread directly (single-thread
+        // mode: back finishes rather than returning to a Home that wasn't in the stack).
+        val target = intent.getStringExtra(SildMessenger.EXTRA_TARGET) ?: SildMessenger.TARGET_LIST
+        val rootIsHome = target == SildMessenger.TARGET_LIST || target == SildMessenger.TARGET_SUPPORT
+        if (rootIsHome) client.start() else client.start(target.removePrefix(SildMessenger.CONV_PREFIX))
 
         setContent {
             val state by client.state.collectAsStateWithLifecycle()
+            var draft by rememberSaveable { mutableStateOf(false) }
             SildTheme(state.brand) {
-                if (state.activeId != null) {
-                    ThreadScreen(client, state, onBack = { client.backToList() })
-                } else {
-                    ConversationListScreen(state, onOpen = { client.openConversation(it) }, onBack = { finish() })
+                val close = { finish() }
+                when {
+                    !rootIsHome -> ThreadScreen(client, state, draft = false, onBack = close, onCreated = {}, onClose = close)
+                    state.activeId != null -> ThreadScreen(client, state, draft = false, onBack = { client.backToList() }, onCreated = {}, onClose = close)
+                    draft -> ThreadScreen(client, state, draft = true, onBack = { draft = false }, onCreated = { draft = false }, onClose = close)
+                    else -> HomeScreen(state, onNew = { draft = true }, onOpen = { client.openConversation(it) }, onToggleSound = { client.toggleSound() }, onClose = close)
                 }
             }
         }
