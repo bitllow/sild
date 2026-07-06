@@ -1,6 +1,7 @@
 package io.sild.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -144,6 +145,9 @@ private fun FileChip(att: Attachment, onOpenUrl: (String) -> Unit) {
             .padding(top = 4.dp)
             .clip(RoundedCornerShape(radii.btn.dp))
             .background(colors.card)
+            // Tap to open/download the file the backend exposes (matches the web
+            // widget's attachment link); no-op if the server didn't return a URL.
+            .let { if (att.url != null) it.clickable { onOpenUrl(att.url!!) } else it }
             .padding(horizontal = 11.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),

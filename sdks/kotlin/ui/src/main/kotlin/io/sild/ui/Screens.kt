@@ -73,6 +73,12 @@ private fun ConversationRow(c: Conversation, onClick: () -> Unit) {
 @Composable
 fun ThreadScreen(client: SildClient, state: SildState, onBack: () -> Unit) {
     val colors = LocalSildColors.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val openUrl: (String) -> Unit = { url ->
+        runCatching {
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+        }
+    }
     val active = state.conversations.firstOrNull { it.id == state.activeId }
     val title = active?.title ?: state.agentName ?: "Support"
     val subtitle = active?.subtitle ?: if (state.connection.name == "CONNECTED") "Replies in a few minutes" else "Connecting…"
@@ -88,7 +94,7 @@ fun ThreadScreen(client: SildClient, state: SildState, onBack: () -> Unit) {
             if (state.loadingThread && state.messages.isEmpty()) {
                 Text("Loading…", color = colors.tertiary, fontSize = 13.sp)
             }
-            state.messages.forEach { m -> SildMessageBubble(m, onOpenUrl = {}) }
+            state.messages.forEach { m -> SildMessageBubble(m, onOpenUrl = openUrl) }
             Spacer(Modifier.height(4.dp))
         }
         val closed = active?.closed == true

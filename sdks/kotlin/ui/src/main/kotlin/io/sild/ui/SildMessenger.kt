@@ -88,7 +88,9 @@ class SildMessengerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        client.destroy()
+        // client is lateinit — it stays uninitialized when onCreate finish()ed early
+        // (no config, e.g. launched before Sild.init or recreated after process death).
+        if (::client.isInitialized) client.destroy()
         tone?.release()
         super.onDestroy()
     }
