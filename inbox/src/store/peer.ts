@@ -47,12 +47,9 @@ export interface PeerConversation {
   messages: PeerMessage[];
 }
 
-// Root surface the PeerStore needs: the signed-in agent id, and a way to ask the
-// shared realtime connection to resubscribe when a brand-new peer conversation
-// appears (subscriptions are derived at connect time).
+// Root surface the PeerStore needs: the signed-in agent id and the shared chime.
 export interface PeerRoot {
   meId: string | null;
-  requestReconnect(): void;
   /** Play the reply-notification chime (honors the shared sound toggle). */
   chime(): void;
 }
@@ -378,14 +375,12 @@ export class PeerStore {
     }
   };
 
-  // A tenant-wide nudge (new peer conversation created): refresh the list and, if
-  // a genuinely new conversation appeared, resubscribe realtime for its channel.
+  // A nudge on the tenant peer channel (new peer conversation created): refresh
+  // the list. No resubscribe needed — the single peer:<tenant> channel already
+  // covers every peer conversation, including ones created after connect.
   onTenantNudge = () => {
     if (!this.loaded) return;
-    const before = new Set(this.conversations.map((c) => c.id));
-    void this.loadConversations().then(() => {
-      if (this.conversations.some((c) => !before.has(c.id))) this.root.requestReconnect();
-    });
+    void this.loadConversations();
   };
 
   // ── search + filter (server-side) ────────────────────────────────────────

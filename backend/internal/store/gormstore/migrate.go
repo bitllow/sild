@@ -15,6 +15,9 @@ func Migrate(db *gorm.DB) error {
 	if err := backfillLastActivity(db); err != nil {
 		return err
 	}
+	if err := backfillConversationKind(db); err != nil {
+		return err
+	}
 	return applyDialectIndexes(db)
 }
 
@@ -42,6 +45,23 @@ func backfillLastActivity(db *gorm.DB) error {
 		ORDER BY m.created_at DESC, m.id DESC LIMIT 1)
 		WHERE (last_message_preview IS NULL OR last_message_preview = '')
 		  AND last_message_at IS NOT NULL`).Error
+}
+
+// backfillConversationKind classifies rows that predate the conversations.kind
+// column: a conversation is peer iff it carries no assignment (the only signal
+// available for historical rows — assignments are never deleted, and support
+// conversations always have one). AutoMigrate defaults new column values to
+// 'support', so this only promotes the assignment-less rows to 'peer'.
+//
+// It relies on the standing invariant "support ⟺ has an assignment": new
+// conversations set their kind explicitly at creation, so peer rows (kind='peer')
+// never match this predicate, and support rows always have an assignment — in
+// steady state it matches nothing. If an assignment-less *support* workflow is
+// ever added, this backfill must be revisited (it would reclassify such rows).
+func backfillConversationKind(db *gorm.DB) error {
+	return db.Exec(`UPDATE conversations SET kind = 'peer'
+		WHERE kind = 'support' AND NOT EXISTS
+		(SELECT 1 FROM assignments a WHERE a.conversation_id = conversations.id)`).Error
 }
 
 // applyDialectIndexes adds the search indexes that AutoMigrate can't express:

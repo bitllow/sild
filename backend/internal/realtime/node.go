@@ -135,18 +135,14 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 		subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
 		subs[ConvInternalChannel(cid)] = centrifuge.SubscribeOptions{}
 	}
-	// Operators with peer access also observe every peer conversation (no
-	// assignment, no agent) — the conv channel only (peer chats have no
-	// agents-only internal channel). Gated on the per-user flag, so a non-peer
-	// operator's socket never carries peer messages.
+	// Operators with peer access observe the peer surface via the single tenant
+	// peer channel (every peer conversation's events fan out there). Gated on the
+	// per-user flag, so a non-peer operator's socket never carries peer messages;
+	// and because it's one tenant channel — not a subscription per peer
+	// conversation — a peer conversation created after this connect is still
+	// observed without any per-connection re-subscription.
 	if admin.PeerAccess {
-		peers, err := st.Conversations().PeerConversationIDs(ctx, tenantID)
-		if err != nil {
-			return nil, err
-		}
-		for _, cid := range peers {
-			subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
-		}
+		subs[PeerChannel(tenantID)] = centrifuge.SubscribeOptions{}
 	}
 	return subs, nil
 }

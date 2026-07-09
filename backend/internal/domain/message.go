@@ -89,7 +89,14 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		// webhooked/pushed/emailed.
 		s.emit(ctx, realtime.Target{Conversation: convID, Internal: true}, realtime.EventMessageCreated, convID, data)
 	} else {
-		s.emit(ctx, realtime.Target{Conversation: convID}, realtime.EventMessageCreated, convID, data)
+		tgt := realtime.Target{Conversation: convID}
+		// A peer conversation also fans out to the tenant peer channel, which
+		// peer_access operators observe — they aren't conversation members, so the
+		// conv channel alone wouldn't reach them.
+		if s.conversationIsPeer(ctx, tenantID, convID) {
+			tgt.Peer = tenantID
+		}
+		s.emit(ctx, tgt, realtime.EventMessageCreated, convID, data)
 		_ = s.fireWebhook(ctx, tenantID, convID, "message.created", data)
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}

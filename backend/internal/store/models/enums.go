@@ -48,6 +48,20 @@ const (
 	ConversationClosed ConversationStatus = "closed"
 )
 
+// ConversationKind distinguishes a support conversation (has an agent assignment,
+// lives in the queue) from a peer conversation (direct end-user chat, no
+// assignment, observed by peer_access operators). It is set once at creation and
+// is the single durable source of truth — every surface (queue, badge, search,
+// peer list, authorization) reads this column rather than re-deriving peer-ness
+// from assignment presence, so the classification can't drift or silently
+// reclassify an assignment-less conversation.
+type ConversationKind string
+
+const (
+	KindSupport ConversationKind = "support"
+	KindPeer    ConversationKind = "peer"
+)
+
 // AssignmentStatus state machine: queued → assigned → closed; assigned → queued
 // (return to queue). closed is TERMINAL.
 type AssignmentStatus string

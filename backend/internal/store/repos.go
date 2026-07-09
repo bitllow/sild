@@ -70,9 +70,6 @@ type ConversationRepo interface {
 	// server-side role + free-text filtering. Mirrors the assignment queue's
 	// pagination so the peer surface has the same limits / infinite scroll / search.
 	ListPeers(ctx context.Context, tenantID string, p PeerParams) (PeerPage, error)
-	// PeerConversationIDs returns the ids of ALL peer conversations (unpaginated),
-	// for deriving an observing agent's realtime subscriptions (§5.2).
-	PeerConversationIDs(ctx context.Context, tenantID string) ([]string, error)
 	// TouchLastMessage updates the denormalized last-activity timestamp + preview
 	// used by the inbox queue ordering (see models.Conversation).
 	TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error

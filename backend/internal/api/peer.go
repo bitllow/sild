@@ -79,9 +79,10 @@ func (h *Handler) postPeerMessage(c *gin.Context) {
 		return
 	}
 	tenant := apiutil.Tenant(c)
+	// The uploads are finalized inside PeerAgentSend, AFTER it validates the send
+	// (peer + open), so a rejected send leaves no orphaned committed uploads.
 	var atts []domain.AttachmentInput
 	for _, a := range req.Attachments {
-		_ = h.svc.CompleteUpload(c.Request.Context(), tenant, a.ObjectKey)
 		atts = append(atts, domain.AttachmentInput{ObjectKey: a.ObjectKey, Disposition: models.Disposition(a.Disposition)})
 	}
 	msg, err := h.svc.PeerAgentSend(c.Request.Context(), tenant, convID, middleware.Get(c).AdminID, req.Body, atts, req.ClientMsgID)

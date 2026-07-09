@@ -3,7 +3,6 @@ package domain
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -18,15 +17,20 @@ import (
 // conversation is one that hasn't. Agents with peer_access observe them and may
 // step in, which implicitly adds them as an agent participant.
 
-// IsPeerConversation reports whether a conversation exists and carries no
-// assignment (so it never entered the support queue). Used to admit peer_access
-// agents at the authorization boundary and to gate implicit join.
+// conversationIsPeer reports whether a conversation exists and is peer-kind. This
+// reads the stored classifier (set once at creation), so it is a single indexed
+// lookup and can't drift from the queue/search view of the same conversation.
+func (s *Service) conversationIsPeer(ctx context.Context, tenantID, convID string) bool {
+	c, err := s.store.Conversations().Get(ctx, tenantID, convID)
+	return err == nil && c.Kind == models.KindPeer
+}
+
+// IsPeerConversation reports whether a conversation exists and is peer-kind. Used
+// to admit peer_access agents at the authorization boundary and to gate implicit
+// join. Note this admits a CLOSED peer conversation too — reading its history
+// stays allowed; writing is separately gated on open status in PeerAgentSend.
 func (s *Service) IsPeerConversation(ctx context.Context, tenantID, convID string) bool {
-	if _, err := s.store.Conversations().Get(ctx, tenantID, convID); err != nil {
-		return false
-	}
-	_, err := s.store.Assignments().GetByConversation(ctx, tenantID, convID)
-	return errors.Is(err, store.ErrNotFound)
+	return s.conversationIsPeer(ctx, tenantID, convID)
 }
 
 // PeerPage is one keyset-paginated page of peer conversations for the inbox: the
@@ -70,8 +74,24 @@ func (s *Service) ListPeerConversations(ctx context.Context, tenantID string, pa
 // This is the one peer-specific write path; reading peer messages reuses the
 // shared GET /conversations/:id/messages (authz now admits peer_access agents).
 func (s *Service) PeerAgentSend(ctx context.Context, tenantID, convID, adminID, body string, atts []AttachmentInput, clientMsgID string) (*models.Message, error) {
-	if !s.IsPeerConversation(ctx, tenantID, convID) {
-		return nil, ErrForbidden // not a peer conversation — use the support path
+	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
+	if err != nil {
+		return nil, mapStoreErr(err)
+	}
+	if conv.Kind != models.KindPeer {
+		return nil, ErrForbidden // a support conversation — use the support send path
+	}
+	if conv.Status != models.ConversationOpen {
+		return nil, ErrForbidden // a closed peer conversation is read-only
+	}
+
+	// Finalize attachment uploads only now that the send is authorized. Doing it
+	// before these guards (e.g. in the handler) would commit orphaned uploads for
+	// a send that is then rejected as non-peer or closed.
+	for _, a := range atts {
+		if err := s.CompleteUpload(ctx, tenantID, a.ObjectKey); err != nil {
+			return nil, err
+		}
 	}
 
 	members, err := s.store.Members().ListActive(ctx, tenantID, convID)
@@ -115,7 +135,9 @@ func (s *Service) agentJoinPeer(ctx context.Context, tenantID, convID, adminID s
 	if err := s.store.Members().Add(ctx, member); err != nil {
 		return err
 	}
-	s.emit(ctx, realtime.Target{Conversation: convID},
+	// agentJoinPeer only ever runs for a peer conversation, so also fan the join
+	// out to the peer channel where observing operators (non-members) watch.
+	s.emit(ctx, realtime.Target{Conversation: convID, Peer: tenantID},
 		realtime.EventMemberAdded, convID,
 		map[string]any{"internal_actor_id": adminID, "conv_role": "support", "member_kind": models.MemberAgent, "name": name})
 	_ = s.fireWebhook(ctx, tenantID, convID, "member.added",

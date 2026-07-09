@@ -454,10 +454,6 @@ export class RootStore {
     }
   };
 
-  // requestReconnect lets the peer store pull a fresh subscription set when a new
-  // peer conversation appears (subscriptions are derived at connect time, §5.2).
-  requestReconnect = () => this.reconnectRealtime();
-
   dispose = () => {
     if (this.safetyTimer) {
       clearInterval(this.safetyTimer);
@@ -527,11 +523,22 @@ export class RootStore {
   private handleEvent = (channel: string, env: RealtimeEnvelope) => {
     if (channel.startsWith("agents:")) {
       void this.syncQueue(); // tenant-wide queue change (new/updated request)
-      if (this.peerAccess) this.peer.onTenantNudge(); // a new peer conversation may exist
       return;
     }
-    // Peer conversations (no assignment) live in their own store — route their
-    // conv:<id> events there rather than the assignment-based handlers below.
+    // The tenant peer channel (peer:<tenant>) carries the whole peer surface for
+    // peer-access operators: a member.added for a not-yet-loaded conversation is
+    // the "new peer conversation" nudge; everything else is an event in a peer
+    // conversation the peer store handles.
+    if (channel.startsWith("peer:")) {
+      if (env.conversation_id && this.peer.owns(env.conversation_id)) {
+        this.peer.onRealtime(env);
+      } else {
+        this.peer.onTenantNudge(); // new or unloaded peer conversation — refresh the list
+      }
+      return;
+    }
+    // A peer conversation the peer store already owns may also see conv:<id>
+    // events (e.g. legacy subscriptions) — route them to the peer store.
     if (env.conversation_id && this.peer.owns(env.conversation_id)) {
       this.peer.onRealtime(env);
       return;

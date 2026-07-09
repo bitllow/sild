@@ -23,15 +23,15 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	b := db.Table("conversations c").Where("c.tenant_id = ?", tenantID)
 
 	if q.PeerOnly {
-		// Peer conversations: open, and carrying no assignment (the peer surface).
-		b = b.Where("c.status = ? AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.conversation_id = c.id)", "open")
+		// The peer surface: peer-kind conversations that are still open.
+		b = b.Where("c.kind = ? AND c.status = ?", "peer", "open")
 	} else {
 		// Default (support) search must EXCLUDE peer conversations — otherwise a
 		// non-peer-access agent could recover peer message/metadata content via the
-		// shared search even though the peer list + message endpoints are gated. The
-		// complement of the peer scope: keep conversations that are closed OR carry
-		// an assignment (i.e. every support conversation), drop open+assignment-less.
-		b = b.Where("c.status != ? OR EXISTS (SELECT 1 FROM assignments a WHERE a.conversation_id = c.id)", "open")
+		// shared search even though the peer list + message endpoints are gated.
+		// Reads the stored kind, so a CLOSED peer conversation (still kind='peer')
+		// does not leak here regardless of status.
+		b = b.Where("c.kind = ?", "support")
 	}
 	if q.Status != nil {
 		b = b.Where("c.status = ?", *q.Status)
@@ -53,17 +53,23 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	}
 	for _, kw := range q.Keywords {
 		// A keyword matches a message body, OR — for any active member — the
-		// materialized member search text (configured metadata keys), the raw
-		// metadata as text (so ANY metadata value matches even without configured
-		// searchable keys), or the participant's external id. This lets an agent
-		// find a conversation by a participant id or metadata value, not just a name.
-		metaText := memberMetaText(dialect)
-		memberCond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" +
-			wrap("m.member_search_text", op) + " " + op + " ? OR " +
-			wrap(metaText, op) + " " + op + " ? OR " +
-			wrap("m.external_user_id", op) + " " + op + " ?))"
+		// materialized member search text (the tenant's configured searchable
+		// metadata keys) or the participant's external id.
+		memberInner := wrap("m.member_search_text", op) + " " + op + " ? OR " +
+			wrap("m.external_user_id", op) + " " + op + " ?"
+		args := []any{like(kw), like(kw), like(kw)} // body, member_search_text, external_user_id
+		if q.PeerOnly {
+			// Peer participants are end users the operator is stepping in to help,
+			// so peer search additionally matches the raw metadata as text — any
+			// value (name, phone, plate) is findable even without configured keys.
+			// This is deliberately NOT done for the default support search, which
+			// stays bound to the tenant's searchable_metadata_keys allowlist.
+			memberInner += " OR " + wrap(memberMetaText(dialect), op) + " " + op + " ?"
+			args = []any{like(kw), like(kw), like(kw), like(kw)} // + raw metadata
+		}
+		memberCond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" + memberInner + "))"
 		cond := "(" + existsLike("messages", "msg", "msg.body", op) + " OR " + memberCond + ")"
-		b = b.Where(cond, like(kw), like(kw), like(kw), like(kw))
+		b = b.Where(cond, args...)
 	}
 	return b
 }
