@@ -105,8 +105,12 @@ export class PeerStore {
   loadingThread = false;
   composer = "";
   sending = false;
+  // A failed send / upload surfaced inline above the composer, so an error is
+  // never swallowed silently (the typed body is also kept — see send()).
+  sendError: string | null = null;
   // Files queued for the next message — the shared composer attachment queue.
-  atts = new AttachmentQueue();
+  // The onError callback surfaces a failed upload instead of it vanishing.
+  atts = new AttachmentQueue((msg) => runInAction(() => (this.sendError = msg)));
   // Search-with-autocomplete state (the peer list uses this instead of tabs).
   query = "";
   searchOpen = false;
@@ -139,6 +143,7 @@ export class PeerStore {
     this.cursor = null;
     this.hasMore = false;
     this.composer = "";
+    this.sendError = null;
     this.atts.reset();
     this.unreadByConv.clear();
   }
@@ -271,6 +276,7 @@ export class PeerStore {
   setActive = async (id: string) => {
     this.activeId = id;
     this.composer = "";
+    this.sendError = null;
     this.atts.reset(); // discard any upload still in flight for the previous conv
     this.unreadByConv.set(id, 0);
     const conv = this.conversations.find((c) => c.id === id);
@@ -300,6 +306,7 @@ export class PeerStore {
 
   setComposer = (v: string) => {
     this.composer = v;
+    if (this.sendError) this.sendError = null;
   };
 
   // send posts the agent's message; the first send implicitly joins them (the
@@ -310,11 +317,15 @@ export class PeerStore {
     const body = this.composer.trim();
     if (!id || (!body && this.atts.pending.length === 0) || this.sending || this.atts.isUploading) return;
     this.sending = true;
-    this.composer = "";
+    this.sendError = null;
+    // Do NOT clear the composer until the send succeeds: if the request fails the
+    // operator's typed message is preserved (and shown with an error) rather than
+    // silently lost. Attachments are likewise cleared only on success (refs()).
     const refs = this.atts.refs();
     try {
       const msg = await adminApi.postPeerMessage(id, body, refs);
       runInAction(() => {
+        this.composer = "";
         this.atts.clear();
         const conv = this.conversations.find((c) => c.id === id);
         if (conv) {
@@ -327,7 +338,9 @@ export class PeerStore {
       void this.loadConversations();
       void this.loadMessages(id);
     } catch {
-      /* transient */
+      runInAction(() => {
+        this.sendError = "Couldn’t send — check your connection and try again.";
+      });
     } finally {
       runInAction(() => {
         this.sending = false;
@@ -354,7 +367,10 @@ export class PeerStore {
       const m = env.data as ApiMessage;
       const conv = this.conversations.find((c) => c.id === cid);
       if (!conv) {
-        void this.loadConversations();
+        // A message for a conversation not in the current list. Pull the default
+        // list to surface it — unless a text search is active, whose result set we
+        // must not clobber with the default page.
+        if (!this.isSearching) void this.loadConversations();
         return;
       }
       const own = m.sender_kind === "agent" || !!m.internal_actor_id;
@@ -370,8 +386,23 @@ export class PeerStore {
       if (inbound) this.root.chime(); // match the support inbox's inbound chime
     } else if (env.type === "member.added") {
       // Someone joined (an agent stepped in) — refresh participants + the row.
-      void this.loadConversations();
+      // Skip the list refetch while a text search is active so it isn't clobbered
+      // by the default page (the participants panel still refreshes on open).
+      if (!this.isSearching) void this.loadConversations();
       if (cid === this.activeId) void this.loadMessages(cid);
+    } else if (env.type === "conversation.closed") {
+      // A closed peer conversation is read-only and drops off the peer surface —
+      // remove it live so an observing operator isn't left composing into a dead
+      // thread (the backend fans conversation.closed out to the peer channel).
+      runInAction(() => {
+        this.conversations = this.conversations.filter((c) => c.id !== cid);
+        this.unreadByConv.delete(cid);
+        if (cid === this.activeId) {
+          this.activeId = null;
+          this.composer = "";
+          this.atts.reset();
+        }
+      });
     }
   };
 
@@ -379,7 +410,7 @@ export class PeerStore {
   // the list. No resubscribe needed — the single peer:<tenant> channel already
   // covers every peer conversation, including ones created after connect.
   onTenantNudge = () => {
-    if (!this.loaded) return;
+    if (!this.loaded || this.isSearching) return; // don't clobber active search results
     void this.loadConversations();
   };
 

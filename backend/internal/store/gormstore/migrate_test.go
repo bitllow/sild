@@ -65,11 +65,12 @@ func hasColumn(t *testing.T, db *gorm.DB, table, col string) bool {
 	return false
 }
 
-// The kind backfill classifies rows that predate the conversations.kind column:
-// an assignment-less conversation (defaulted to 'support' by AutoMigrate) is
-// promoted to 'peer', while one carrying an assignment stays 'support'. This is
-// what keeps a legacy peer conversation off the support surfaces after upgrade.
-func TestBackfillConversationKind(t *testing.T) {
+// Review fix: the kind backfill was removed. A pre-existing assignment-less
+// conversation (defaulted to 'support' by AutoMigrate) must therefore stay
+// 'support' across a re-migration — it must NOT be silently reclassified to
+// 'peer' (which would drop it from the support surfaces and expose it on the peer
+// surface on upgrade). New conversations get their kind at creation instead.
+func TestMigrateDoesNotReclassifyAssignmentless(t *testing.T) {
 	for _, dbc := range dialects(t) {
 		t.Run(string(dbc.Driver), func(t *testing.T) {
 			db, err := gormstore.Open(&config.Config{DB: dbc})
@@ -80,40 +81,26 @@ func TestBackfillConversationKind(t *testing.T) {
 				t.Fatalf("migrate: %v", err)
 			}
 
-			// Simulate pre-column rows: both default to 'support' (Kind left unset,
-			// so the DB default applies) — one has an assignment, one does not.
-			now := time.Now()
-			for _, id := range []string{"c_legacy_peer", "c_legacy_support"} {
-				if err := db.Create(&models.Conversation{
-					ID: id, TenantID: "t1", Status: models.ConversationOpen, CreatedAt: now,
-				}).Error; err != nil {
-					t.Fatalf("insert %s: %v", id, err)
-				}
-			}
-			if err := db.Create(&models.Assignment{
-				ID: "a1", TenantID: "t1", ConversationID: "c_legacy_support",
-				Status: models.AssignmentQueued, CreatedAt: now,
+			// An assignment-less conversation, classified support (the AutoMigrate
+			// default), carrying no assignment — exactly what the removed backfill
+			// used to promote to peer.
+			if err := db.Create(&models.Conversation{
+				ID: "c_bare", TenantID: "t1", Status: models.ConversationOpen,
+				Kind: models.KindSupport, CreatedAt: time.Now(),
 			}).Error; err != nil {
-				t.Fatalf("insert assignment: %v", err)
+				t.Fatalf("insert: %v", err)
 			}
 
-			// Re-run migration → the backfill runs.
 			if err := gormstore.Migrate(db); err != nil {
 				t.Fatalf("re-migrate: %v", err)
 			}
 
-			kindOf := func(id string) string {
-				var k string
-				if err := db.Raw("SELECT kind FROM conversations WHERE id = ?", id).Scan(&k).Error; err != nil {
-					t.Fatalf("read kind %s: %v", id, err)
-				}
-				return k
+			var kind string
+			if err := db.Raw("SELECT kind FROM conversations WHERE id = ?", "c_bare").Scan(&kind).Error; err != nil {
+				t.Fatalf("read kind: %v", err)
 			}
-			if got := kindOf("c_legacy_peer"); got != "peer" {
-				t.Fatalf("assignment-less legacy row: kind = %q, want peer", got)
-			}
-			if got := kindOf("c_legacy_support"); got != "support" {
-				t.Fatalf("assigned legacy row: kind = %q, want support", got)
+			if kind != string(models.KindSupport) {
+				t.Fatalf("assignment-less conversation reclassified to %q, want support (backfill removed)", kind)
 			}
 		})
 	}

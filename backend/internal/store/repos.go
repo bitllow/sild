@@ -83,6 +83,11 @@ type ConversationRepo interface {
 
 type MemberRepo interface {
 	Add(ctx context.Context, m *models.ConversationMember) error
+	// AddIfAbsent inserts a member idempotently, doing nothing when a row with the
+	// same primary key already exists, and reports whether a row was created. Used
+	// by the peer implicit-join so concurrent first-sends can't double-add the
+	// operator (the caller sets a deterministic id keyed on conversation+actor).
+	AddIfAbsent(ctx context.Context, m *models.ConversationMember) (bool, error)
 	RemoveExternal(ctx context.Context, tenantID, convID, externalUserID string) error
 	Get(ctx context.Context, tenantID, convID, externalUserID string) (*models.ConversationMember, error)
 	IsActiveMember(ctx context.Context, tenantID, convID, externalUserID string) (bool, error)

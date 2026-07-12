@@ -155,6 +155,18 @@ func (r *memberRepo) Add(ctx context.Context, m *models.ConversationMember) erro
 	return r.db.WithContext(ctx).Create(m).Error
 }
 
+// AddIfAbsent inserts idempotently: on a primary-key conflict it does nothing and
+// reports added=false. Portable across dialects (ON CONFLICT DO NOTHING / INSERT
+// IGNORE) via GORM's clause.OnConflict, so the peer implicit-join stays race-safe
+// without a partial unique index (which MySQL can't express).
+func (r *memberRepo) AddIfAbsent(ctx context.Context, m *models.ConversationMember) (bool, error) {
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(m)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 func (r *memberRepo) RemoveExternal(ctx context.Context, tenantID, convID, externalUserID string) error {
 	res := r.db.WithContext(ctx).Model(&models.ConversationMember{}).
 		Where("tenant_id = ? AND conversation_id = ? AND external_user_id = ? AND left_at IS NULL",

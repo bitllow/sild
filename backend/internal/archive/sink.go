@@ -18,6 +18,7 @@ type SerializedConversation struct {
 	Reference      string           `json:"reference"`
 	Metadata       any              `json:"metadata,omitempty"`
 	Status         string           `json:"status"`
+	Kind           string           `json:"kind"`
 	Members        []map[string]any `json:"members"`
 	Messages       []map[string]any `json:"messages"`
 	MessageCount   int              `json:"message_count"`

@@ -2,7 +2,10 @@ package domain
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -84,10 +87,23 @@ func (s *Service) PeerAgentSend(ctx context.Context, tenantID, convID, adminID, 
 	if conv.Status != models.ConversationOpen {
 		return nil, ErrForbidden // a closed peer conversation is read-only
 	}
-
-	// Finalize attachment uploads only now that the send is authorized. Doing it
-	// before these guards (e.g. in the handler) would commit orphaned uploads for
-	// a send that is then rejected as non-peer or closed.
+	// Reject an empty submit BEFORE any side effect: an implicit join is
+	// user-visible (a "joined to help" note webhooked/emailed to both end-user
+	// parties), so it must never fire for a message that carries nothing.
+	if strings.TrimSpace(body) == "" && len(atts) == 0 {
+		return nil, invalid("a message body or attachment is required")
+	}
+	// Validate the attachment keys up front — before the implicit join and before
+	// completing any upload. Doing the join/complete first and letting SendMessage
+	// reject an unknown key would leave a phantom join (member + broadcast join
+	// note) and an orphaned completed upload behind a rejected send.
+	for _, a := range atts {
+		if _, err := s.store.Uploads().GetByObjectKey(ctx, tenantID, a.ObjectKey); err != nil {
+			return nil, invalid("unknown attachment object_key")
+		}
+	}
+	// Finalize the uploads (keys verified above; still after the peer/open guards
+	// so a rejected send never commits an upload).
 	for _, a := range atts {
 		if err := s.CompleteUpload(ctx, tenantID, a.ObjectKey); err != nil {
 			return nil, err
@@ -114,7 +130,7 @@ func (s *Service) PeerAgentSend(ctx context.Context, tenantID, convID, adminID, 
 	}
 
 	return s.SendMessage(ctx, tenantID, convID, SendInput{
-		SenderKind: models.SenderAgent, Internal: &adminID,
+		SenderKind: models.SenderAgent, Internal: &adminID, Kind: models.KindPeer,
 		Body: body, Attachments: atts, ClientMsgID: clientMsgIDPtr(clientMsgID),
 	})
 }
@@ -132,8 +148,18 @@ func (s *Service) agentJoinPeer(ctx context.Context, tenantID, convID, adminID s
 	if err != nil {
 		return err
 	}
-	if err := s.store.Members().Add(ctx, member); err != nil {
+	// Deterministic id keyed on (conversation, operator) so two concurrent first
+	// sends by the same operator (double-click / retry / a second tab) collide on
+	// the primary key instead of both inserting. The insert is idempotent and only
+	// the winner proceeds to broadcast the join + append the "joined to help" note,
+	// so a race can't double-add the participant or double-post the note.
+	member.ID = peerAgentMemberID(convID, adminID)
+	added, err := s.store.Members().AddIfAbsent(ctx, member)
+	if err != nil {
 		return err
+	}
+	if !added {
+		return nil // another concurrent send already joined this operator
 	}
 	// agentJoinPeer only ever runs for a peer conversation, so also fan the join
 	// out to the peer channel where observing operators (non-members) watch.
@@ -146,10 +172,18 @@ func (s *Service) agentJoinPeer(ctx context.Context, tenantID, convID, adminID s
 	// System join-note. Authored by the agent's actor so end-user surfaces can
 	// name who joined; SenderSystem is excluded from last-activity/preview.
 	_, err = s.SendMessage(ctx, tenantID, convID, SendInput{
-		SenderKind: models.SenderSystem, Internal: &adminID,
+		SenderKind: models.SenderSystem, Internal: &adminID, Kind: models.KindPeer,
 		Body: "joined to help. I can see the full history above.",
 	})
 	return err
+}
+
+// peerAgentMemberID derives a stable participant id for an operator stepping into
+// a peer conversation, so the implicit-join insert is idempotent on the primary
+// key (see agentJoinPeer). 32-byte digest → 64 hex chars, trimmed to fit size:40.
+func peerAgentMemberID(convID, adminID string) string {
+	sum := sha256.Sum256([]byte(convID + "|" + adminID))
+	return "m_" + hex.EncodeToString(sum[:])[:38]
 }
 
 func clientMsgIDPtr(s string) *string {
