@@ -1,11 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { gotoInbox, composer, composerSend, composerFileInput } from "../../support/inbox";
-import {
-  createWidgetPage,
-  widgetComposer,
-  widgetSend,
-  widgetBubble,
-} from "../../support/widget";
+import { composer, composerSend, composerFileInput } from "../../support/inbox";
+import { widgetComposer, widgetSend, widgetBubble } from "../../support/widget";
 import { expectRealtimeVisible } from "../../support/realtime";
 import { uid } from "../../support/env";
 import { riderPostsAndAgentObserves, closePeerConversation } from "../../support/peer";
@@ -18,27 +13,11 @@ test("peer chat: rider (widget) → agent observes → step-in reply → widget,
   page,
   browser,
 }) => {
-  const rider = uid("rider");
-  const { context, page: widget } = await createWidgetPage(browser, {
-    mode: "user",
-    userId: rider,
-    metadata: { name: rider },
-  });
+  // Rider opens the driver chat straight from the host "Open chat" card, posts a
+  // message, and the agent finds the conversation live on the peer surface (the
+  // host backend creates the peer conversation — the dev server stands in).
+  const { context, widget, row, riderMsg } = await riderPostsAndAgentObserves(browser, page, "where are you");
   try {
-    // Rider opens the driver chat straight from the host "Open chat" card (the
-    // host backend creates the peer conversation — the dev server stands in).
-    await widget.getByRole("button", { name: "Open chat" }).click();
-    await widgetComposer(widget).waitFor({ state: "visible" });
-    const riderMsg = `where are you ${uid("m")}`;
-    await widgetComposer(widget).fill(riderMsg);
-    await widgetSend(widget).click();
-    await expect(widgetBubble(widget, riderMsg)).toBeVisible();
-
-    // Agent opens the peer surface and finds the conversation by that message.
-    await gotoInbox(page);
-    await page.getByRole("button", { name: "Peer conversations" }).click();
-    const row = page.getByTestId("peer-row").filter({ hasText: riderMsg });
-    await expectRealtimeVisible(row);
     await row.click();
     await expect(page.getByTestId("peer-message").filter({ hasText: riderMsg })).toBeVisible();
 
@@ -82,29 +61,12 @@ test("peer chat: rider (widget) → agent observes → step-in reply → widget,
   }
 });
 
-// Review fix (#3): a peer conversation closed elsewhere must drop off an
-// observing operator's list LIVE — the peer store now handles conversation.closed
-// on the peer channel (previously it fell through and the dead thread lingered
-// until a manual reload).
-test("peer chat: a close elsewhere removes the row from the observer's list live", async ({
-  page,
-  browser,
-  request,
-}) => {
-  const { context, rider, row } = await riderPostsAndAgentObserves(browser, page, "closing soon");
-  try {
-    // Close it out-of-band; the close fans out on the peer channel and the row
-    // disappears live.
-    await closePeerConversation(request, rider);
-    await expect(row).toHaveCount(0);
-  } finally {
-    await context.close();
-  }
-});
-
-// Review fix: when the closed conversation was the OPEN one, the observer must
-// land on another live thread — not an empty pane. The store now auto-selects the
-// next conversation after removing the active one on conversation.closed.
+// Review fix: a peer conversation closed elsewhere must drop off an observing
+// operator's list LIVE (the peer store handles conversation.closed on the peer
+// channel), AND when it was the OPEN one the observer must land on another live
+// thread rather than an empty pane (auto-select). This covers both: it opens the
+// conversation (making it active), closes it out-of-band, and asserts the row
+// disappears and a different conversation becomes active.
 test("peer chat: closing the active conversation auto-selects another", async ({
   page,
   browser,
