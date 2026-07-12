@@ -72,11 +72,14 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, convID string) b
 		if p.Role == models.PlatformOwner || p.Role == models.PlatformAdmin {
 			return true
 		}
+		// One classification pass (a single hot lookup + at most one tombstone)
+		// rather than overlapping peer/assignment/archive lookups on this hot path.
+		access := svc.ClassifyAgentAccess(ctx, t, convID)
 		// A peer conversation (open, closed, or archived) is gated on the operator's
-		// own peer_access — even for a formerly-support archived read, because the
-		// blanket IsArchived grant below must NOT admit a non-peer agent to peer
-		// history. Checked first so the archived branch can't leak it.
-		if svc.IsPeerConversation(ctx, t, convID) || svc.IsArchivedPeer(ctx, t, convID) {
+		// own peer_access — even a formerly-support archived read must NOT admit a
+		// non-peer agent to peer history. Checked first so the support branch can't
+		// leak it.
+		if access.Peer {
 			if p.PeerAccess {
 				return true
 			}
@@ -85,7 +88,7 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, convID string) b
 		}
 		// agent: otherwise limited to support conversations (§7) — a live assignment
 		// or an archived formerly-support conversation.
-		if svc.HasAssignment(ctx, t, convID) || svc.IsArchived(ctx, t, convID) {
+		if access.SupportOK {
 			return true
 		}
 		httpx.Forbidden(c, "agents may only access support conversations")

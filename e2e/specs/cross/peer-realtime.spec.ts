@@ -8,6 +8,7 @@ import {
 } from "../../support/widget";
 import { expectRealtimeVisible } from "../../support/realtime";
 import { uid } from "../../support/env";
+import { riderPostsAndAgentObserves, closePeerConversation } from "../../support/peer";
 
 // The flagship peer-conversations flow: a rider↔driver chat (no support agent)
 // observed in the inbox and stepped into, round-tripping over realtime in BOTH
@@ -90,42 +91,43 @@ test("peer chat: a close elsewhere removes the row from the observer's list live
   browser,
   request,
 }) => {
-  const rider = uid("rider");
-  const { context, page: widget } = await createWidgetPage(browser, {
-    mode: "user",
-    userId: rider,
-    metadata: { name: rider },
-  });
+  const { context, rider, row } = await riderPostsAndAgentObserves(browser, page, "closing soon");
   try {
-    // Rider opens the driver chat and posts a uniquely-identifiable message.
-    await widget.getByRole("button", { name: "Open chat" }).click();
-    await widgetComposer(widget).waitFor({ state: "visible" });
-    const riderMsg = `closing soon ${uid("m")}`;
-    await widgetComposer(widget).fill(riderMsg);
-    await widgetSend(widget).click();
-    await expect(widgetBubble(widget, riderMsg)).toBeVisible();
-
-    // Agent observes it on the peer surface.
-    await gotoInbox(page);
-    await page.getByRole("button", { name: "Peer conversations" }).click();
-    const row = page.getByTestId("peer-row").filter({ hasText: riderMsg });
-    await expectRealtimeVisible(row);
-
-    // Resolve the conversation id for this rider via the admin API, then close it
-    // out-of-band (a host/back-office action the inbox peer view has no button
-    // for) — the observer never took the close action themselves.
-    const list = (await (await request.get("/v1/admin/peer-conversations")).json()) as {
-      conversations: { id: string; members: { external_user_id?: string }[] }[];
-    };
-    const convId = list.conversations.find((c) =>
-      c.members.some((m) => m.external_user_id === rider)
-    )?.id;
-    expect(convId, "found the rider's peer conversation").toBeTruthy();
-    const res = await request.post(`/v1/conversations/${convId}/close`);
-    expect(res.ok(), "close peer conversation").toBeTruthy();
-
-    // The close fans out on the peer channel and the row disappears live.
+    // Close it out-of-band; the close fans out on the peer channel and the row
+    // disappears live.
+    await closePeerConversation(request, rider);
     await expect(row).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+// Review fix: when the closed conversation was the OPEN one, the observer must
+// land on another live thread — not an empty pane. The store now auto-selects the
+// next conversation after removing the active one on conversation.closed.
+test("peer chat: closing the active conversation auto-selects another", async ({
+  page,
+  browser,
+  request,
+}) => {
+  const { context, rider, row } = await riderPostsAndAgentObserves(browser, page, "wrapping up");
+  try {
+    // OPEN the rider's conversation (make it active) — the header then shows the
+    // rider's (unique) name. There are other (dev-seeded) peers to fall back to.
+    await row.click();
+    await expect(page.getByTestId("peer-header")).toContainText(rider);
+    expect(await page.getByTestId("peer-row").count()).toBeGreaterThan(1);
+
+    // Close the active conversation out-of-band.
+    await closePeerConversation(request, rider);
+
+    // The row drops live AND a different conversation becomes active — the header
+    // stays visible (never the "Select a peer conversation." empty state) and no
+    // longer names the rider.
+    await expect(row).toHaveCount(0);
+    const header = page.getByTestId("peer-header");
+    await expect(header).toBeVisible();
+    await expect(header).not.toContainText(rider);
   } finally {
     await context.close();
   }

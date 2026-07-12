@@ -172,7 +172,7 @@ export class PeerStore {
         this.cursor = has_more ? next_cursor : null;
         this.hasMore = has_more;
         this.loaded = true;
-        if (!this.activeId && this.conversations.length) void this.setActive(this.conversations[0].id);
+        this.ensureSelection();
       });
     } catch {
       runInAction(() => {
@@ -214,7 +214,7 @@ export class PeerStore {
     });
     try {
       const { conversations } = await adminApi.searchPeer(q);
-      const rows = await Promise.all(conversations.map((hit) => this.hydrateHit(hit.conversation_id, hit.snippet)));
+      const rows = await Promise.all(conversations.map((hit) => this.fetchRow(hit.conversation_id, hit.snippet)));
       if (seq !== this.searchSeq) return; // stale response
       runInAction(() => {
         this.conversations = rows.filter((r): r is PeerConversation => r !== null);
@@ -229,9 +229,10 @@ export class PeerStore {
     }
   };
 
-  // hydrateHit turns a search hit id into a peer row using the shared conversation
+  // fetchRow turns a conversation id into a peer row using the shared conversation
   // + messages endpoints (same pattern as the support inbox's search hydration).
-  private async hydrateHit(id: string, snippet?: string): Promise<PeerConversation | null> {
+  // Used both by search hydration and by surface() for a single live arrival.
+  private async fetchRow(id: string, snippet?: string): Promise<PeerConversation | null> {
     try {
       const [conv, page] = await Promise.all([adminApi.getConversation(id), adminApi.listMessages(id)]);
       const participants = conv.members.map(mapParticipant);
@@ -256,6 +257,54 @@ export class PeerStore {
     }
   }
 
+  // surface inserts or refreshes a SINGLE conversation's row in place — the
+  // targeted alternative to loadConversations() for a live arrival. It preserves
+  // already-loaded pages (infinite scroll) and the current ordering instead of
+  // collapsing back to page 1. No-op during a text search, whose result set must
+  // not be mutated by background events.
+  private surface = async (id: string) => {
+    if (this.isSearching) return;
+    const row = await this.fetchRow(id);
+    if (!row) return;
+    runInAction(() => {
+      const existing = this.conversations.find((c) => c.id === id);
+      if (existing) {
+        // Refresh the fields a join / new message changes, but keep the existing
+        // object — and thus its optimistic messages, unread count, and position.
+        existing.participants = row.participants;
+        existing.joined = row.joined;
+        existing.preview = row.preview;
+        existing.time = row.time;
+        existing.lastActivity = row.lastActivity;
+      } else {
+        // New (or previously-unloaded) conversation: peer rows are newest-activity
+        // first and a live arrival is the newest, so prepend it.
+        this.conversations.unshift(row);
+      }
+    });
+  };
+
+  // refreshParticipants re-reads just the members of a loaded conversation (a
+  // getConversation, no message page) and updates its roster + joined flag in
+  // place — for member.added, which changes nothing but who's in the room. Cheaper
+  // than surface(): a join needs no message fetch, and for the active conversation
+  // loadMessages already pulls the page (so surface() here would fetch it twice).
+  private refreshParticipants = async (id: string) => {
+    if (!this.conversations.some((c) => c.id === id)) return;
+    try {
+      const conv = await adminApi.getConversation(id);
+      const participants = conv.members.map(mapParticipant);
+      runInAction(() => {
+        const row = this.conversations.find((c) => c.id === id);
+        if (!row) return;
+        row.participants = participants;
+        row.joined = participants.some((p) => p.isAgent);
+      });
+    } catch {
+      /* transient */
+    }
+  };
+
   private buildRow(c: ApiQueueConversation): PeerConversation {
     const participants = c.members.map(mapParticipant);
     const joined = participants.some((p) => p.isAgent);
@@ -271,6 +320,13 @@ export class PeerStore {
       joined,
       messages: existing?.messages || [],
     };
+  }
+
+  // ensureSelection defaults the open thread to the first row when nothing valid
+  // is selected — the single expression of "never sit on an empty pane", shared by
+  // the initial load and the live close of the active conversation.
+  private ensureSelection() {
+    if (!this.activeId && this.conversations.length) void this.setActive(this.conversations[0].id);
   }
 
   setActive = async (id: string) => {
@@ -365,19 +421,24 @@ export class PeerStore {
     if (!cid) return;
     if (env.type === "message.created") {
       const m = env.data as ApiMessage;
-      const conv = this.conversations.find((c) => c.id === cid);
-      if (!conv) {
-        // A message for a conversation not in the current list. Pull the default
-        // list to surface it — unless a text search is active, whose result set we
-        // must not clobber with the default page.
-        if (!this.isSearching) void this.loadConversations();
-        return;
-      }
       const own = m.sender_kind === "agent" || !!m.internal_actor_id;
       const inbound = !own && m.sender_kind !== "system";
+      const bumpUnread = inbound && cid !== this.activeId;
+      const conv = this.conversations.find((c) => c.id === cid);
+      if (!conv) {
+        // A message for a conversation not in the loaded list (a new peer chat, or
+        // one beyond the loaded pages). Surface JUST that row — preserving the
+        // already-loaded pages and their order — instead of resetting to page 1.
+        // Skipped while a text search is active, whose result set we must not touch.
+        if (!this.isSearching) {
+          if (bumpUnread) this.unreadByConv.set(cid, (this.unreadByConv.get(cid) || 0) + 1);
+          void this.surface(cid);
+        }
+        return;
+      }
       runInAction(() => {
         this.appendMessage(conv, m);
-        if (inbound && cid !== this.activeId) {
+        if (bumpUnread) {
           const n = (this.unreadByConv.get(cid) || 0) + 1;
           this.unreadByConv.set(cid, n);
           conv.unread = n;
@@ -385,33 +446,44 @@ export class PeerStore {
       });
       if (inbound) this.root.chime(); // match the support inbox's inbound chime
     } else if (env.type === "member.added") {
-      // Someone joined (an agent stepped in) — refresh participants + the row.
-      // Skip the list refetch while a text search is active so it isn't clobbered
-      // by the default page (the participants panel still refreshes on open).
-      if (!this.isSearching) void this.loadConversations();
+      // Someone joined (an agent stepped in) — refresh that row's participants in
+      // place, preserving loaded pages / scroll depth (not a full first-page
+      // refetch). A join changes only the roster, so this reads the conversation
+      // WITHOUT the message page. Skipped while a text search is active; the
+      // participants panel still refreshes on open.
+      if (!this.isSearching) void this.refreshParticipants(cid);
       if (cid === this.activeId) void this.loadMessages(cid);
     } else if (env.type === "conversation.closed") {
       // A closed peer conversation is read-only and drops off the peer surface —
       // remove it live so an observing operator isn't left composing into a dead
       // thread (the backend fans conversation.closed out to the peer channel).
+      const wasActive = cid === this.activeId;
       runInAction(() => {
         this.conversations = this.conversations.filter((c) => c.id !== cid);
         this.unreadByConv.delete(cid);
-        if (cid === this.activeId) {
+        if (wasActive) {
           this.activeId = null;
           this.composer = "";
+          this.sendError = null;
           this.atts.reset();
         }
       });
+      // If the closed thread was the open one, land on the next conversation
+      // rather than an empty pane.
+      if (wasActive) this.ensureSelection();
     }
   };
 
   // A nudge on the tenant peer channel (new peer conversation created): refresh
   // the list. No resubscribe needed — the single peer:<tenant> channel already
   // covers every peer conversation, including ones created after connect.
-  onTenantNudge = () => {
+  onTenantNudge = (cid?: string) => {
     if (!this.loaded || this.isSearching) return; // don't clobber active search results
-    void this.loadConversations();
+    // A specific conversation nudge (a new peer chat, or a message for one not in
+    // the loaded pages) surfaces just that row, preserving loaded pages; a bare
+    // nudge falls back to a first-page refresh.
+    if (cid) void this.surface(cid);
+    else void this.loadConversations();
   };
 
   // ── search + filter (server-side) ────────────────────────────────────────

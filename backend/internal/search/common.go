@@ -23,8 +23,13 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	b := db.Table("conversations c").Where("c.tenant_id = ?", tenantID)
 
 	if q.PeerOnly {
-		// The peer surface: peer-kind conversations that are still open.
-		b = b.Where("c.kind = ? AND c.status = ?", "peer", "open")
+		// The peer surface's search spans every peer-kind conversation, open OR
+		// closed — reading a closed peer conversation's history is authorized (only
+		// WRITING is gated on open status, in PeerAgentSend), so it must stay
+		// findable rather than vanishing the moment it closes. A status: filter in
+		// the query still narrows it. Mirrors support search, which likewise spans
+		// closed conversations.
+		b = b.Where("c.kind = ?", "peer")
 	} else {
 		// Default (support) search must EXCLUDE peer conversations — otherwise a
 		// non-peer-access agent could recover peer message/metadata content via the

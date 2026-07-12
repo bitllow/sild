@@ -28,12 +28,39 @@ func (s *Service) conversationIsPeer(ctx context.Context, tenantID, convID strin
 	return err == nil && c.Kind == models.KindPeer
 }
 
-// IsPeerConversation reports whether a conversation exists and is peer-kind. Used
-// to admit peer_access agents at the authorization boundary and to gate implicit
-// join. Note this admits a CLOSED peer conversation too — reading its history
-// stays allowed; writing is separately gated on open status in PeerAgentSend.
-func (s *Service) IsPeerConversation(ctx context.Context, tenantID, convID string) bool {
-	return s.conversationIsPeer(ctx, tenantID, convID)
+// AgentAccess is the single-pass classification of a platform agent's access to a
+// conversation, so AuthorizeConversation needn't issue overlapping lookups.
+type AgentAccess struct {
+	// Peer is true when the conversation (hot OR archived) is peer-kind — access
+	// is then gated on the operator's peer_access, never on an assignment.
+	Peer bool
+	// SupportOK is true when the conversation is a support conversation the agent
+	// may access: a live assignment, or an archived formerly-support conversation.
+	SupportOK bool
+}
+
+// ClassifyAgentAccess resolves an agent's access to a conversation in ONE pass —
+// a single hot lookup plus at most one tombstone lookup — the sole authz entry
+// point for the agent branch (rather than several overlapping peer/assignment/
+// archive predicates that made a naive sequence hit the tombstone twice on an
+// archived-support read). Peer takes precedence: a peer conversation is always
+// the peer path regardless of any (never-present) assignment.
+func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID string) AgentAccess {
+	if conv, err := s.store.Conversations().Get(ctx, tenantID, convID); err == nil {
+		if conv.Kind == models.KindPeer {
+			return AgentAccess{Peer: true}
+		}
+		// Hot support conversation: agents reach it only if it carries an assignment.
+		return AgentAccess{SupportOK: s.HasAssignment(ctx, tenantID, convID)}
+	}
+	// Not hot — a tombstone (archived) still carries the durable kind.
+	if tomb, ok := s.tombstone(ctx, tenantID, convID); ok {
+		if tomb.Kind == models.KindPeer {
+			return AgentAccess{Peer: true}
+		}
+		return AgentAccess{SupportOK: true} // archived formerly-support
+	}
+	return AgentAccess{}
 }
 
 // PeerPage is one keyset-paginated page of peer conversations for the inbox: the

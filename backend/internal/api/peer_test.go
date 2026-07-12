@@ -469,6 +469,17 @@ func TestClosedPeerConversationStaysOutOfSupportSearch(t *testing.T) {
 	if len(res.Conversations) != 0 {
 		t.Fatalf("default search leaked a closed peer conversation: %v", res.Conversations)
 	}
+
+	// But the PEER surface's search must still surface it (open OR closed): reading
+	// a closed peer conversation's history is authorized — only writing is gated on
+	// open status — so it must not vanish from search the moment it closes.
+	pres, err := h.Search.Search(ctx, tenant.ID, "p_needle", "", "", 25, true)
+	if err != nil {
+		t.Fatalf("peer search: %v", err)
+	}
+	if len(pres.Conversations) != 1 || pres.Conversations[0].ConversationID != peer.ID {
+		t.Fatalf("peer search dropped the closed peer conversation: %v, want just %s", pres.Conversations, peer.ID)
+	}
 }
 
 // A conversation's kind is set once at creation from whether an assignment is
