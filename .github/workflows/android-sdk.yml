@@ -2,6 +2,7 @@ name: android-sdk
 
 on:
   push:
+    branches: [master]
     paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
   pull_request:
     paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
