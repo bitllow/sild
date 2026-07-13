@@ -11,6 +11,8 @@ import (
 // substitute a fake).
 type nodePublisher interface {
 	Publish(channel string, data []byte, opts ...centrifuge.PublishOption) (centrifuge.PublishResult, error)
+	Subscribe(userID, channel string, opts ...centrifuge.SubscribeOption) error
+	Unsubscribe(userID, channel string, opts ...centrifuge.UnsubscribeOption) error
 }
 
 // CentrifugePublisher routes envelopes to Centrifuge channels per the channel
@@ -40,6 +42,19 @@ func (p *CentrifugePublisher) Publish(_ context.Context, t Target, env Envelope)
 	return nil
 }
 
+// Subscribe adds a live server-side subscription for a connected user (§5.2), so
+// a newly-granted access takes effect without a reconnect. Propagates cluster-wide
+// through the broker.
+func (p *CentrifugePublisher) Subscribe(userID, channel string) error {
+	return p.node.Subscribe(userID, channel)
+}
+
+// Unsubscribe removes a live server-side subscription for a connected user, so a
+// revoked access stops delivery immediately.
+func (p *CentrifugePublisher) Unsubscribe(userID, channel string) error {
+	return p.node.Unsubscribe(userID, channel)
+}
+
 // channelsFor computes the destination channels for a target. Internal notes go
 // ONLY to the agents-only channel — clients are never subscribed there, so the
 // privacy boundary is a subscription fact, not UI logic (§5.6).
@@ -57,6 +72,9 @@ func channelsFor(t Target) []string {
 	}
 	if t.Tenant != "" {
 		channels = append(channels, AgentsChannel(t.Tenant))
+	}
+	if t.Peer != "" {
+		channels = append(channels, PeerChannel(t.Peer))
 	}
 	return channels
 }

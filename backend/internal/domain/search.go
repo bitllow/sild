@@ -21,13 +21,15 @@ func NewSearch(st store.Store, backend search.Backend) *SearchService {
 }
 
 // Search executes a query against hot data only (§4.3). callerActorID resolves
-// the assignee:me shortcut.
-func (s *SearchService) Search(ctx context.Context, tenantID, rawQuery, callerActorID, before string, limit int) (search.Results, error) {
+// the assignee:me shortcut. peerOnly scopes results to peer conversations (open,
+// no assignment) — the peer surface's search (GET /admin/search?peer=true).
+func (s *SearchService) Search(ctx context.Context, tenantID, rawQuery, callerActorID, before string, limit int, peerOnly bool) (search.Results, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
 	q := search.Parse(rawQuery)
 	q.ResolveAssignee(callerActorID)
+	q.PeerOnly = peerOnly
 	q.Before = before
 	q.Limit = limit
 	return s.backend.Search(ctx, tenantID, q)

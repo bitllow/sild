@@ -22,6 +22,22 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	op := likeOpFor(dialect)
 	b := db.Table("conversations c").Where("c.tenant_id = ?", tenantID)
 
+	if q.PeerOnly {
+		// The peer surface's search spans every peer-kind conversation, open OR
+		// closed — reading a closed peer conversation's history is authorized (only
+		// WRITING is gated on open status, in PeerAgentSend), so it must stay
+		// findable rather than vanishing the moment it closes. A status: filter in
+		// the query still narrows it. Mirrors support search, which likewise spans
+		// closed conversations.
+		b = b.Where("c.kind = ?", "peer")
+	} else {
+		// Default (support) search must EXCLUDE peer conversations — otherwise a
+		// non-peer-access agent could recover peer message/metadata content via the
+		// shared search even though the peer list + message endpoints are gated.
+		// Reads the stored kind, so a CLOSED peer conversation (still kind='peer')
+		// does not leak here regardless of status.
+		b = b.Where("c.kind = ?", "support")
+	}
 	if q.Status != nil {
 		b = b.Where("c.status = ?", *q.Status)
 	}
@@ -41,10 +57,41 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 		b = b.Where(cond, args...)
 	}
 	for _, kw := range q.Keywords {
-		cond := "(" + existsLike("messages", "msg", "msg.body", op) + " OR " + memberLikeExists("m.member_search_text", op) + ")"
-		b = b.Where(cond, like(kw), like(kw))
+		// A keyword matches a message body, OR — for any active member — the
+		// materialized member search text (the tenant's configured searchable
+		// metadata keys) or the participant's external id.
+		memberInner := wrap("m.member_search_text", op) + " " + op + " ? OR " +
+			wrap("m.external_user_id", op) + " " + op + " ?"
+		args := []any{like(kw), like(kw), like(kw)} // body, member_search_text, external_user_id
+		if q.PeerOnly {
+			// Peer participants are end users the operator is stepping in to help,
+			// so peer search additionally matches the raw metadata as text — any
+			// value (name, phone, plate) is findable even without configured keys.
+			// This is deliberately NOT done for the default support search, which
+			// stays bound to the tenant's searchable_metadata_keys allowlist.
+			memberInner += " OR " + wrap(memberMetaText(dialect), op) + " " + op + " ?"
+			args = []any{like(kw), like(kw), like(kw), like(kw)} // + raw metadata
+		}
+		memberCond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" + memberInner + "))"
+		cond := "(" + existsLike("messages", "msg", "msg.body", op) + " OR " + memberCond + ")"
+		b = b.Where(cond, args...)
 	}
 	return b
+}
+
+// memberMetaText is the dialect-specific expression that exposes a member's raw
+// metadata as text for a LIKE/ILIKE match — so any metadata value is searchable
+// even when the tenant hasn't declared searchable_metadata_keys (member_search_text
+// is empty then).
+func memberMetaText(d config.Driver) string {
+	switch d {
+	case config.Postgres:
+		return "m.metadata::text"
+	case config.MySQL:
+		return "CAST(m.metadata AS CHAR)"
+	default: // sqlite stores JSON as TEXT
+		return "m.metadata"
+	}
 }
 
 func like(s string) string { return "%" + strings.ToLower(s) + "%" }
@@ -60,10 +107,6 @@ func wrap(col, op string) string {
 func existsLike(table, alias, col, op string) string {
 	return "EXISTS (SELECT 1 FROM " + table + " " + alias +
 		" WHERE " + alias + ".conversation_id = c.id AND " + wrap(col, op) + " " + op + " ?)"
-}
-
-func memberLikeExists(col, op string) string {
-	return "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND " + wrap(col, op) + " " + op + " ?)"
 }
 
 // metaExists matches a member-metadata key against the materialized search text

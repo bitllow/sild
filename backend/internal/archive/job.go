@@ -58,7 +58,7 @@ func (j *Job) archiveOne(ctx context.Context, conv *models.Conversation) error {
 
 	ser := SerializedConversation{
 		ConversationID: conv.ID, TenantID: conv.TenantID, Reference: conv.Reference,
-		Status: string(conv.Status), MessageCount: len(msgs),
+		Status: string(conv.Status), Kind: string(conv.Kind), MessageCount: len(msgs),
 	}
 	if len(conv.Metadata) > 0 {
 		ser.Metadata = json.RawMessage(conv.Metadata)
@@ -84,7 +84,7 @@ func (j *Job) archiveOne(ctx context.Context, conv *models.Conversation) error {
 		if err := tx.Archives().CreateTombstone(ctx, &models.ConversationArchive{
 			ConversationID: conv.ID, TenantID: conv.TenantID, Sink: models.ArchiveSink(j.sink.Name()),
 			SinkRef: sinkRef, MessageCount: len(msgs), MembersSnapshot: datatypes.JSON(snapshot),
-			ArchivedAt: j.now(),
+			Kind: conv.Kind, ArchivedAt: j.now(),
 		}); err != nil {
 			return err
 		}

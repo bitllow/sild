@@ -62,6 +62,11 @@ export interface SildConfig {
   /** Open directly to this conversation. Required for guest tokens (§9); omit
    *  for an authed user to show the conversation list / open a new request. */
   conversationId?: string;
+  /** The end-user's own id (the token's subject). Supplied by the host, which
+   *  minted the token and already knows it. Lets the widget tell the visitor's
+   *  own messages from the other party's in a peer conversation (rider↔driver),
+   *  where both are user-authored. Optional — support-only usage doesn't need it. */
+  userId?: string;
   /** Per-participant metadata attached when this user opens a support request
    *  (becomes conversation_members.metadata — shown in the inbox member panel).
    *  Host-defined and opaque, e.g. { name, email, phone, plan }. */
@@ -110,6 +115,15 @@ export interface WidgetConversation {
   closed: boolean;
   /** The handling agent's display name (first name), if one is assigned. */
   agentName?: string;
+  /** A peer conversation: a direct chat between end-user parties (e.g. rider↔
+   *  driver) with no support agent. Rendered without agent framing. */
+  peer?: boolean;
+  /** Row/header title — the other party for a peer chat, else the agent. */
+  title?: string;
+  /** Peer thread subtitle, e.g. "Direct chat · trip 9021". */
+  subtitle?: string;
+  /** external_user_id → display name, for resolving message authors in the thread. */
+  names?: Record<string, string>;
 }
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "disconnected";

@@ -23,6 +23,10 @@ export interface WidgetClient {
   upload(file: File): Promise<PendingAttachment>;
   /** Toggle the reply-notification sound (shared across the home + thread headers). */
   toggleSound(): void;
+  /** Force the realtime socket to reconnect so the server re-derives this user's
+   *  channel subscriptions — needed after opening a conversation created after the
+   *  socket connected (its conv:<id> channel isn't in the current subscription set). */
+  reconnect(): void;
 }
 
 interface ApiAttachment {
@@ -41,9 +45,20 @@ interface ApiMessage {
   visibility: "participants" | "internal";
   body: string;
   created_at: string;
+  external_user_id?: string;
+  internal_actor_id?: string;
   /** The agent's display name for agent-authored messages (from the server). */
   author_name?: string;
   attachments?: ApiAttachment[];
+}
+
+// Minimal member shape from GET /me/conversations (§4.2 conversation view).
+interface ApiConvMember {
+  member_kind: "user" | "agent" | "bot" | "email";
+  conv_role: string;
+  external_user_id?: string;
+  internal_actor_id?: string;
+  metadata?: Record<string, unknown> | null;
 }
 
 interface Envelope {
@@ -151,14 +166,29 @@ function initialSoundOn(): boolean {
   }
 }
 
-function mapMessage(m: ApiMessage): WidgetMessage {
+// mapMessage renders an API message for the thread. Direction is by author:
+//  - system → system line
+//  - agent/bot → incoming (author = the agent's name)
+//  - user → the visitor's OWN message is outgoing; any OTHER user (the driver in
+//    a peer chat) is incoming, its author resolved from the conversation members.
+// selfId distinguishes own vs other user messages (peer conversations have two
+// user parties); without it, every user message is treated as the visitor's own
+// (the support-only case, where the visitor is the only user).
+function mapMessage(m: ApiMessage, selfId?: string, names?: Record<string, string>): WidgetMessage {
   const system = m.sender_kind === "system";
-  const out = m.sender_kind === "user";
+  const isAgent = m.sender_kind === "agent" || m.sender_kind === "bot" || !!m.internal_actor_id;
+  const mine = m.sender_kind === "user" && (!selfId || m.external_user_id === selfId);
+  let author: string | undefined;
+  if (!system && !mine) {
+    author = isAgent
+      ? m.author_name || "Support"
+      : (m.external_user_id && names?.[m.external_user_id]) || m.author_name || m.external_user_id || "User";
+  }
   return {
     id: m.id,
-    direction: out ? "out" : "in",
+    direction: mine ? "out" : "in",
     system,
-    author: system ? undefined : out ? undefined : m.author_name || "Support",
+    author,
     time: clock(m.created_at),
     body: m.body,
     attachments: (m.attachments || []).map((a) => ({
@@ -177,6 +207,8 @@ export class SildClient implements WidgetClient {
   private base: string;
   private tokenProvider: () => Promise<string> | string;
   private metadata: Record<string, unknown>;
+  private selfId?: string;
+  private activeNames: Record<string, string> = {};
   private token: string | null = null;
   private cf: Centrifuge | null = null;
   private listeners = new Set<() => void>();
@@ -196,6 +228,7 @@ export class SildClient implements WidgetClient {
     this.base = (cfg.baseUrl || "").replace(/\/$/, "");
     this.tokenProvider = cfg.tokenProvider;
     this.metadata = cfg.metadata || {};
+    this.selfId = cfg.userId;
     installAudioUnlock(); // prime reply-notification audio on the first gesture
   }
 
@@ -301,7 +334,7 @@ export class SildClient implements WidgetClient {
 
   private onEvent(env: Envelope) {
     if (env.type === "message.created" && env.conversation_id === this.state.activeId) {
-      const msg = mapMessage(env.data as ApiMessage);
+      const msg = mapMessage(env.data as ApiMessage, this.selfId, this.activeNames);
       if (this.state.messages.some((m) => m.id === msg.id)) return; // dedupe own echo
       const patch: Partial<WidgetState> = { messages: [...this.state.messages, msg] };
       if (msg.direction === "in" && !msg.system && msg.author) patch.agentName = msg.author;
@@ -321,12 +354,29 @@ export class SildClient implements WidgetClient {
     const convs: WidgetConversation[] = (list || []).map((c) => {
       const last = (c.last_message || {}) as { body?: string; created_at?: string };
       const assignment = c.assignment as { status?: string } | undefined;
+      const members = (c.members as ApiConvMember[]) || [];
+      const agentName = (c.agent_name as string) || undefined;
+      // Peer conversation: a direct chat with no support agent (no assignment, no
+      // agent participant). Render without agent framing.
+      const peer = !assignment && !agentName && !members.some((m) => m.member_kind === "agent");
+      const names: Record<string, string> = {};
+      for (const m of members) {
+        if (m.external_user_id) names[m.external_user_id] = String(m.metadata?.name || m.external_user_id);
+      }
+      // The other party in a peer chat = the (non-agent) member that isn't me.
+      const other = members.find((m) => m.member_kind !== "agent" && m.external_user_id && m.external_user_id !== this.selfId);
+      const otherName = other ? String(other.metadata?.name || other.external_user_id) : undefined;
+      const reference = (c.reference as string) || "";
       return {
         id: String(c.id),
         preview: last.body || "No messages yet",
         time: last.created_at ? clock(last.created_at) : "",
         closed: (c.status as string) === "closed" || assignment?.status === "closed",
-        agentName: (c.agent_name as string) || undefined,
+        agentName,
+        peer,
+        names,
+        title: peer ? otherName || "Direct chat" : agentName,
+        subtitle: peer ? "Direct chat" + (reference ? ` · ${reference}` : "") : undefined,
       };
     });
     // Seed a header fallback name from any conversation that already has an agent.
@@ -336,6 +386,9 @@ export class SildClient implements WidgetClient {
 
   async openConversation(id: string) {
     this.patch({ activeId: id, loadingThread: true, messages: [] });
+    // Resolve author names from the already-loaded conversation members so a peer
+    // thread can label the other party's messages.
+    this.activeNames = this.state.conversations.find((c) => c.id === id)?.names || {};
     try {
       const page = await this.api<{ messages: ApiMessage[] }>(
         "GET",
@@ -344,7 +397,7 @@ export class SildClient implements WidgetClient {
       const messages = (page.messages || [])
         .slice()
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
-        .map(mapMessage);
+        .map((m) => mapMessage(m, this.selfId, this.activeNames));
       this.patch({ messages, loadingThread: false, agentName: agentNameOf(messages) });
     } catch (e) {
       this.patch({ loadingThread: false, error: e instanceof Error ? e.message : "Failed to load" });
@@ -362,7 +415,7 @@ export class SildClient implements WidgetClient {
     return conv.id;
   }
 
-  private reconnect() {
+  reconnect() {
     if (!this.cf) return;
     try {
       this.cf.disconnect();
@@ -413,7 +466,7 @@ export class SildClient implements WidgetClient {
         client_msg_id: uuid(),
         attachments: attachments.map((a) => ({ object_key: a.objectKey, disposition: a.disposition })),
       });
-      const mapped = mapMessage(msg);
+      const mapped = mapMessage(msg, this.selfId, this.activeNames);
       if (!this.state.messages.some((m) => m.id === mapped.id)) {
         this.patch({ messages: [...this.state.messages, mapped] });
       }
@@ -468,6 +521,7 @@ export class PreviewClient implements WidgetClient {
   openSupportRequest(): void {}
   send(): void {}
   backToList(): void {}
+  reconnect(): void {}
   toggleSound(): void {
     this.state = { ...this.state, soundOn: !this.state.soundOn };
     for (const l of this.listeners) l();

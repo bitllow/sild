@@ -1,11 +1,9 @@
 # Sild
 
-*Sild ("bridge" in Estonian) — a multi-tenant chat platform that bridges client,
-driver, dispatcher, support, and email into one conversation primitive.*
+*Sild ("bridge" in Estonian) — a multi-tenant chat platform 
+that bridges various clients and channels into one conversation primitive.*
 
-One **untyped** conversation primitive serves every case (dispatcher↔client,
-client↔driver, client↔support). Support is not a type — it's any conversation
-carrying an **assignment**. Multi-tenant from row zero; Postgres canonical, with
+Multi-tenant from row zero; Postgres canonical, with
 MySQL and SQLite supported via the ORM for easy self-hosting.
 
 See [`docs/chat-platform-spec.md`](docs/chat-platform-spec.md) for the product

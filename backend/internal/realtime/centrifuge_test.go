@@ -7,11 +7,25 @@ import (
 	"github.com/centrifugal/centrifuge"
 )
 
-type fakeNode struct{ published []string }
+type fakeNode struct {
+	published    []string
+	subscribed   []string
+	unsubscribed []string
+}
 
 func (f *fakeNode) Publish(channel string, _ []byte, _ ...centrifuge.PublishOption) (centrifuge.PublishResult, error) {
 	f.published = append(f.published, channel)
 	return centrifuge.PublishResult{}, nil
+}
+
+func (f *fakeNode) Subscribe(userID, channel string, _ ...centrifuge.SubscribeOption) error {
+	f.subscribed = append(f.subscribed, userID+"→"+channel)
+	return nil
+}
+
+func (f *fakeNode) Unsubscribe(userID, channel string, _ ...centrifuge.UnsubscribeOption) error {
+	f.unsubscribed = append(f.unsubscribed, userID+"→"+channel)
+	return nil
 }
 
 // §5.1 channel split: a participants message → conv channel + user channels.

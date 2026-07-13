@@ -277,8 +277,14 @@ func (h *Handler) closeAssignmentAdmin(c *gin.Context) {
 }
 
 func (h *Handler) adminSearch(c *gin.Context) {
+	// ?peer=true scopes the search to peer conversations — gated on peer access,
+	// mirroring the peer-list endpoint.
+	peerOnly := c.Query("peer") == "true"
+	if peerOnly && !requirePeerAccess(c) {
+		return
+	}
 	res, err := h.search.Search(c.Request.Context(), apiutil.Tenant(c),
-		c.Query("q"), middleware.Get(c).AdminID, c.Query("before"), atoiDefault(c.Query("limit"), 25))
+		c.Query("q"), middleware.Get(c).AdminID, c.Query("before"), atoiDefault(c.Query("limit"), 25), peerOnly)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
@@ -388,6 +394,7 @@ func (h *Handler) listTeam(c *gin.Context) {
 		out = append(out, map[string]any{
 			"id": a.ID, "email": a.Email, "platform_role": a.PlatformRole,
 			"first_name": a.FirstName, "last_name": a.LastName,
+			"peer_access":  a.PeerAccess,
 			"has_password": a.PasswordHash != nil, "created_at": a.CreatedAt,
 		})
 	}
@@ -411,17 +418,47 @@ func (h *Handler) updateWebhook(c *gin.Context) {
 
 func (h *Handler) updateAgent(c *gin.Context) {
 	var req struct {
-		PlatformRole models.PlatformRole `json:"platform_role"`
+		PlatformRole *models.PlatformRole `json:"platform_role"`
+		PeerAccess   *bool                `json:"peer_access"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "invalid body")
 		return
 	}
-	if err := h.svc.SetAdminRole(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), req.PlatformRole); err != nil {
+	if req.PlatformRole == nil && req.PeerAccess == nil {
+		httpx.BadRequest(c, "nothing to update")
+		return
+	}
+	ctx, tenant, id := c.Request.Context(), apiutil.Tenant(c), c.Param("id")
+	if req.PlatformRole != nil {
+		if err := h.svc.SetAdminRole(ctx, tenant, id, *req.PlatformRole); err != nil {
+			apiutil.Fail(c, err)
+			return
+		}
+	}
+	if req.PeerAccess != nil {
+		if err := h.svc.SetPeerAccess(ctx, tenant, id, *req.PeerAccess); err != nil {
+			apiutil.Fail(c, err)
+			return
+		}
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// adminMe: GET /v1/admin/me — the signed-in operator's identity, so the inbox
+// can gate the peer-conversations nav on peer_access and mark "You" in the team
+// list. Any authenticated admin may read their own record.
+func (h *Handler) adminMe(c *gin.Context) {
+	p := middleware.Get(c)
+	a, err := h.svc.GetAdmin(c.Request.Context(), p.TenantID, p.AdminID)
+	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{
+		"id": a.ID, "email": a.Email, "platform_role": a.PlatformRole,
+		"first_name": a.FirstName, "last_name": a.LastName, "peer_access": a.PeerAccess,
+	})
 }
 
 func (h *Handler) inviteAgent(c *gin.Context) {

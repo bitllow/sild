@@ -23,12 +23,6 @@ func (s *Service) tombstone(ctx context.Context, tenantID, convID string) (*mode
 	return tomb, true
 }
 
-// IsArchived reports whether the conversation has been moved to a cold sink (§12).
-func (s *Service) IsArchived(ctx context.Context, tenantID, convID string) bool {
-	_, ok := s.tombstone(ctx, tenantID, convID)
-	return ok
-}
-
 // IsArchivedMember authorizes an archived read for a user against the membership
 // snapshot preserved in the tombstone (hot members are gone, review finding).
 func (s *Service) IsArchivedMember(ctx context.Context, tenantID, convID, userID string) bool {

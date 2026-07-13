@@ -59,8 +59,17 @@ func (s *Service) OpenSupportRequest(ctx context.Context, tenantID, clientUserID
 
 // AddAssignment queues an existing conversation for an agent (§4.0).
 func (s *Service) AddAssignment(ctx context.Context, tenantID, convID string) (*models.Assignment, error) {
-	if _, err := s.store.Conversations().Get(ctx, tenantID, convID); err != nil {
+	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
+	if err != nil {
 		return nil, mapStoreErr(err)
+	}
+	// A conversation's kind is fixed at creation and never re-derived. A peer
+	// conversation stays peer for life (agents observe/step in via peer_access,
+	// which never adds an assignment), so it must never be queued — otherwise it
+	// would carry an assignment while every kind-based path still treats it as
+	// peer, leaving it on the peer surface yet also in the raw queue.
+	if conv.Kind == models.KindPeer {
+		return nil, ErrForbidden
 	}
 	a := &models.Assignment{TenantID: tenantID, ConversationID: convID, Status: models.AssignmentQueued, CreatedAt: s.now()}
 	if err := s.store.Assignments().Create(ctx, a); err != nil {
@@ -79,7 +88,7 @@ func (s *Service) ListQueue(ctx context.Context, tenantID string, p store.QueueP
 // CountOpenConversations returns the tenant's open-conversation count for the
 // inbox badge (§8).
 func (s *Service) CountOpenConversations(ctx context.Context, tenantID string) (int64, error) {
-	return s.store.Conversations().CountOpen(ctx, tenantID)
+	return s.store.Conversations().CountOpenSupport(ctx, tenantID)
 }
 
 // CountQueue returns the inbox scope-tab counters (assigned-to-me / unassigned /

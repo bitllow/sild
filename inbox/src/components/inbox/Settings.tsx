@@ -137,15 +137,29 @@ export const Settings = observer(function Settings() {
               <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>Team</div>
                 <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
-                  Platform roles guard the API and the inbox. owner and admin can manage keys and webhooks.
+                  Platform roles guard the API and the inbox. Peer conversations are direct chats between parties with
+                  no assigned agent — grant that access per person.
                 </div>
+              </div>
+              <div style={{ padding: "8px 18px", display: "flex", alignItems: "center", gap: 12, borderBottom: rowBorder, fontSize: 11, fontWeight: 600, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+                <div style={{ flex: 1 }} />
+                <div style={{ width: 120, flex: "none", textAlign: "right" }}>Peer access</div>
+                <div style={{ width: 130, flex: "none" }}>Role</div>
               </div>
               {store.team.map((t) => (
                 <div key={t.id} style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, borderBottom: rowBorder }}>
                   <Avatar name={t.name} size={36} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{t.name}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>
+                      {t.name}
+                      {t.id === store.meId && (
+                        <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>· You</span>
+                      )}
+                    </div>
                     <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t.email}</div>
+                  </div>
+                  <div style={{ width: 120, flex: "none", display: "flex", justifyContent: "flex-end" }}>
+                    <Switch checked={t.peerAccess} onChange={(v) => store.setPeerAccess(t.id, v)} />
                   </div>
                   <div style={{ width: 130, flex: "none" }}>
                     <Select

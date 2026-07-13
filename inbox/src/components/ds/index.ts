@@ -1,5 +1,7 @@
 export { Avatar } from "./Avatar";
 export type { AvatarProps, AvatarSize, Presence } from "./Avatar";
+export { AvatarStack } from "./AvatarStack";
+export type { AvatarStackProps, AvatarStackPerson } from "./AvatarStack";
 export { Badge } from "./Badge";
 export type { BadgeProps, BadgeVariant } from "./Badge";
 export { Banner } from "./Banner";
@@ -20,6 +22,7 @@ export { Textarea } from "./Textarea";
 export type { TextareaProps } from "./Textarea";
 export { MessageBubble } from "./MessageBubble";
 export type { MessageBubbleProps, MessageAttachment } from "./MessageBubble";
+export { InlineImages, AttachmentChips, hasInlineImages } from "./MessageAttachments";
 export { Select } from "./Select";
 export type { SelectProps, SelectOption } from "./Select";
 export { StatusPill } from "./StatusPill";

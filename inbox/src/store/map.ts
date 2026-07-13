@@ -61,7 +61,7 @@ export function mapMember(m: ApiMember): Member {
  *  already-loaded UI conversation to resolve the author. */
 // mapAttachments converts the API attachment shape to the UI render shape,
 // deriving kind (image → inline render) from the mime type.
-function mapAttachments(m: ApiMessage): MessageAttachment[] {
+export function mapAttachments(m: ApiMessage): MessageAttachment[] {
   return (m.attachments || []).map((a) => ({
     disposition: a.disposition,
     kind: a.mime_type?.startsWith("image/") ? "image" : "file",
@@ -200,7 +200,7 @@ export function mapWebhook(w: ApiWebhook): Webhook {
 export function mapTeamMember(t: ApiTeamMember): TeamMember {
   const local = t.email.split("@")[0].replace(/[._-]+/g, " ");
   const name = local.replace(/\b\w/g, (c) => c.toUpperCase());
-  return { id: t.id, name: name || t.email, email: t.email, role: t.platform_role };
+  return { id: t.id, name: name || t.email, email: t.email, role: t.platform_role, peerAccess: !!t.peer_access };
 }
 
 export function mapEmailChannel(c: ApiEmailChannel): EmailChannel {

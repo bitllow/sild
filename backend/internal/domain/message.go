@@ -30,6 +30,11 @@ type SendInput struct {
 	// AllowInternal is true when the caller is an agent (admin/ingress); only
 	// then may Visibility be internal (§4.2, §5.6).
 	AllowInternal bool
+	// Kind, when set, is the conversation's classifier as already known to the
+	// caller — it lets SendMessage decide the peer fan-out without re-reading the
+	// conversation. The peer send path (which has already loaded the conversation)
+	// sets it; leave empty to have SendMessage look it up.
+	Kind models.ConversationKind
 }
 
 // SendMessage appends a message to a conversation with idempotency, visibility
@@ -89,7 +94,17 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		// webhooked/pushed/emailed.
 		s.emit(ctx, realtime.Target{Conversation: convID, Internal: true}, realtime.EventMessageCreated, convID, data)
 	} else {
-		s.emit(ctx, realtime.Target{Conversation: convID}, realtime.EventMessageCreated, convID, data)
+		tgt := realtime.Target{Conversation: convID}
+		// A peer conversation also fans out to the tenant peer channel, which
+		// peer_access operators observe — they aren't conversation members, so the
+		// conv channel alone wouldn't reach them. Trust the caller's kind hint when
+		// present (the peer send path already loaded the conversation); only read it
+		// back when the hint is absent (e.g. an end-user send from the widget).
+		isPeer := in.Kind == models.KindPeer || (in.Kind == "" && s.conversationIsPeer(ctx, tenantID, convID))
+		if isPeer {
+			tgt.Peer = tenantID
+		}
+		s.emit(ctx, tgt, realtime.EventMessageCreated, convID, data)
 		_ = s.fireWebhook(ctx, tenantID, convID, "message.created", data)
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}

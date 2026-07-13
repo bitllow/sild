@@ -119,16 +119,16 @@ export const ConversationView = observer(function ConversationView() {
           </Banner>
         ) : (
           <>
-            {(store.pendingAtts.length > 0 || store.uploading > 0) && (
+            {(store.atts.pending.length > 0 || store.atts.uploading > 0) && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                {store.pendingAtts.map((a, i) => (
+                {store.atts.pending.map((a, i) => (
                   <span
                     key={i}
                     style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 220, fontSize: 12, color: "var(--text-secondary)", background: "var(--surface-sunken)", border: "1px solid var(--border-default)", borderRadius: 8, padding: "5px 8px" }}
                   >
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.filename}</span>
                     <button
-                      onClick={() => store.removePendingAtt(i)}
+                      onClick={() => store.atts.remove(i)}
                       aria-label="Remove attachment"
                       style={{ border: 0, background: "transparent", cursor: "pointer", color: "var(--text-tertiary)", padding: 0, display: "flex", lineHeight: 1 }}
                     >
@@ -136,7 +136,7 @@ export const ConversationView = observer(function ConversationView() {
                     </button>
                   </span>
                 ))}
-                {store.uploading > 0 && (
+                {store.atts.uploading > 0 && (
                   <span style={{ fontSize: 12, color: "var(--text-tertiary)", alignSelf: "center" }}>Uploading…</span>
                 )}
               </div>
@@ -149,7 +149,7 @@ export const ConversationView = observer(function ConversationView() {
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
                 e.target.value = "";
-                if (files.length) void store.attachFiles(files);
+                if (files.length) void store.atts.attach(files);
               }}
             />
             <ComposerBar
@@ -157,8 +157,8 @@ export const ConversationView = observer(function ConversationView() {
               onChange={(v) => store.setComposer(v)}
               onSend={store.sendMessage}
               onAttach={() => fileRef.current?.click()}
-              canSendEmpty={store.pendingAtts.length > 0}
-              disabled={store.uploading > 0}
+              canSendEmpty={store.atts.pending.length > 0}
+              disabled={store.atts.uploading > 0}
               showInternalToggle
               internal={store.internal}
               onToggleInternal={(v) => store.setInternal(v)}

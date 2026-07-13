@@ -34,11 +34,18 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	if len(in.Members) == 0 {
 		return nil, invalid("at least one member is required")
 	}
+	// Classify once, up front: opening an assignment makes it a support
+	// conversation; otherwise it's a peer conversation. Stored, never re-derived.
+	kind := models.KindPeer
+	if in.OpenAssignment {
+		kind = models.KindSupport
+	}
 	conv := &models.Conversation{
 		TenantID:  tenantID,
 		Reference: in.Reference,
 		Metadata:  datatypes.JSON(in.Metadata),
 		Status:    models.ConversationOpen,
+		Kind:      kind,
 		CreatedAt: s.now(),
 	}
 	var members []models.ConversationMember
@@ -87,6 +94,13 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	// surface host-created support requests in the inbox queue live (§8)
 	if assignment != nil {
 		s.emit(ctx, realtime.Target{Tenant: tenantID}, realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
+	} else {
+		// A peer conversation (no assignment): nudge the tenant PEER channel so any
+		// open peer inbox refreshes its list. Only peer_access operators observe
+		// that channel, so a non-peer operator never even learns the conversation's
+		// id (the agents channel would have leaked it to every connected operator).
+		s.emit(ctx, realtime.Target{Peer: tenantID}, realtime.EventMemberAdded, conv.ID,
+			map[string]any{"peer": true, "conversation_id": conv.ID})
 	}
 	return conv, nil
 }
@@ -101,17 +115,24 @@ func (s *Service) buildMember(ctx context.Context, tenantID, convID string, mi M
 		kind = models.MemberUser
 	}
 	st, _ := s.searchText(ctx, tenantID, mi.Metadata)
-	uid := mi.UserID
-	return &models.ConversationMember{
+	id := mi.UserID
+	m := &models.ConversationMember{
 		TenantID:         tenantID,
 		ConversationID:   convID,
 		MemberKind:       kind,
-		ExternalUserID:   &uid,
 		ConvRole:         mi.ConvRole,
 		Metadata:         datatypes.JSON(mi.Metadata),
 		MemberSearchText: st,
 		JoinedAt:         s.now(),
-	}, nil
+	}
+	// Exactly one identity column is set, keyed by kind: an agent member carries
+	// the admin_users.id in internal_actor_id; everyone else is external.
+	if kind == models.MemberAgent {
+		m.InternalActorID = &id
+	} else {
+		m.ExternalUserID = &id
+	}
+	return m, nil
 }
 
 // GetConversation loads a conversation with members and current assignment.
@@ -187,7 +208,13 @@ func (s *Service) CloseConversation(ctx context.Context, tenantID, convID string
 	if err := s.store.Conversations().UpdateStatus(ctx, tenantID, convID, models.ConversationClosed); err != nil {
 		return err
 	}
-	s.emit(ctx, realtime.Target{Conversation: convID}, realtime.EventConversationClosed, convID, map[string]any{})
+	tgt := realtime.Target{Conversation: convID}
+	// A peer conversation close must also reach observing operators (non-members)
+	// on the peer channel so they drop it from the peer inbox.
+	if conv.Kind == models.KindPeer {
+		tgt.Peer = tenantID
+	}
+	s.emit(ctx, tgt, realtime.EventConversationClosed, convID, map[string]any{})
 	_ = s.fireWebhook(ctx, tenantID, convID, "conversation.closed", map[string]any{})
 	return nil
 }

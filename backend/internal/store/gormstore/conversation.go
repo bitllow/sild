@@ -49,6 +49,14 @@ func (r *conversationRepo) CountOpen(ctx context.Context, tenantID string) (int6
 	return n, err
 }
 
+func (r *conversationRepo) CountOpenSupport(ctx context.Context, tenantID string) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where("tenant_id = ? AND status = ? AND kind = ?",
+			tenantID, models.ConversationOpen, models.KindSupport).Count(&n).Error
+	return n, err
+}
+
 func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error) {
 	var cs []models.Conversation
 	err := r.db.WithContext(ctx).
@@ -57,6 +65,74 @@ func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUs
 		Order("conversations.created_at desc").
 		Find(&cs).Error
 	return cs, err
+}
+
+// peerConversationScope is the shared predicate for the peer inbox surface: a
+// peer-kind conversation that is still open. Reads the stored kind column — the
+// authoritative classifier — rather than re-deriving from assignment presence.
+const peerConversationScope = `conversations.tenant_id = ? AND conversations.kind = 'peer' AND conversations.status = ?`
+
+func (r *conversationRepo) ListPeers(ctx context.Context, tenantID string, p store.PeerParams) (store.PeerPage, error) {
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	// Newest activity first, conversation id as the stable tiebreak — the same
+	// keyset shape as the assignment queue (see assignmentRepo.ListQueue).
+	const sortExpr = "COALESCE(conversations.last_message_at, conversations.created_at)"
+
+	q := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where(peerConversationScope, tenantID, models.ConversationOpen)
+
+	if p.Role != "" {
+		q = q.Where("EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = conversations.id AND m.left_at IS NULL AND m.conv_role = ?)", p.Role)
+	}
+	if p.Cursor != nil {
+		q = q.Where(sortExpr+" < ? OR ("+sortExpr+" = ? AND conversations.id < ?)",
+			p.Cursor.Value, p.Cursor.Value, p.Cursor.ID)
+	}
+
+	var convs []models.Conversation
+	if err := q.Order(sortExpr + " DESC").Order("conversations.id DESC").
+		Limit(limit + 1).Find(&convs).Error; err != nil {
+		return store.PeerPage{}, err
+	}
+
+	page := store.PeerPage{}
+	if len(convs) > limit {
+		page.HasMore = true
+		convs = convs[:limit]
+	}
+	if len(convs) == 0 {
+		return page, nil
+	}
+
+	ids := make([]string, len(convs))
+	for i := range convs {
+		ids[i] = convs[i].ID
+	}
+	var members []models.ConversationMember
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND conversation_id IN ? AND left_at IS NULL", tenantID, ids).
+		Find(&members).Error; err != nil {
+		return store.PeerPage{}, err
+	}
+	byConv := make(map[string][]models.ConversationMember)
+	for _, m := range members {
+		byConv[m.ConversationID] = append(byConv[m.ConversationID], m)
+	}
+
+	page.Items = make([]store.PeerItem, 0, len(convs))
+	for i := range convs {
+		page.Items = append(page.Items, store.PeerItem{
+			Conversation: convs[i],
+			Members:      byConv[convs[i].ID],
+			LastActivity: convLastActivity(convs[i]),
+		})
+	}
+	last := page.Items[len(page.Items)-1]
+	page.NextCursor = &store.QueueCursor{Value: last.LastActivity, ID: last.Conversation.ID}
+	return page, nil
 }
 
 func (r *conversationRepo) ListArchivable(ctx context.Context, tenantID, idleBeforeMsgID string, limit int) ([]models.Conversation, error) {
@@ -77,6 +153,18 @@ type memberRepo struct{ db *gorm.DB }
 
 func (r *memberRepo) Add(ctx context.Context, m *models.ConversationMember) error {
 	return r.db.WithContext(ctx).Create(m).Error
+}
+
+// AddIfAbsent inserts idempotently: on a primary-key conflict it does nothing and
+// reports added=false. Portable across dialects (ON CONFLICT DO NOTHING / INSERT
+// IGNORE) via GORM's clause.OnConflict, so the peer implicit-join stays race-safe
+// without a partial unique index (which MySQL can't express).
+func (r *memberRepo) AddIfAbsent(ctx context.Context, m *models.ConversationMember) (bool, error) {
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(m)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (r *memberRepo) RemoveExternal(ctx context.Context, tenantID, convID, externalUserID string) error {

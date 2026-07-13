@@ -46,6 +46,7 @@ type AdminRepo interface {
 	List(ctx context.Context, tenantID string) ([]models.AdminUser, error)
 	SetPassword(ctx context.Context, tenantID, id, passwordHash string) error
 	SetRole(ctx context.Context, tenantID, id string, role models.PlatformRole) error
+	SetPeerAccess(ctx context.Context, tenantID, id string, peerAccess bool) error
 	CreateSession(ctx context.Context, s *models.AdminSession) error
 	GetSession(ctx context.Context, id string) (*models.AdminSession, error)
 	DeleteSession(ctx context.Context, id string) error
@@ -64,16 +65,29 @@ type ConversationRepo interface {
 	UpdateStatus(ctx context.Context, tenantID, id string, status models.ConversationStatus) error
 	ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error)
 	ListArchivable(ctx context.Context, tenantID string, idleBeforeMsgID string, limit int) ([]models.Conversation, error)
+	// ListPeers returns one keyset-paginated page of the tenant's peer
+	// conversations (open, no assignment), newest-activity first, with optional
+	// server-side role + free-text filtering. Mirrors the assignment queue's
+	// pagination so the peer surface has the same limits / infinite scroll / search.
+	ListPeers(ctx context.Context, tenantID string, p PeerParams) (PeerPage, error)
 	// TouchLastMessage updates the denormalized last-activity timestamp + preview
 	// used by the inbox queue ordering (see models.Conversation).
 	TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error
-	// CountOpen returns the number of open conversations in the tenant — the
-	// inbox's open-conversation badge (§8).
+	// CountOpen returns the number of open conversations in the tenant.
 	CountOpen(ctx context.Context, tenantID string) (int64, error)
+	// CountOpenSupport counts open conversations that carry an assignment — the
+	// inbox's open-conversation badge (§8). Peer conversations (no assignment) are
+	// a separate surface and never counted here.
+	CountOpenSupport(ctx context.Context, tenantID string) (int64, error)
 }
 
 type MemberRepo interface {
 	Add(ctx context.Context, m *models.ConversationMember) error
+	// AddIfAbsent inserts a member idempotently, doing nothing when a row with the
+	// same primary key already exists, and reports whether a row was created. Used
+	// by the peer implicit-join so concurrent first-sends can't double-add the
+	// operator (the caller sets a deterministic id keyed on conversation+actor).
+	AddIfAbsent(ctx context.Context, m *models.ConversationMember) (bool, error)
 	RemoveExternal(ctx context.Context, tenantID, convID, externalUserID string) error
 	Get(ctx context.Context, tenantID, convID, externalUserID string) (*models.ConversationMember, error)
 	IsActiveMember(ctx context.Context, tenantID, convID, externalUserID string) (bool, error)
@@ -160,6 +174,32 @@ type QueuePage struct {
 type MessagePage struct {
 	Messages []models.Message
 	HasMore  bool
+}
+
+// PeerParams are the filter + keyset pagination for the peer-conversation LIST
+// (the default, no-query view — mirrors the assignment queue's ListQueue). Role
+// filters to conversations that include the given conv_role. Free-text SEARCH is
+// not here: it reuses the shared search.Backend via GET /admin/search?peer=true,
+// so id/metadata/keyword matching is identical to the support inbox's search.
+type PeerParams struct {
+	Role   string
+	Limit  int
+	Cursor *QueueCursor // keyset by (last_activity, conversation id); nil = first page
+}
+
+// PeerItem is one enriched peer-list row (conversation + active members, no
+// message history — the thread loads on open).
+type PeerItem struct {
+	Conversation models.Conversation
+	Members      []models.ConversationMember
+	LastActivity time.Time
+}
+
+// PeerPage is one page of peer conversations with the cursor for the next page.
+type PeerPage struct {
+	Items      []PeerItem
+	NextCursor *QueueCursor
+	HasMore    bool
 }
 
 type MessageRepo interface {

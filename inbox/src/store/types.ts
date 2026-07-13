@@ -82,6 +82,7 @@ export interface TeamMember {
   name: string;
   email: string;
   role: PlatformRole;
+  peerAccess: boolean;
 }
 
 /** The email support channel as the Channels settings render it (§6.2). */
@@ -103,7 +104,7 @@ export interface Brand {
   config: BrandConfig;
 }
 
-export type InboxView = "inbox" | "settings";
+export type InboxView = "inbox" | "peer" | "settings";
 export type SettingsTab = "channels" | "appearance" | "keys" | "webhooks" | "team";
 export type InboxFilter = "you" | "unassigned" | "all";
 export type SessionState = "loading" | "authed" | "anon";

@@ -2,17 +2,21 @@
 
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Avatar, InboxIcon, SettingsIcon } from "@/components/ds";
+import { Avatar, InboxIcon, PeopleIcon, SettingsIcon } from "@/components/ds";
 import { navStyle } from "./styles";
 import { ConversationList } from "./ConversationList";
 import { ConversationView } from "./ConversationView";
 import { MemberPanel } from "./MemberPanel";
+import { PeerList } from "./PeerList";
+import { PeerView } from "./PeerView";
+import { PeerPanel } from "./PeerPanel";
 import { Settings } from "./Settings";
 import { KeyDialog } from "./KeyDialog";
 
 export const Shell = observer(function Shell() {
   const store = useStore();
   const isList = store.inboxView === "inbox";
+  const isPeer = store.inboxView === "peer";
 
   return (
     <div style={{ height: "100%", display: "flex" }}>
@@ -64,7 +68,43 @@ export const Shell = observer(function Shell() {
             </span>
           )}
         </div>
-        <button onClick={store.goSettings} aria-label="Settings" style={navStyle(!isList)}>
+        {store.peerAccess && (
+          <div style={{ position: "relative" }}>
+            <button onClick={store.goPeer} aria-label="Peer conversations" style={navStyle(isPeer)}>
+              <PeopleIcon size={22} />
+            </button>
+            {store.peer.attention > 0 && (
+              <span
+                data-testid="peer-attention"
+                style={{
+                  position: "absolute",
+                  top: -3,
+                  right: -3,
+                  minWidth: 18,
+                  height: 18,
+                  padding: "0 5px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  // Slate (not coral) — peer chats have no SLA, so the attention
+                  // is deliberately muted vs the inbox badge.
+                  background: "var(--slate-500)",
+                  color: "#fff",
+                  fontFamily: "var(--font-sans)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  borderRadius: 9,
+                  border: "2px solid var(--surface-card)",
+                  pointerEvents: "none",
+                }}
+              >
+                {store.peer.attention}
+              </span>
+            )}
+          </div>
+        )}
+        <button onClick={store.goSettings} aria-label="Settings" style={navStyle(store.inboxView === "settings")}>
           <SettingsIcon size={22} />
         </button>
         <div style={{ flex: 1 }} />
@@ -83,6 +123,12 @@ export const Shell = observer(function Shell() {
           <ConversationList />
           <ConversationView />
           {store.panelOpen && <MemberPanel />}
+        </div>
+      ) : isPeer ? (
+        <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
+          <PeerList />
+          <PeerView />
+          {store.panelOpen && <PeerPanel />}
         </div>
       ) : (
         <Settings />

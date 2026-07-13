@@ -29,6 +29,10 @@ type Principal struct {
 	// admin (session)
 	AdminID string
 	Role    models.PlatformRole
+	// PeerAccess mirrors AdminUser.PeerAccess — whether this operator may access
+	// peer conversations (no-assignment direct chats). Gates the agent branch of
+	// AuthorizeConversation for peer conversations.
+	PeerAccess bool
 }
 
 const principalKey = "sild.principal"

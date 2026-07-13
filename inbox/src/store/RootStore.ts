@@ -10,6 +10,8 @@ import {
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
+import { AttachmentQueue } from "./attachments";
+import { PeerStore } from "./peer";
 import {
   buildConversation,
   buildQueueRow,
@@ -27,7 +29,6 @@ import type {
   Conversation,
   EmailChannel,
   InboxFilter,
-  PendingAttachment,
   InboxView,
   PlatformRole,
   SessionState,
@@ -150,13 +151,9 @@ export class RootStore {
   private contactSeq = 0;
   composer = "";
   internal = false;
-  // Files uploaded and queued to attach to the next outgoing message, plus a
-  // count of uploads still in flight (the composer disables Send while > 0).
-  // uploadGen bumps whenever the active conversation changes, so an upload that
-  // finishes after a switch is discarded rather than leaking into another thread.
-  pendingAtts: PendingAttachment[] = [];
-  uploading = 0;
-  private uploadGen = 0;
+  // Files queued for the next outgoing message — the shared composer attachment
+  // queue (uploads, in-flight count, conversation-switch guard). See AttachmentQueue.
+  atts = new AttachmentQueue((msg) => runInAction(() => (this.convError = msg)));
   loadingConvs = false;
   // pagination (cursor-based, scroll-loading)
   nextCursor: string | null = null;
@@ -205,8 +202,16 @@ export class RootStore {
   private typingTimer: ReturnType<typeof setTimeout> | null = null;
   private safetyTimer: ReturnType<typeof setInterval> | null = null;
 
+  // --- signed-in operator + peer conversations ---
+  // meId identifies the signed-in agent (Team "You" marker); peerAccess gates the
+  // peer-conversations nav. The peer surface lives in its own store, fed the shared
+  // realtime connection's events for peer conversation ids.
+  meId: string | null = null;
+  peerAccess = false;
+  peer = new PeerStore(this);
+
   constructor() {
-    makeAutoObservable(this);
+    makeAutoObservable(this, { peer: false, atts: false });
     if (typeof window !== "undefined") {
       this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
       installAudioUnlock(); // prime notification audio on the agent's first gesture
@@ -214,9 +219,29 @@ export class RootStore {
   }
 
   // ─────────────────────────── session ───────────────────────────
+  // loadMe resolves the signed-in operator (id + peer access). Best-effort — a
+  // failure just leaves the peer nav hidden; it never blocks the inbox.
+  loadMe = async () => {
+    try {
+      const me = await adminApi.me();
+      runInAction(() => {
+        this.meId = me.id;
+        this.peerAccess = !!me.peer_access;
+      });
+      // Load peer conversations up front (not lazily on first visit) so the nav
+      // attention badge is live from session start and realtime peer messages
+      // route to the peer store — otherwise, until the surface is opened once,
+      // peer.owns() is false and peer arrivals are dropped into a queue refetch.
+      if (this.peerAccess) void this.peer.loadConversations();
+    } catch {
+      /* leave peer surface hidden */
+    }
+  };
+
   bootstrap = async () => {
     try {
       await this.loadConversations();
+      void this.loadMe();
       runInAction(() => {
         this.session = "authed";
       });
@@ -235,6 +260,7 @@ export class RootStore {
     try {
       await adminApi.loginPassword(email, password);
       await this.loadConversations();
+      void this.loadMe();
       runInAction(() => {
         this.session = "authed";
         this.authBusy = false;
@@ -270,6 +296,9 @@ export class RootStore {
       this.activeId = null;
       this.settingsLoaded = false;
       this.inboxView = "inbox";
+      this.meId = null;
+      this.peerAccess = false;
+      this.peer.reset();
     });
   };
 
@@ -496,6 +525,24 @@ export class RootStore {
       void this.syncQueue(); // tenant-wide queue change (new/updated request)
       return;
     }
+    // The tenant peer channel (peer:<tenant>) carries the whole peer surface for
+    // peer-access operators: a member.added for a not-yet-loaded conversation is
+    // the "new peer conversation" nudge; everything else is an event in a peer
+    // conversation the peer store handles.
+    if (channel.startsWith("peer:")) {
+      if (env.conversation_id && this.peer.owns(env.conversation_id)) {
+        this.peer.onRealtime(env);
+      } else {
+        this.peer.onTenantNudge(env.conversation_id); // new/unloaded peer conversation — surface just it
+      }
+      return;
+    }
+    // A peer conversation the peer store already owns may also see conv:<id>
+    // events (e.g. legacy subscriptions) — route them to the peer store.
+    if (env.conversation_id && this.peer.owns(env.conversation_id)) {
+      this.peer.onRealtime(env);
+      return;
+    }
     switch (env.type) {
       case "message.created":
         this.onMessageCreated(env);
@@ -520,6 +567,11 @@ export class RootStore {
     const conv = this.convs.find((c) => c.id === cid);
     if (!conv) {
       void this.syncQueue();
+      // Might be a peer conversation the peer store doesn't have loaded (beyond the
+      // first page, or while a search replaced the list) — peer-access agents are
+      // subscribed to ALL peer channels, so surface that one row rather than
+      // dropping the message.
+      if (this.peerAccess) this.peer.onTenantNudge(cid);
       return;
     }
     const m = env.data as ApiMessage;
@@ -585,6 +637,11 @@ export class RootStore {
   goInbox = () => {
     this.inboxView = "inbox";
   };
+  goPeer = () => {
+    if (!this.peerAccess) return; // gated per-user (Settings → Team)
+    this.inboxView = "peer";
+    if (!this.peer.loaded) void this.peer.loadConversations();
+  };
   goSettings = () => {
     this.inboxView = "settings";
     if (!this.settingsLoaded) void this.loadSettings();
@@ -597,10 +654,7 @@ export class RootStore {
     this.activeId = id;
     this.composer = "";
     this.internal = false;
-    // Abandon the previous conversation's attachment queue + any in-flight uploads.
-    this.pendingAtts = [];
-    this.uploading = 0;
-    this.uploadGen += 1;
+    this.atts.reset(); // abandon the previous conversation's uploads + in-flight ones
     const conv = this.convs.find((c) => c.id === id) || this.contactHistory.find((c) => c.id === id);
     if (conv) conv.unread = 0;
     void this.refreshActiveMessages();
@@ -666,7 +720,9 @@ export class RootStore {
 
   // chime plays the two-tone notification when unmuted (no-op otherwise). The
   // Web Audio plumbing + autoplay unlock live at module scope (see playChime).
-  private chime = () => {
+  // chime plays the reply-notification sound (honors the mute toggle). Public so
+  // the peer store (PeerRoot) can chime on inbound peer messages too.
+  chime = () => {
     if (this.soundOn) playChime();
   };
 
@@ -831,76 +887,18 @@ export class RootStore {
     this.internal = v;
   };
 
-  // attachFiles uploads each file direct-to-bucket (§11) and queues a reference
-  // for the next message. Uploads are bound to the current conversation via
-  // uploadGen, so a completion that lands after a conversation switch is dropped
-  // (it must never appear in — or be sent from — a different conversation).
-  attachFiles = (files: File[]) => {
-    const gen = this.uploadGen;
-    for (const file of files) {
-      runInAction(() => {
-        this.uploading += 1;
-      });
-      void this.uploadOne(file, gen);
-    }
-  };
-  private uploadOne = async (file: File, gen: number) => {
-    const mime = file.type || "application/octet-stream";
-    try {
-      const grant = await adminApi.issueUpload(mime, file.size, file.name);
-      // Local backend returns an absolute public-origin URL; PUT to its relative
-      // /v1 path so it goes same-origin through the Next proxy. Cloud signed URLs
-      // (no local route) are used as-is.
-      const marker = "/v1/uploads/local/";
-      const at = grant.upload_url.indexOf(marker);
-      const putUrl = at >= 0 ? grant.upload_url.slice(at) : grant.upload_url;
-      const res = await fetch(putUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": mime },
-        credentials: at >= 0 ? "include" : "omit",
-      });
-      if (!res.ok) throw new Error("upload failed");
-      runInAction(() => {
-        if (this.uploadGen !== gen) return; // conversation changed — discard
-        this.pendingAtts.push({
-          objectKey: grant.object_key,
-          disposition: mime.startsWith("image/") ? "inline" : "attachment",
-          mimeType: mime,
-          filename: file.name,
-        });
-      });
-    } catch (e) {
-      runInAction(() => {
-        if (this.uploadGen === gen) this.convError = e instanceof ApiError ? e.message : `Could not upload ${file.name}.`;
-      });
-    } finally {
-      runInAction(() => {
-        if (this.uploadGen === gen) this.uploading -= 1;
-      });
-    }
-  };
-  removePendingAtt = (i: number) => {
-    this.pendingAtts.splice(i, 1);
-  };
-
   sendMessage = async () => {
     const conv = this.active;
     const text = this.composer.trim();
-    const atts = this.pendingAtts.slice();
-    if (!conv || (!text && atts.length === 0) || this.sending || this.uploading > 0) return;
+    if (!conv || (!text && this.atts.pending.length === 0) || this.sending || this.atts.isUploading) return;
     const internal = this.internal;
     this.sending = true;
+    const refs = this.atts.refs();
     try {
-      await adminApi.postMessage(
-        conv.id,
-        text,
-        internal ? "internal" : "participants",
-        atts.map((a) => ({ object_key: a.objectKey, disposition: a.disposition }))
-      );
+      await adminApi.postMessage(conv.id, text, internal ? "internal" : "participants", refs);
       runInAction(() => {
         this.composer = "";
-        this.pendingAtts = [];
+        this.atts.clear();
       });
       await this.refreshActiveMessages();
     } catch (e) {
@@ -1232,6 +1230,30 @@ export class RootStore {
       runInAction(() => {
         const t = this.team.find((x) => x.id === id);
         if (t && prev) t.role = prev;
+      });
+    }
+  };
+
+  // setPeerAccess toggles an operator's peer-conversation access (Settings → Team,
+  // per-user). Flipping your own off live-hides the peer nav and bounces you back
+  // to the inbox if you're viewing it.
+  setPeerAccess = async (id: string, value: boolean) => {
+    const prev = this.team.find((t) => t.id === id)?.peerAccess;
+    runInAction(() => {
+      const t = this.team.find((x) => x.id === id);
+      if (t) t.peerAccess = value;
+      if (id === this.meId) {
+        this.peerAccess = value;
+        if (!value && this.inboxView === "peer") this.inboxView = "inbox";
+      }
+    });
+    try {
+      await adminApi.setTeamPeerAccess(id, value);
+    } catch {
+      runInAction(() => {
+        const t = this.team.find((x) => x.id === id);
+        if (t && prev !== undefined) t.peerAccess = prev;
+        if (id === this.meId && prev !== undefined) this.peerAccess = prev;
       });
     }
   };

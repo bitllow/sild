@@ -1,4 +1,5 @@
 import * as React from "react";
+import { AttachmentChips, InlineImages, hasInlineImages } from "./MessageAttachments";
 
 export interface MessageAttachment {
   disposition?: "inline" | "attachment";
@@ -19,12 +20,6 @@ export interface MessageBubbleProps extends React.HTMLAttributes<HTMLDivElement>
   readReceipt?: string;
   [key: `data-${string}`]: string | undefined;
 }
-
-const Paperclip = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m21.44 11.05-9.19 9.19a6 6 0 01-8.49-8.49l8.57-8.57A4 4 0 1118 8.84l-8.59 8.57a2 2 0 01-2.83-2.83l8.49-8.48" />
-  </svg>
-);
 
 const Mail = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -66,9 +61,6 @@ export function MessageBubble({
     );
   }
 
-  const inlineImgs = attachments.filter((a) => a.disposition === "inline" && a.kind === "image");
-  const listed = attachments.filter((a) => a.disposition !== "inline" || a.kind !== "image");
-
   return (
     <div
       className={cls}
@@ -93,33 +85,13 @@ export function MessageBubble({
           {time && <span className="sild-msg__time">{time}</span>}
         </div>
       )}
-      {(body || inlineImgs.length > 0) && (
+      {(body || hasInlineImages(attachments)) && (
         <div className="sild-msg__bubble">
           {body}
-          {inlineImgs.map((a, i) =>
-            a.url ? (
-              <a key={i} href={a.url} target="_blank" rel="noopener noreferrer">
-                <img className="sild-msg__att-img" src={a.url} alt={a.filename || ""} />
-              </a>
-            ) : null
-          )}
+          <InlineImages attachments={attachments} />
         </div>
       )}
-      {listed.length > 0 && (
-        <div className="sild-msg__atts">
-          {listed.map((a, i) =>
-            a.url ? (
-              <a key={i} className="sild-msg__att" href={a.url} target="_blank" rel="noopener noreferrer" download={a.filename || undefined}>
-                <Paperclip /> <span className="sild-msg__att-name">{a.filename || "attachment"}</span>
-              </a>
-            ) : (
-              <span key={i} className="sild-msg__att">
-                <Paperclip /> <span className="sild-msg__att-name">{a.filename || "attachment"}</span>
-              </span>
-            )
-          )}
-        </div>
-      )}
+      <AttachmentChips attachments={attachments} />
       {readReceipt && <div className="sild-msg__read">{readReceipt}</div>}
     </div>
   );
