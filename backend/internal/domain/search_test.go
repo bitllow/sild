@@ -86,3 +86,39 @@ func TestAdminSearchLiveJSONFallback(t *testing.T) {
 		t.Fatal("expected live-JSON fallback to match an unindexed metadata key")
 	}
 }
+
+// §4.3 privacy: a bare keyword in the DEFAULT (support) search must match member
+// metadata only through the tenant's configured searchable_metadata_keys — never
+// the raw metadata JSON. Otherwise a value the tenant deliberately kept out of
+// the allowlist (here "city") would be recoverable by any agent typing it. The
+// qualified meta.<key> form still reaches it (see TestAdminSearchLiveJSONFallback);
+// this guards only the un-namespaced free-text path.
+func TestSupportKeywordDoesNotMatchUnindexedMetadata(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant("phone") // only "phone" is searchable; "city" is not
+	ctx := context.Background()
+
+	if _, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
+		OpenAssignment: true,
+		Members: []domain.MemberInput{{
+			UserID: "u_driver", ConvRole: models.RoleDriver,
+			Metadata: json.RawMessage(`{"phone":"+3725512345","city":"Tallinn"}`),
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A bare keyword matching only the unindexed "city" value must NOT hit.
+	res, err := h.Search.Search(ctx, tenant.ID, "Tallinn", "", "", 25, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Conversations) != 0 {
+		t.Fatalf("support keyword search leaked an unindexed metadata value: %d hits", len(res.Conversations))
+	}
+
+	// The configured key still matches, so search isn't simply broken.
+	if res, err := h.Search.Search(ctx, tenant.ID, "5512", "", "", 25, false); err != nil || len(res.Conversations) != 1 {
+		t.Fatalf("configured key search: hits=%d err=%v, want 1/nil", len(res.Conversations), err)
+	}
+}

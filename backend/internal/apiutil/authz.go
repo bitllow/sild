@@ -52,7 +52,7 @@ func CallerParticipant(c *gin.Context) store.Participant {
 //   - API key:        tenant-wide (server backend)
 //   - owner/admin:    tenant-wide (all conversations)
 //   - agent:          support inbox only — conversation must carry an assignment
-//                     (or be an archived, formerly-support conversation)
+//     (or be an archived, formerly-support conversation)
 //   - user:           must be an (active or archived) member
 //
 // Writes a 403/401 and returns false on denial.
@@ -72,12 +72,23 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, convID string) b
 		if p.Role == models.PlatformOwner || p.Role == models.PlatformAdmin {
 			return true
 		}
-		// agent: limited to support conversations (§7)…
-		if svc.HasAssignment(ctx, t, convID) || svc.IsArchived(ctx, t, convID) {
-			return true
+		// One classification pass (a single hot lookup + at most one tombstone)
+		// rather than overlapping peer/assignment/archive lookups on this hot path.
+		access := svc.ClassifyAgentAccess(ctx, t, convID)
+		// A peer conversation (open, closed, or archived) is gated on the operator's
+		// own peer_access — even a formerly-support archived read must NOT admit a
+		// non-peer agent to peer history. Checked first so the support branch can't
+		// leak it.
+		if access.Peer {
+			if p.PeerAccess {
+				return true
+			}
+			httpx.Forbidden(c, "peer access is not enabled for this operator")
+			return false
 		}
-		// …or, with peer access, an assignment-less peer conversation (observe/step in).
-		if p.PeerAccess && svc.IsPeerConversation(ctx, t, convID) {
+		// agent: otherwise limited to support conversations (§7) — a live assignment
+		// or an archived formerly-support conversation.
+		if access.SupportOK {
 			return true
 		}
 		httpx.Forbidden(c, "agents may only access support conversations")

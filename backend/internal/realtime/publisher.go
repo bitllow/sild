@@ -28,6 +28,16 @@ func ConvInternalChannel(convID string) string { return "conv:" + convID + ":int
 // subscribed here — end-user clients are not.
 func AgentsChannel(tenantID string) string { return "agents:" + tenantID }
 
+// PeerChannel carries every peer-conversation event (new-conversation nudges and
+// message.created / member.added / conversation.closed for peer conversations) to
+// operators who observe the peer surface. ONLY peer_access operators are ever
+// subscribed here (gated in agentSubscriptions + reconcilePeerSubscriptions), so
+// peer content reaching a non-peer operator is impossible as a subscription fact.
+// A single tenant channel — rather than one subscription per peer conversation —
+// means a peer conversation created after an operator connects is observed with
+// no per-connection bookkeeping (§5.1).
+func PeerChannel(tenantID string) string { return "peer:" + tenantID }
+
 // Envelope is the wire format pushed to clients (§5.3).
 type Envelope struct {
 	Type           string `json:"type"`
@@ -42,6 +52,7 @@ type Target struct {
 	Internal     bool     // route to the agents-only internal channel (§5.6)
 	Users        []string // also push to user:<id> channels
 	Tenant       string   // also push to agents:<tenant> (queue-wide agent fan-out)
+	Peer         string   // also push to peer:<tenant> (peer-access operator fan-out)
 }
 
 // Publisher pushes envelopes to the broker. REST handlers call it AFTER the

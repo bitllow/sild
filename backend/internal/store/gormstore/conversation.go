@@ -52,9 +52,8 @@ func (r *conversationRepo) CountOpen(ctx context.Context, tenantID string) (int6
 func (r *conversationRepo) CountOpenSupport(ctx context.Context, tenantID string) (int64, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
-		Where("tenant_id = ? AND status = ? AND EXISTS "+
-			"(SELECT 1 FROM assignments a WHERE a.conversation_id = conversations.id)",
-			tenantID, models.ConversationOpen).Count(&n).Error
+		Where("tenant_id = ? AND status = ? AND kind = ?",
+			tenantID, models.ConversationOpen, models.KindSupport).Count(&n).Error
 	return n, err
 }
 
@@ -68,11 +67,10 @@ func (r *conversationRepo) ListForUser(ctx context.Context, tenantID, externalUs
 	return cs, err
 }
 
-// peerConversationScope is the shared predicate for a peer conversation: open,
-// and no assignment row (never entered the support queue). Kept in one place so
-// ListPeers and PeerConversationIDs can't drift apart.
-const peerConversationScope = `conversations.tenant_id = ? AND conversations.status = ? AND NOT EXISTS ` +
-	`(SELECT 1 FROM assignments a WHERE a.conversation_id = conversations.id)`
+// peerConversationScope is the shared predicate for the peer inbox surface: a
+// peer-kind conversation that is still open. Reads the stored kind column — the
+// authoritative classifier — rather than re-deriving from assignment presence.
+const peerConversationScope = `conversations.tenant_id = ? AND conversations.kind = 'peer' AND conversations.status = ?`
 
 func (r *conversationRepo) ListPeers(ctx context.Context, tenantID string, p store.PeerParams) (store.PeerPage, error) {
 	limit := p.Limit
@@ -137,14 +135,6 @@ func (r *conversationRepo) ListPeers(ctx context.Context, tenantID string, p sto
 	return page, nil
 }
 
-func (r *conversationRepo) PeerConversationIDs(ctx context.Context, tenantID string) ([]string, error) {
-	var ids []string
-	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
-		Where(peerConversationScope, tenantID, models.ConversationOpen).
-		Pluck("id", &ids).Error
-	return ids, err
-}
-
 func (r *conversationRepo) ListArchivable(ctx context.Context, tenantID, idleBeforeMsgID string, limit int) ([]models.Conversation, error) {
 	// closed conversations whose most recent message id is below the cutoff
 	// (ULIDs sort by time, so an id below the cutoff == older than the cutoff).
@@ -163,6 +153,18 @@ type memberRepo struct{ db *gorm.DB }
 
 func (r *memberRepo) Add(ctx context.Context, m *models.ConversationMember) error {
 	return r.db.WithContext(ctx).Create(m).Error
+}
+
+// AddIfAbsent inserts idempotently: on a primary-key conflict it does nothing and
+// reports added=false. Portable across dialects (ON CONFLICT DO NOTHING / INSERT
+// IGNORE) via GORM's clause.OnConflict, so the peer implicit-join stays race-safe
+// without a partial unique index (which MySQL can't express).
+func (r *memberRepo) AddIfAbsent(ctx context.Context, m *models.ConversationMember) (bool, error) {
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(m)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (r *memberRepo) RemoveExternal(ctx context.Context, tenantID, convID, externalUserID string) error {

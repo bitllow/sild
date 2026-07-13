@@ -70,9 +70,6 @@ type ConversationRepo interface {
 	// server-side role + free-text filtering. Mirrors the assignment queue's
 	// pagination so the peer surface has the same limits / infinite scroll / search.
 	ListPeers(ctx context.Context, tenantID string, p PeerParams) (PeerPage, error)
-	// PeerConversationIDs returns the ids of ALL peer conversations (unpaginated),
-	// for deriving an observing agent's realtime subscriptions (§5.2).
-	PeerConversationIDs(ctx context.Context, tenantID string) ([]string, error)
 	// TouchLastMessage updates the denormalized last-activity timestamp + preview
 	// used by the inbox queue ordering (see models.Conversation).
 	TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error
@@ -86,6 +83,11 @@ type ConversationRepo interface {
 
 type MemberRepo interface {
 	Add(ctx context.Context, m *models.ConversationMember) error
+	// AddIfAbsent inserts a member idempotently, doing nothing when a row with the
+	// same primary key already exists, and reports whether a row was created. Used
+	// by the peer implicit-join so concurrent first-sends can't double-add the
+	// operator (the caller sets a deterministic id keyed on conversation+actor).
+	AddIfAbsent(ctx context.Context, m *models.ConversationMember) (bool, error)
 	RemoveExternal(ctx context.Context, tenantID, convID, externalUserID string) error
 	Get(ctx context.Context, tenantID, convID, externalUserID string) (*models.ConversationMember, error)
 	IsActiveMember(ctx context.Context, tenantID, convID, externalUserID string) (bool, error)

@@ -73,5 +73,8 @@ func channelsFor(t Target) []string {
 	if t.Tenant != "" {
 		channels = append(channels, AgentsChannel(t.Tenant))
 	}
+	if t.Peer != "" {
+		channels = append(channels, PeerChannel(t.Peer))
+	}
 	return channels
 }

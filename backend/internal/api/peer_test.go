@@ -3,10 +3,13 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/realtime"
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/testutil"
 )
@@ -242,31 +245,35 @@ func TestPeerSearchByIdAndMetadata(t *testing.T) {
 	}
 }
 
-// Revoking peer access reconciles the operator's LIVE realtime subscriptions:
-// they are unsubscribed from every peer conv channel at once, so a still-open
-// inbox stops receiving peer publications without waiting for a reconnect.
-// Granting subscribes them.
+// Revoking peer access reconciles the operator's LIVE realtime subscription to
+// the tenant peer channel, so a still-open inbox stops receiving peer
+// publications without waiting for a reconnect. Granting subscribes them. It is
+// a single channel — not one per peer conversation — so the number of broker
+// calls does not grow with how many peer conversations exist.
 func TestPeerAccessRevokeUnsubscribesRealtime(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
 	ctx := context.Background()
-	peer := mkPeer(t, h, tenant.ID, "trip_1")
+	// Several peer conversations: the reconcile must still be exactly one call.
+	mkPeer(t, h, tenant.ID, "trip_1")
+	mkPeer(t, h, tenant.ID, "trip_2")
+	mkPeer(t, h, tenant.ID, "trip_3")
 
 	h.Pub.Reset()
 	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, true); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	wantChan := agent.ID + "→" + "conv:" + peer.ID
+	wantChan := agent.ID + "→" + "peer:" + tenant.ID
 	if len(h.Pub.Subscribed) != 1 || h.Pub.Subscribed[0] != wantChan {
-		t.Fatalf("grant should subscribe to %s, got %v", wantChan, h.Pub.Subscribed)
+		t.Fatalf("grant should subscribe once to %s, got %v", wantChan, h.Pub.Subscribed)
 	}
 
 	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, false); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if len(h.Pub.Unsubscribed) != 1 || h.Pub.Unsubscribed[0] != wantChan {
-		t.Fatalf("revoke should unsubscribe from %s, got %v", wantChan, h.Pub.Unsubscribed)
+		t.Fatalf("revoke should unsubscribe once from %s, got %v", wantChan, h.Pub.Unsubscribed)
 	}
 }
 
@@ -308,5 +315,222 @@ func TestPeerAccessTogglePersists(t *testing.T) {
 	testutil.DecodeJSON(t, w, &me)
 	if me["peer_access"] != true {
 		t.Fatalf("/admin/me peer_access = %v, want true", me["peer_access"])
+	}
+}
+
+// A peer conversation that has been closed is read-only: an operator can no
+// longer implicitly join and post into it. Reading its history stays allowed
+// (that gate is separate); only the write path enforces open status.
+func TestPeerSendRejectedOnClosedConversation(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
+	ctx := context.Background()
+	peer := mkPeer(t, h, tenant.ID, "trip_1")
+
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	_, err := h.Svc.PeerAgentSend(ctx, tenant.ID, peer.ID, admin.ID, "stepping in", nil, "")
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("send into closed peer conversation: err = %v, want ErrForbidden", err)
+	}
+}
+
+// A rejected peer send must not commit its attachment uploads. The uploads are
+// finalized only after PeerAgentSend's guards pass, so a send rejected because
+// the conversation is closed leaves the upload untouched (still pending) rather
+// than orphaned in completed state with no message referencing it.
+func TestPeerSendDoesNotCompleteUploadsWhenRejected(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
+	ctx := context.Background()
+	peer := mkPeer(t, h, tenant.ID, "trip_1")
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	up, err := h.Svc.IssueUpload(ctx, tenant.ID, domain.IssueUploadInput{
+		MimeType: "image/png", SizeBytes: 4, Filename: "a.png",
+		Uploader: store.Participant{Kind: models.MemberAgent, InternalActorID: &admin.ID},
+	})
+	if err != nil {
+		t.Fatalf("issue upload: %v", err)
+	}
+
+	_, err = h.Svc.PeerAgentSend(ctx, tenant.ID, peer.ID, admin.ID, "with attachment",
+		[]domain.AttachmentInput{{ObjectKey: up.ObjectKey}}, "")
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("send should be rejected: err = %v, want ErrForbidden", err)
+	}
+
+	stored, err := h.Store.Uploads().GetByObjectKey(ctx, tenant.ID, up.ObjectKey)
+	if err != nil {
+		t.Fatalf("load upload: %v", err)
+	}
+	if stored.Status == models.UploadCompleted {
+		t.Fatalf("rejected send left an orphaned completed upload: %s", up.ObjectKey)
+	}
+}
+
+// Peer-conversation events fan out to the tenant PEER channel (peer:<tenant>),
+// which only peer_access operators observe — never the tenant agents channel
+// (which every operator subscribes to). This covers both the new-conversation
+// nudge and message.created, so an operator who connected before the
+// conversation existed still receives its messages via the peer channel.
+func TestPeerEventsFanOutToPeerChannelOnly(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+
+	h.Pub.Reset()
+	peer := mkPeer(t, h, tenant.ID, "trip_1")
+
+	// The new-peer-conversation nudge targets the peer channel, not the tenant
+	// agents channel (which would leak the id to non-peer operators).
+	nudges := h.Pub.OfType(realtime.EventMemberAdded)
+	if len(nudges) != 1 {
+		t.Fatalf("want 1 member.added nudge on create, got %d", len(nudges))
+	}
+	if nudges[0].Target.Peer != tenant.ID || nudges[0].Target.Tenant != "" {
+		t.Fatalf("create nudge target = %+v, want Peer=%s Tenant empty", nudges[0].Target, tenant.ID)
+	}
+
+	// An end-user message in the peer conversation reaches operators via the peer
+	// channel (and the conv channel for the participants).
+	h.Pub.Reset()
+	rider := "u_rider_trip_1"
+	if _, err := h.Svc.SendMessage(ctx, tenant.ID, peer.ID, domain.SendInput{
+		SenderKind: models.SenderUser, External: &rider, Body: "hello",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	msgs := h.Pub.OfType(realtime.EventMessageCreated)
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 message.created, got %d", len(msgs))
+	}
+	if msgs[0].Target.Peer != tenant.ID {
+		t.Fatalf("peer message target = %+v, want Peer=%s", msgs[0].Target, tenant.ID)
+	}
+	if msgs[0].Target.Conversation != peer.ID {
+		t.Fatalf("peer message must still target the conv channel for participants, got %+v", msgs[0].Target)
+	}
+}
+
+// A support (assignment-carrying) message must NOT fan out to the peer channel —
+// peer_access operators observe only peer conversations.
+func TestSupportMessageDoesNotFanOutToPeerChannel(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+	conv := mkSupport(t, h, tenant.ID, "support")
+
+	h.Pub.Reset()
+	ext := "u_support"
+	if _, err := h.Svc.SendMessage(ctx, tenant.ID, conv.ID, domain.SendInput{
+		SenderKind: models.SenderUser, External: &ext, Body: "help",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	msgs := h.Pub.OfType(realtime.EventMessageCreated)
+	if len(msgs) != 1 || msgs[0].Target.Peer != "" {
+		t.Fatalf("support message must not target the peer channel, got %+v", msgs)
+	}
+}
+
+// A closed peer conversation (still assignment-less) must not surface in the
+// default (non-peer) search — otherwise a non-peer-access operator could recover
+// its content by closing it first, defeating the peer gating.
+func TestClosedPeerConversationStaysOutOfSupportSearch(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+
+	peer, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
+		Reference: "trip_secret", OpenAssignment: false,
+		Members: []domain.MemberInput{
+			{UserID: "p_needle", ConvRole: models.ConvRole("rider"), Metadata: json.RawMessage(`{"name":"Needle Haystack"}`)},
+			{UserID: "p_drv", ConvRole: models.ConvRole("driver"), Metadata: json.RawMessage(`{"name":"Dee Driver"}`)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create peer: %v", err)
+	}
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Default (support) search must not return the now-closed peer conversation.
+	res, err := h.Search.Search(ctx, tenant.ID, "p_needle", "", "", 25, false)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res.Conversations) != 0 {
+		t.Fatalf("default search leaked a closed peer conversation: %v", res.Conversations)
+	}
+
+	// But the PEER surface's search must still surface it (open OR closed): reading
+	// a closed peer conversation's history is authorized — only writing is gated on
+	// open status — so it must not vanish from search the moment it closes.
+	pres, err := h.Search.Search(ctx, tenant.ID, "p_needle", "", "", 25, true)
+	if err != nil {
+		t.Fatalf("peer search: %v", err)
+	}
+	if len(pres.Conversations) != 1 || pres.Conversations[0].ConversationID != peer.ID {
+		t.Fatalf("peer search dropped the closed peer conversation: %v, want just %s", pres.Conversations, peer.ID)
+	}
+}
+
+// A conversation's kind is set once at creation from whether an assignment is
+// opened — support when it is, peer otherwise — and persisted as the durable
+// classifier every surface reads (rather than re-derived from assignment
+// presence, which is what allowed a closed peer conversation to leak).
+func TestConversationKindSetAtCreation(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+
+	peer := mkPeer(t, h, tenant.ID, "trip_1")
+	support := mkSupport(t, h, tenant.ID, "support")
+
+	got, err := h.Store.Conversations().Get(ctx, tenant.ID, peer.ID)
+	if err != nil {
+		t.Fatalf("load peer: %v", err)
+	}
+	if got.Kind != models.KindPeer {
+		t.Fatalf("peer conversation kind = %q, want peer", got.Kind)
+	}
+	got, err = h.Store.Conversations().Get(ctx, tenant.ID, support.ID)
+	if err != nil {
+		t.Fatalf("load support: %v", err)
+	}
+	if got.Kind != models.KindSupport {
+		t.Fatalf("support conversation kind = %q, want support", got.Kind)
+	}
+}
+
+// A conversation's kind is fixed at creation and never re-derived, so a peer
+// conversation can never be queued: adding an assignment is rejected. Otherwise
+// it would carry an assignment while every kind-based path (queue count, default
+// search, realtime fan-out) still treats it as peer — visible on the peer surface
+// yet also in the raw queue.
+func TestAddAssignmentRejectedOnPeerConversation(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+	peer := mkPeer(t, h, tenant.ID, "trip_1")
+
+	if _, err := h.Svc.AddAssignment(ctx, tenant.ID, peer.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("add assignment to peer conversation: err = %v, want ErrForbidden", err)
+	}
+
+	// It stays a peer conversation with no assignment.
+	got, err := h.Store.Conversations().Get(ctx, tenant.ID, peer.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Kind != models.KindPeer {
+		t.Fatalf("conversation kind = %q, want peer (unchanged)", got.Kind)
 	}
 }

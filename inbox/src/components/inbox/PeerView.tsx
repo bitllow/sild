@@ -170,6 +170,11 @@ const PeerComposer = observer(function PeerComposer() {
           if (files.length) peer.atts.attach(files);
         }}
       />
+      {peer.sendError && (
+        <div role="alert" style={{ marginBottom: 8, fontSize: 12, color: "var(--danger-600, #c0362c)" }}>
+          {peer.sendError}
+        </div>
+      )}
       <ComposerBar
         value={peer.composer}
         onChange={(v) => peer.setComposer(v)}

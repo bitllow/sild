@@ -536,6 +536,24 @@ export class RootStore {
       this.peer.onRealtime(env);
       return;
     }
+    // The tenant peer channel (peer:<tenant>) carries the whole peer surface for
+    // peer-access operators: a member.added for a not-yet-loaded conversation is
+    // the "new peer conversation" nudge; everything else is an event in a peer
+    // conversation the peer store handles.
+    if (channel.startsWith("peer:")) {
+      if (env.conversation_id && this.peer.owns(env.conversation_id)) {
+        this.peer.onRealtime(env);
+      } else {
+        this.peer.onTenantNudge(env.conversation_id); // new/unloaded peer conversation — surface just it
+      }
+      return;
+    }
+    // A peer conversation the peer store already owns may also see conv:<id>
+    // events (e.g. legacy subscriptions) — route them to the peer store.
+    if (env.conversation_id && this.peer.owns(env.conversation_id)) {
+      this.peer.onRealtime(env);
+      return;
+    }
     switch (env.type) {
       case "message.created":
         this.onMessageCreated(env);
@@ -562,9 +580,9 @@ export class RootStore {
       void this.syncQueue();
       // Might be a peer conversation the peer store doesn't have loaded (beyond the
       // first page, or while a search replaced the list) — peer-access agents are
-      // subscribed to ALL peer channels, so refresh the peer list to surface/reorder
-      // it rather than dropping the message.
-      if (this.peerAccess) this.peer.onTenantNudge();
+      // subscribed to ALL peer channels, so surface that one row rather than
+      // dropping the message.
+      if (this.peerAccess) this.peer.onTenantNudge(cid);
       return;
     }
     const m = env.data as ApiMessage;
