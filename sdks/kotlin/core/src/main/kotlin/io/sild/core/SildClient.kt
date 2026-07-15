@@ -85,42 +85,67 @@ class SildClient(
         _state.update { it.copy(activeId = id, loadingThread = true, messages = emptyList()) }
         runCatching { api.listMessages(id) }
             .onSuccess { page ->
+                // A newer open() may have superseded this load while it was in flight —
+                // applying it now would render this thread under another's header and
+                // resolve its authors against the wrong members. Drop the stale result.
+                if (!isActive(id)) return
                 val msgs = page.messages.sortedBy { it.createdAt }.map { mapMessage(it) }
                 _state.update { it.copy(messages = msgs, loadingThread = false, agentName = agentNameOf(msgs) ?: it.agentName) }
             }
-            .onFailure { e -> _state.update { it.copy(loadingThread = false, error = e.message) } }
+            .onFailure { e ->
+                if (!isActive(id)) return
+                _state.update { it.copy(loadingThread = false, error = e.message) }
+            }
     }
 
-    /** Create a support request, open it, then reconnect so its channel is covered. */
-    fun openSupportRequest(onOpened: (String) -> Unit = {}) {
+    /** Create a support request, open it, then reconnect so its channel is covered.
+     *  [onResult] receives the new conversation id, or null if creation failed — so a
+     *  caller (the draft composer) can reset its in-flight state on either outcome. */
+    fun openSupportRequest(onResult: (String?) -> Unit = {}) {
         scope.launch {
             runCatching {
                 val id = api.openSupportRequest()
                 loadConversations()
-                // Await the initial thread load: a send() fired from onOpened must not
+                // Await the initial thread load: a send() fired from onResult must not
                 // race the in-flight listMessages, which would overwrite the new message.
                 loadThread(id)
                 realtime.reconnect()
-                onOpened(id)
-            }.onFailure { e -> _state.update { it.copy(error = e.message) } }
+                id
+            }.onSuccess { onResult(it) }
+                .onFailure { e -> _state.update { it.copy(error = e.message) }; onResult(null) }
         }
     }
 
-    /** Send a message (optionally with attachments) to the active conversation. */
-    fun send(text: String, attachments: List<PendingAttachment> = emptyList()) {
-        val id = _state.value.activeId ?: return
+    /** Send a message (optionally with attachments) to the active conversation.
+     *  [onResult] reports delivery so the caller can clear its draft only once the
+     *  message is safely persisted (false on empty input, no active thread, or a
+     *  transient failure) — never dropping the user's text on a failed send. */
+    fun send(text: String, attachments: List<PendingAttachment> = emptyList(), onResult: (Boolean) -> Unit = {}) {
+        val id = _state.value.activeId ?: return onResult(false)
         val body = text.trim()
-        if (body.isEmpty() && attachments.isEmpty()) return
+        if (body.isEmpty() && attachments.isEmpty()) return onResult(false)
         scope.launch {
             runCatching { api.sendMessage(id, body, UUID.randomUUID().toString(), attachments) }
                 .onSuccess { msg ->
-                    val mapped = mapMessage(msg)
-                    _state.update { s ->
-                        if (s.messages.any { it.id == mapped.id }) s
-                        else s.copy(messages = s.messages + mapped)
+                    // Only append to the thread the send targeted: the user may have
+                    // navigated to another conversation while the POST was in flight.
+                    if (isActive(id)) {
+                        val mapped = mapMessage(msg)
+                        _state.update { s ->
+                            val msgs = if (s.messages.any { it.id == mapped.id }) s.messages
+                                       else s.messages + mapped
+                            s.copy(messages = msgs, error = null)
+                        }
                     }
+                    onResult(true)
                 }
-                .onFailure { e -> _state.update { it.copy(error = e.message) } }
+                // Surface the error only if this is still the open thread — the same
+                // gate as the success path, so a failed send in A can't flash its error
+                // onto B after the user switched. onResult still fires for the caller.
+                .onFailure { e ->
+                    if (isActive(id)) _state.update { it.copy(error = e.message) }
+                    onResult(false)
+                }
         }
     }
 
@@ -129,7 +154,9 @@ class SildClient(
         api.upload(bytes, filename, mimeType)
 
     fun backToList() {
-        _state.update { it.copy(activeId = null, messages = emptyList()) }
+        // Drop a thread-level error too, so a send failure doesn't follow the user
+        // back to the list and resurface on Home.
+        _state.update { it.copy(activeId = null, messages = emptyList(), error = null) }
         scope.launch { loadConversations() }
     }
 
@@ -147,10 +174,14 @@ class SildClient(
 
     // ── realtime ─────────────────────────────────────────────────────────────
 
+    /** Whether [id] is still the open conversation. Guards async results (thread
+     *  loads, sends, realtime events) that may land after the user switched away. */
+    private fun isActive(id: String?): Boolean = _state.value.activeId == id
+
     private fun onEvent(env: RealtimeEnvelope) {
         when (env.type) {
             "message.created" -> {
-                if (env.conversationId != _state.value.activeId) return
+                if (!isActive(env.conversationId)) return
                 val api = env.data?.let { runCatching { json.decodeFromJsonElement(ApiMessage.serializer(), it) }.getOrNull() } ?: return
                 val msg = mapMessage(api)
                 var appended = false
@@ -163,7 +194,7 @@ class SildClient(
                 if (appended && msg.direction == Direction.IN && !msg.system && _state.value.soundOn) onChime()
             }
             "conversation.closed" -> {
-                if (env.conversationId != _state.value.activeId) return
+                if (!isActive(env.conversationId)) return
                 _state.update { s ->
                     s.copy(conversations = s.conversations.map { if (it.id == env.conversationId) it.copy(closed = true) else it })
                 }

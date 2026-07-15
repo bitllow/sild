@@ -87,8 +87,13 @@ class SildMessengerActivity : ComponentActivity() {
                 val close = { finish() }
                 when {
                     !rootIsHome -> ThreadScreen(client, state, draft = false, onBack = close, onCreated = {}, onClose = close)
-                    state.activeId != null -> ThreadScreen(client, state, draft = false, onBack = { client.backToList() }, onCreated = {}, onClose = close)
+                    // Draft takes precedence over activeId: openSupportRequest sets activeId
+                    // before the first message lands, and switching to the created-thread
+                    // branch here would dispose the draft composer (losing its text) if that
+                    // first send then failed. onCreated — fired only on a successful first
+                    // send — is what leaves the draft view.
                     draft -> ThreadScreen(client, state, draft = true, onBack = { draft = false }, onCreated = { draft = false }, onClose = close)
+                    state.activeId != null -> ThreadScreen(client, state, draft = false, onBack = { client.backToList() }, onCreated = {}, onClose = close)
                     else -> HomeScreen(state, onNew = { draft = true }, onOpen = { client.openConversation(it) }, onToggleSound = { client.toggleSound() }, onClose = close)
                 }
             }

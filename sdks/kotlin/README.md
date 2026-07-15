@@ -24,6 +24,9 @@ dependencies {
 }
 ```
 
+Works on `minSdk` 24+ with no extra setup — the SDK avoids `java.time`, so no
+core-library desugaring is required in your app.
+
 ## Quick start
 
 ```kotlin

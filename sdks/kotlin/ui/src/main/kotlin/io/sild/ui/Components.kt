@@ -204,6 +204,13 @@ private fun FileChip(att: Attachment, onOpenUrl: (String) -> Unit) {
     }
 }
 
+// Inline error line shown wherever the client surfaces a failure (Home, thread).
+// One place to change error styling / add a retry affordance later.
+@Composable
+fun SildError(text: String, modifier: Modifier = Modifier) {
+    Text(text, color = LocalSildColors.current.tertiary, fontSize = 12.sp, modifier = modifier)
+}
+
 // SildComposer is the message input row: a pending-attachment tray, an attach
 // button, the text field, and a send button — mirroring the web widget. Picked
 // files show as removable chips (plus an "Uploading…" chip while in flight) and
@@ -212,7 +219,9 @@ private fun FileChip(att: Attachment, onOpenUrl: (String) -> Unit) {
 fun SildComposer(
     pending: List<PendingAttachment>,
     uploading: Int,
-    onSend: (String) -> Unit,
+    // Reports the message to send and a completion callback; the composer clears
+    // the input only once that reports success, so a failed send keeps the draft.
+    onSend: (String, (Boolean) -> Unit) -> Unit,
     onAttach: () -> Unit,
     onRemove: (Int) -> Unit,
     enabled: Boolean = true,
@@ -220,7 +229,8 @@ fun SildComposer(
     val colors = LocalSildColors.current
     val radii = LocalSildRadii.current
     var text by remember { mutableStateOf("") }
-    val canSend = enabled && uploading == 0 && (text.isNotBlank() || pending.isNotEmpty())
+    var sending by remember { mutableStateOf(false) }
+    val canSend = enabled && !sending && uploading == 0 && (text.isNotBlank() || pending.isNotEmpty())
     // .composer: card surface with a top hairline border.
     Column(Modifier.fillMaxWidth().background(colors.card)) {
         HorizontalDivider(color = colors.border)
@@ -280,7 +290,18 @@ fun SildComposer(
                 Box(
                     Modifier.size(34.dp).clip(RoundedCornerShape(radii.btn.dp))
                         .background(if (canSend) colors.brand else colors.brand.copy(alpha = 0.4f))
-                        .clickable(enabled = canSend) { onSend(text.trim()); text = "" },
+                        .clickable(enabled = canSend) {
+                            val sent = text.trim()
+                            sending = true
+                            onSend(sent) { ok ->
+                                sending = false
+                                // Clear only if the field still holds exactly what we sent —
+                                // the input stays editable during the request, so anything the
+                                // user typed meanwhile is theirs to keep (and a failure keeps
+                                // the draft either way).
+                                if (ok && text.trim() == sent) text = ""
+                            }
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(SildIcons.Send, contentDescription = "Send", tint = colors.onBrand, modifier = Modifier.size(18.dp))

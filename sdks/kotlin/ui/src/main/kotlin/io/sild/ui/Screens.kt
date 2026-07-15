@@ -3,6 +3,7 @@ package io.sild.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import java.io.ByteArrayOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -121,9 +122,7 @@ fun HomeScreen(state: SildState, onNew: () -> Unit, onOpen: (String) -> Unit, on
                     }
                 }
             }
-            if (state.error != null) {
-                Text(state.error!!, color = colors.tertiary, fontSize = 12.sp)
-            }
+            if (state.error != null) SildError(state.error!!)
             if (brand.poweredBy) {
                 Text("Powered by Sild", color = colors.tertiary, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
@@ -249,22 +248,47 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
                 modifier = Modifier.fillMaxWidth().background(colors.card).padding(14.dp),
             )
         }
+        // Surface a send/create failure here (the composer keeps the draft on failure),
+        // so a message can't be silently lost with no feedback and no retry.
+        if (state.error != null) {
+            SildError(state.error!!, Modifier.fillMaxWidth().background(colors.card).padding(horizontal = 14.dp))
+        }
         SildComposer(
             pending = pending,
             uploading = uploading,
             enabled = !closed,
             onAttach = { picker.launch("*/*") },
             onRemove = { i -> pending = pending.filterIndexed { j, _ -> j != i } },
-            onSend = { body ->
+            onSend = { body, onResult ->
                 val atts = pending
-                pending = emptyList()
-                if (body.isEmpty() && atts.isEmpty()) return@SildComposer
-                if (draft) {
-                    // Create the support request, then send once it exists (web parity).
-                    client.openSupportRequest { client.send(body, atts) }
-                    onCreated()
+                if (body.isEmpty() && atts.isEmpty()) return@SildComposer onResult(false)
+                // Clear the draft (text + attachments) only once the send is confirmed —
+                // on any failure both are preserved so the user can retry.
+                // On success remove only the attachments we actually sent — the picker
+                // stays live during the request, so any added meanwhile are kept.
+                val done = { ok: Boolean ->
+                    if (ok) pending = pending.filterNot { it in atts }
+                    onResult(ok)
+                }
+                if (draft && state.activeId == null) {
+                    // First attempt: create the support request, then send into it (web
+                    // parity). Leaving the draft view (onCreated) waits for a successful
+                    // send; a creation OR send failure reports done(false) so the composer
+                    // resets and the draft stays put with the error shown below the thread.
+                    client.openSupportRequest { id ->
+                        if (id == null) return@openSupportRequest done(false)
+                        client.send(body, atts) { ok ->
+                            if (ok) onCreated()
+                            done(ok)
+                        }
+                    }
                 } else {
-                    client.send(body, atts)
+                    // An existing thread, or a draft whose conversation was already created
+                    // by a prior attempt whose send failed — (re)send, never re-create.
+                    client.send(body, atts) { ok ->
+                        if (draft && ok) onCreated()
+                        done(ok)
+                    }
                 }
             },
         )
@@ -273,15 +297,44 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
 
 private class PickedFile(val bytes: ByteArray, val name: String, val mime: String)
 
-/** Read a picked content Uri into bytes + display name + mime (off the main thread). */
+// Conservative client-side ceiling on the file we'll buffer into memory. Its job is
+// to reject a huge pick before readBytes() materializes the whole file — otherwise a
+// large enough file OutOfMemoryErrors the process (OOM is an Error the picker's catch
+// won't stop). The backend enforces the authoritative, per-tenant attachment limit.
+private const val MAX_UPLOAD_BYTES = 10L * 1024 * 1024
+
+/** Read a picked content Uri into bytes + display name + mime (off the main thread).
+ *  Throws if the file exceeds [MAX_UPLOAD_BYTES] (caller drops it), so an oversized
+ *  pick is rejected before it can be buffered. */
 private fun readFile(context: Context, uri: Uri): PickedFile {
     val cr = context.contentResolver
-    val bytes = cr.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
-    val mime = cr.getType(uri) ?: "application/octet-stream"
     var name = "file"
-    cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-        val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (idx >= 0 && c.moveToFirst()) c.getString(idx)?.let { name = it }
+    var size: Long = -1
+    cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+        if (c.moveToFirst()) {
+            val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (ni >= 0) c.getString(ni)?.let { name = it }
+            val si = c.getColumnIndex(OpenableColumns.SIZE)
+            if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+        }
     }
+    // Reject on reported size first (cheap early-out), but don't trust it: SIZE is
+    // optional and can be wrong. Bound the actual read too, so a provider that reports
+    // no/low size still can't OOM us — we stop the moment the stream passes the cap.
+    require(size < 0 || size <= MAX_UPLOAD_BYTES) { "file too large" }
+    val bytes = cr.openInputStream(uri)?.use { input ->
+        val out = ByteArrayOutputStream()
+        val chunk = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val n = input.read(chunk)
+            if (n < 0) break
+            total += n
+            require(total <= MAX_UPLOAD_BYTES) { "file too large" }
+            out.write(chunk, 0, n)
+        }
+        out.toByteArray()
+    } ?: ByteArray(0)
+    val mime = cr.getType(uri) ?: "application/octet-stream"
     return PickedFile(bytes, name, mime)
 }

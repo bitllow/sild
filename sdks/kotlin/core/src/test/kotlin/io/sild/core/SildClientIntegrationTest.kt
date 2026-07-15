@@ -1,10 +1,12 @@
 package io.sild.core
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -46,7 +48,10 @@ class SildClientIntegrationTest {
             val body = "hello ${uid("m")}"
             client.openSupportRequest()
             awaitUntil(get = { client.state.value }) { it.activeId != null }
-            client.send(body)
+            // A successful send reports true (the composer clears the draft on this).
+            val sendResult = CompletableDeferred<Boolean>()
+            client.send(body) { sendResult.complete(it) }
+            assertTrue(withTimeout(10_000) { sendResult.await() }, "send should report success")
             // Our own message is outgoing and appears in the thread.
             val s = awaitUntil(get = { client.state.value }) { st -> st.messages.any { it.body == body } }
             val sent = s.messages.first { it.body == body }
