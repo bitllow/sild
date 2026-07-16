@@ -21,6 +21,10 @@ data class SildConfig(
     /** Per-participant metadata attached when this user opens a support request
      *  (becomes conversation_members.metadata, shown in the inbox). */
     val metadata: Map<String, String> = emptyMap(),
+    /** Client-side ceiling (bytes) on a picked attachment before it is buffered into
+     *  memory — a safety bound against OOM, NOT the business limit (the backend enforces
+     *  the authoritative per-tenant max). Raise it to match a larger tenant limit. */
+    val uploadSizeLimitBytes: Long = 10L * 1024 * 1024,
 ) {
     /** baseUrl with any trailing slash stripped (matches the web client). */
     val base: String get() = baseUrl.trimEnd('/')

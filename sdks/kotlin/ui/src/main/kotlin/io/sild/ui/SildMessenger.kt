@@ -87,13 +87,23 @@ class SildMessengerActivity : ComponentActivity() {
                 val close = { finish() }
                 when {
                     !rootIsHome -> ThreadScreen(client, state, draft = false, onBack = close, onCreated = {}, onClose = close)
-                    // Draft takes precedence over activeId: openSupportRequest sets activeId
-                    // before the first message lands, and switching to the created-thread
-                    // branch here would dispose the draft composer (losing its text) if that
-                    // first send then failed. onCreated — fired only on a successful first
-                    // send — is what leaves the draft view.
-                    draft -> ThreadScreen(client, state, draft = true, onBack = { draft = false }, onCreated = { draft = false }, onClose = close)
-                    state.activeId != null -> ThreadScreen(client, state, draft = false, onBack = { client.backToList() }, onCreated = {}, onClose = close)
+                    // ONE ThreadScreen call site spans both draft and created states so its
+                    // composer keeps its remembered text/attachments across the transition.
+                    // openSupportRequest sets activeId before the first send finishes, and
+                    // onCreated only flips draft=false on success; a separate call site per
+                    // state would dispose the composer and lose whatever the user typed while
+                    // that first send was in flight (or the whole draft if the send failed).
+                    draft || state.activeId != null -> ThreadScreen(
+                        client, state,
+                        draft = draft,
+                        // Leave to the list in one press: backToList clears activeId AND
+                        // cancels any in-flight support-request creation, so a conversation
+                        // created (or still creating) for this draft can't keep us here or
+                        // reopen the thread after we've left.
+                        onBack = { draft = false; client.backToList() },
+                        onCreated = { draft = false },
+                        onClose = close,
+                    )
                     else -> HomeScreen(state, onNew = { draft = true }, onOpen = { client.openConversation(it) }, onToggleSound = { client.toggleSound() }, onClose = close)
                 }
             }

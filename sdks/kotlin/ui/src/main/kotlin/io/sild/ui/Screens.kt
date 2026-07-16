@@ -198,7 +198,7 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
             uploading++
             scope.launch {
                 try {
-                    val file = withContext(Dispatchers.IO) { readFile(context, uri) }
+                    val file = withContext(Dispatchers.IO) { readFile(context, uri, client.uploadSizeLimitBytes) }
                     val att = client.upload(file.bytes, file.name, file.mime)
                     pending = pending + att
                 } catch (_: Exception) {
@@ -297,16 +297,11 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
 
 private class PickedFile(val bytes: ByteArray, val name: String, val mime: String)
 
-// Conservative client-side ceiling on the file we'll buffer into memory. Its job is
-// to reject a huge pick before readBytes() materializes the whole file — otherwise a
-// large enough file OutOfMemoryErrors the process (OOM is an Error the picker's catch
-// won't stop). The backend enforces the authoritative, per-tenant attachment limit.
-private const val MAX_UPLOAD_BYTES = 10L * 1024 * 1024
-
 /** Read a picked content Uri into bytes + display name + mime (off the main thread).
- *  Throws if the file exceeds [MAX_UPLOAD_BYTES] (caller drops it), so an oversized
- *  pick is rejected before it can be buffered. */
-private fun readFile(context: Context, uri: Uri): PickedFile {
+ *  Throws if the file exceeds [maxBytes] (caller drops it), so an oversized pick is
+ *  rejected before it can be buffered. [maxBytes] is a client-side memory bound (see
+ *  SildConfig.uploadSizeLimitBytes), not the backend's authoritative per-tenant limit. */
+private fun readFile(context: Context, uri: Uri, maxBytes: Long): PickedFile {
     val cr = context.contentResolver
     var name = "file"
     var size: Long = -1
@@ -321,7 +316,7 @@ private fun readFile(context: Context, uri: Uri): PickedFile {
     // Reject on reported size first (cheap early-out), but don't trust it: SIZE is
     // optional and can be wrong. Bound the actual read too, so a provider that reports
     // no/low size still can't OOM us — we stop the moment the stream passes the cap.
-    require(size < 0 || size <= MAX_UPLOAD_BYTES) { "file too large" }
+    require(size < 0 || size <= maxBytes) { "file too large" }
     val bytes = cr.openInputStream(uri)?.use { input ->
         val out = ByteArrayOutputStream()
         val chunk = ByteArray(64 * 1024)
@@ -330,7 +325,7 @@ private fun readFile(context: Context, uri: Uri): PickedFile {
             val n = input.read(chunk)
             if (n < 0) break
             total += n
-            require(total <= MAX_UPLOAD_BYTES) { "file too large" }
+            require(total <= maxBytes) { "file too large" }
             out.write(chunk, 0, n)
         }
         out.toByteArray()

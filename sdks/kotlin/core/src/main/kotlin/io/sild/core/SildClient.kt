@@ -1,6 +1,8 @@
 package io.sild.core
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,8 +28,16 @@ class SildClient(
     private val selfId = cfg.userId
     private var activeNames: Map<String, String> = emptyMap()
 
+    // The in-flight support-request creation, so leaving the draft (backToList) can
+    // cancel it — otherwise its activeId update would reopen the thread after the user
+    // navigated away.
+    private var pendingOpen: Job? = null
+
     private val _state = MutableStateFlow(SildState())
     val state: StateFlow<SildState> = _state.asStateFlow()
+
+    /** Configured client-side attachment size ceiling (bytes); see [SildConfig]. */
+    val uploadSizeLimitBytes: Long get() = cfg.uploadSizeLimitBytes
 
     private val realtime = SildRealtime(
         cfg = cfg,
@@ -66,6 +76,10 @@ class SildClient(
     /** GET /me/conversations → rows, with peer derivation matching the web client. */
     suspend fun loadConversations() {
         val list = runCatching { api.listConversations() }.getOrElse {
+            // Propagate cancellation so a caller cancelled mid-load (e.g. openSupportRequest
+            // after backToList) actually stops, rather than falling through to loadThread
+            // and re-setting activeId — which would reopen the thread the user just left.
+            if (it is CancellationException) throw it
             _state.update { s -> s.copy(error = it.message) }; return
         }
         val convs = list.map { toConversation(it) }
@@ -93,6 +107,7 @@ class SildClient(
                 _state.update { it.copy(messages = msgs, loadingThread = false, agentName = agentNameOf(msgs) ?: it.agentName) }
             }
             .onFailure { e ->
+                if (e is CancellationException) throw e // cancelled (left the draft) — not an error
                 if (!isActive(id)) return
                 _state.update { it.copy(loadingThread = false, error = e.message) }
             }
@@ -102,7 +117,8 @@ class SildClient(
      *  [onResult] receives the new conversation id, or null if creation failed — so a
      *  caller (the draft composer) can reset its in-flight state on either outcome. */
     fun openSupportRequest(onResult: (String?) -> Unit = {}) {
-        scope.launch {
+        pendingOpen?.cancel()
+        pendingOpen = scope.launch {
             runCatching {
                 val id = api.openSupportRequest()
                 loadConversations()
@@ -112,7 +128,12 @@ class SildClient(
                 realtime.reconnect()
                 id
             }.onSuccess { onResult(it) }
-                .onFailure { e -> _state.update { it.copy(error = e.message) }; onResult(null) }
+                .onFailure { e ->
+                    // Cancelled = the user left the draft; don't surface an error or report.
+                    if (e is CancellationException) throw e
+                    _state.update { it.copy(error = e.message) }
+                    onResult(null)
+                }
         }
     }
 
@@ -154,8 +175,10 @@ class SildClient(
         api.upload(bytes, filename, mimeType)
 
     fun backToList() {
-        // Drop a thread-level error too, so a send failure doesn't follow the user
-        // back to the list and resurface on Home.
+        // Cancel an in-flight support-request creation so its activeId update can't
+        // reopen the thread after the user has left. Drop a thread-level error too, so a
+        // send failure doesn't follow the user back to the list and resurface on Home.
+        pendingOpen?.cancel()
         _state.update { it.copy(activeId = null, messages = emptyList(), error = null) }
         scope.launch { loadConversations() }
     }
