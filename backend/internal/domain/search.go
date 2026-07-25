@@ -40,6 +40,9 @@ type SearchInput struct {
 	Status   *models.ConversationStatus
 	Assignee string
 	ConvRole string
+	// IncludeInternal permits internal notes to match and be quoted. Only an
+	// agent-class principal sets it (§5.6).
+	IncludeInternal bool
 }
 
 // Search executes a query against hot data only (§4.3). The policy scope decides
@@ -73,6 +76,12 @@ func (s *SearchService) Search(ctx context.Context, tenantID string, scope polic
 		q.Role = &v
 	}
 	q.Kinds = searchKinds(scope, in.Kind)
+	// The whole ceiling, not just kinds.
+	if pt, ok := scope.Participant(); ok {
+		q.Participant = pt
+	}
+	q.RequiresAssignment = scope.RequiresAssignment()
+	q.IncludeInternal = in.IncludeInternal
 	// Only a peer-scoped search widens to raw metadata; support search stays
 	// bound to the tenant's searchable_metadata_keys allowlist.
 	q.MatchRawMetadata = len(q.Kinds) == 1 && q.Kinds[0] == models.KindPeer

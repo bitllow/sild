@@ -3,7 +3,6 @@ package api
 import (
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,10 +154,10 @@ func (h *Handler) localUploadGet(c *gin.Context) {
 }
 
 // localObjectPath resolves an object key to an on-disk path, rejecting traversal.
+// The key is used verbatim, never unescaped: storage.localBucket.Put writes
+// server-side objects (email attachments) at the raw key, so decoding here would
+// look for a different file than ingestion created.
 func (h *Handler) localObjectPath(key string) (string, bool) {
-	if decoded, err := url.PathUnescape(key); err == nil {
-		key = decoded
-	}
 	key = strings.TrimPrefix(key, "/")
 	clean := filepath.Clean("/" + key) // collapses any ".."
 	base := filepath.Join(h.cfg.Storage.LocalDir, "objects")

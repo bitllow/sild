@@ -32,9 +32,10 @@ func (h *Handler) listConversations(c *gin.Context) {
 	}
 
 	in := domain.ListConversationsInput{
-		Query:         q,
-		Search:        c.Query("q"),
-		CallerActorID: adminIDOf(c),
+		Query:           q,
+		Search:          c.Query("q"),
+		CallerActorID:   adminIDOf(c),
+		IncludeInternal: apiutil.IsAgent(c),
 	}
 	// Only messenger surfaces render unread counts; the queue shows assignment
 	// state and would pay for the extra query.

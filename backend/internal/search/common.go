@@ -31,6 +31,18 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	if len(q.Kinds) > 0 {
 		b = b.Where("c.kind IN ?", q.Kinds)
 	}
+	// The rest of the authorization ceiling. Applied here, not after hydration:
+	// filtering a page of already-limited ids yields sparse pages and hides later
+	// matches.
+	if q.Participant != "" {
+		b = b.Where(`EXISTS (SELECT 1 FROM conversation_members pm
+			WHERE pm.conversation_id = c.id AND pm.left_at IS NULL
+			  AND pm.external_user_id = ?)`, q.Participant)
+	}
+	if q.RequiresAssignment {
+		b = b.Where(`c.kind <> 'support' OR c.archived_at IS NOT NULL
+			OR EXISTS (SELECT 1 FROM assignments ra WHERE ra.conversation_id = c.id)`)
+	}
 	if q.Status != nil {
 		b = b.Where("c.status = ?", *q.Status)
 	}
@@ -53,6 +65,13 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 		// A keyword matches a message body, OR — for any active member — the
 		// materialized member search text (the tenant's configured searchable
 		// metadata keys) or the participant's external id.
+		bodyCond := existsLike("messages", "msg", "msg.body", op)
+		if !q.IncludeInternal {
+			// A note the caller cannot read must not be findable either (§5.6).
+			bodyCond = `EXISTS (SELECT 1 FROM messages msg
+				WHERE msg.conversation_id = c.id AND msg.visibility <> 'internal'
+				  AND ` + wrap("msg.body", op) + " " + op + " ?)"
+		}
 		memberInner := wrap("m.member_search_text", op) + " " + op + " ? OR " +
 			wrap("m.external_user_id", op) + " " + op + " ?"
 		args := []any{like(kw), like(kw), like(kw)} // body, member_search_text, external_user_id
@@ -66,7 +85,7 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 			args = []any{like(kw), like(kw), like(kw), like(kw)} // + raw metadata
 		}
 		memberCond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" + memberInner + "))"
-		cond := "(" + existsLike("messages", "msg", "msg.body", op) + " OR " + memberCond + ")"
+		cond := "(" + bodyCond + " OR " + memberCond + ")"
 		b = b.Where(cond, args...)
 	}
 	return b
@@ -142,7 +161,7 @@ func collectHits(ctx context.Context, db, filtered *gorm.DB, q Query, dialect co
 	for _, id := range ids {
 		hit := ConversationHit{ConversationID: id}
 		if len(q.Keywords) > 0 {
-			hit.Snippet = snippet(ctx, db, id, q.Keywords[0], op)
+			hit.Snippet = snippet(ctx, db, id, q.Keywords[0], op, q.IncludeInternal)
 		}
 		res.Conversations = append(res.Conversations, hit)
 	}
@@ -150,10 +169,13 @@ func collectHits(ctx context.Context, db, filtered *gorm.DB, q Query, dialect co
 }
 
 // snippet returns one matching message body for the result row.
-func snippet(ctx context.Context, db *gorm.DB, convID, kw, op string) string {
+func snippet(ctx context.Context, db *gorm.DB, convID, kw, op string, includeInternal bool) string {
 	var body string
-	db.WithContext(ctx).Table("messages").
-		Where("conversation_id = ? AND "+wrap("body", op)+" "+op+" ?", convID, like(kw)).
-		Order("id DESC").Limit(1).Pluck("body", &body)
+	q := db.WithContext(ctx).Table("messages").
+		Where("conversation_id = ? AND "+wrap("body", op)+" "+op+" ?", convID, like(kw))
+	if !includeInternal {
+		q = q.Where("visibility <> ?", "internal")
+	}
+	q.Order("id DESC").Limit(1).Pluck("body", &body)
 	return body
 }

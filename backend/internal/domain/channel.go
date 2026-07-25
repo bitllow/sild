@@ -45,29 +45,29 @@ func (s *Service) GetEmailChannel(ctx context.Context, tenantID string) (*EmailC
 
 // UpdateEmailChannel applies the toggles / sender fields set in the Channels UI.
 func (s *Service) UpdateEmailChannel(ctx context.Context, tenantID string, p EmailChannelUpdate, expectVersion string) (*EmailChannel, error) {
-	cfg, err := s.ensureEmailConfig(ctx, tenantID)
-	if err != nil {
+	if _, err := s.ensureEmailConfig(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	// Compared against the state this write is based on, before applying the
-	// patch, so a concurrent edit from the same version loses.
-	if !versionMatches(expectVersion, Version(emailConfigView(cfg))) {
-		return nil, conflict(CodeStaleVersion, "the email channel changed since you read it")
-	}
-	if p.AutoReply != nil {
-		cfg.AutoReply = *p.AutoReply
-	}
-	if p.SpamFilter != nil {
-		cfg.SpamFilter = *p.SpamFilter
-	}
-	if p.FromName != nil {
-		cfg.FromName = *p.FromName
-	}
-	if p.FromAddress != nil {
-		cfg.FromAddress = *p.FromAddress
-	}
-	if err := s.store.Tenants().SetEmailConfig(ctx, cfg); err != nil {
-		return nil, err
+
+	// Re-read, verify and write in ONE transaction. Verifying outside it leaves a
+	// window where two edits from the same version both pass.
+	var cfg *models.TenantEmailConfig
+	if err := s.store.Tx(ctx, func(tx store.Store) error {
+		current, err := tx.Tenants().GetEmailConfig(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if !versionMatches(expectVersion, Version(emailConfigView(current))) {
+			return conflict(CodeStaleVersion, "the email channel changed since you read it")
+		}
+		apply(current, p)
+		if err := tx.Tenants().SetEmailConfig(ctx, current); err != nil {
+			return err
+		}
+		cfg = current
+		return nil
+	}); err != nil {
+		return nil, mapStoreErr(err)
 	}
 	return s.emailChannelView(cfg), nil
 }
@@ -121,4 +121,20 @@ func (s *Service) EmailChannelVersion(ctx context.Context, tenantID string) (str
 		return "", err
 	}
 	return Version(emailConfigView(cfg)), nil
+}
+
+// apply folds a patch onto a config; absent fields are left alone.
+func apply(cfg *models.TenantEmailConfig, p EmailChannelUpdate) {
+	if p.AutoReply != nil {
+		cfg.AutoReply = *p.AutoReply
+	}
+	if p.SpamFilter != nil {
+		cfg.SpamFilter = *p.SpamFilter
+	}
+	if p.FromName != nil {
+		cfg.FromName = *p.FromName
+	}
+	if p.FromAddress != nil {
+		cfg.FromAddress = *p.FromAddress
+	}
 }

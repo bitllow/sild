@@ -24,6 +24,8 @@ type ListConversationsInput struct {
 	IncludeUnread bool
 	// UnreadFor is the participant unread counts are computed for.
 	UnreadFor string
+	// IncludeInternal permits internal notes to match a search (§5.6).
+	IncludeInternal bool
 }
 
 // ConversationPage is a rendered page plus the paging position.
@@ -122,7 +124,8 @@ func (s *Service) searchConversations(ctx context.Context, tenantID string, scop
 	res, err := s.search.Search(ctx, tenantID, scope, SearchInput{
 		Query: in.Search, CallerActorID: in.CallerActorID, Kind: q.Kind,
 		Status: q.Status, Assignee: q.AssigneeActorID, ConvRole: q.ConvRole,
-		Before: before, Limit: limit + 1, // +1 probes for another page
+		IncludeInternal: in.IncludeInternal,
+		Before:          before, Limit: limit + 1, // +1 probes for another page
 	})
 	if err != nil {
 		return ConversationPage{}, err
