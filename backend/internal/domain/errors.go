@@ -37,6 +37,7 @@ const (
 	CodeConversationClosed      = "conversation_closed"
 	CodeLastMemberRemoval       = "last_member_removal"
 	CodePeerNotQueueable        = "peer_not_queueable"
+	CodeStaleVersion            = "stale_version"
 )
 
 func conflict(code, msg string) error { return &ConflictError{Code: code, Msg: msg} }

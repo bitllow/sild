@@ -44,10 +44,15 @@ func (s *Service) GetEmailChannel(ctx context.Context, tenantID string) (*EmailC
 }
 
 // UpdateEmailChannel applies the toggles / sender fields set in the Channels UI.
-func (s *Service) UpdateEmailChannel(ctx context.Context, tenantID string, p EmailChannelUpdate) (*EmailChannel, error) {
+func (s *Service) UpdateEmailChannel(ctx context.Context, tenantID string, p EmailChannelUpdate, expectVersion string) (*EmailChannel, error) {
 	cfg, err := s.ensureEmailConfig(ctx, tenantID)
 	if err != nil {
 		return nil, err
+	}
+	// Compared against the state this write is based on, before applying the
+	// patch, so a concurrent edit from the same version loses.
+	if !versionMatches(expectVersion, Version(emailConfigView(cfg))) {
+		return nil, conflict(CodeStaleVersion, "the email channel changed since you read it")
 	}
 	if p.AutoReply != nil {
 		cfg.AutoReply = *p.AutoReply
@@ -97,4 +102,23 @@ func (s *Service) ensureEmailConfig(ctx context.Context, tenantID string) (*mode
 		}
 	}
 	return cfg, nil
+}
+
+// emailConfigView is the value an email-channel version is computed over —
+// independent of the HTTP rendering, so both sides agree.
+func emailConfigView(cfg *models.TenantEmailConfig) map[string]any {
+	return map[string]any{
+		"auto_reply": cfg.AutoReply, "spam_filter": cfg.SpamFilter,
+		"from_name": cfg.FromName, "from_address": cfg.FromAddress,
+		"verified": cfg.Verified, "inbound_token": cfg.InboundToken,
+	}
+}
+
+// EmailChannelVersion is the current version of a tenant's email channel.
+func (s *Service) EmailChannelVersion(ctx context.Context, tenantID string) (string, error) {
+	cfg, err := s.ensureEmailConfig(ctx, tenantID)
+	if err != nil {
+		return "", err
+	}
+	return Version(emailConfigView(cfg)), nil
 }

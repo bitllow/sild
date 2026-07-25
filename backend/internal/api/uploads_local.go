@@ -3,6 +3,7 @@ package api
 import (
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,9 +51,26 @@ func (h *Handler) localSigner() (*storage.LocalSigner, bool) {
 	return b.Signer(), true
 }
 
+// localObjectPrefix is the route prefix the object key follows.
+const localObjectPrefix = "/v1/uploads/local/"
+
+// signedObjectKey is the key exactly as stored and signed.
+//
+// Object keys are URL-escaped at mint (storage.NewObjectKey escapes the
+// filename), so a key for "my photo.png" contains %20. gin's c.Param decodes
+// that, which would not match the signature or the stored key — so read the raw
+// escaped path instead.
+func signedObjectKey(c *gin.Context) string {
+	raw := c.Request.URL.EscapedPath()
+	if i := strings.Index(raw, localObjectPrefix); i >= 0 {
+		return strings.TrimPrefix(raw[i+len(localObjectPrefix):], "/")
+	}
+	return strings.TrimPrefix(c.Param("objectKey"), "/")
+}
+
 // authorizeSigned resolves the signed grant and checks it against policy.
 func (h *Handler) authorizeSigned(c *gin.Context, method string, action policy.Action) (string, bool) {
-	key := strings.TrimPrefix(c.Param("objectKey"), "/")
+	key := signedObjectKey(c)
 	p, ok := h.signedPrincipal(c, method, key)
 	if !ok {
 		httpx.Unauthorized(c, "invalid or expired upload signature")
@@ -138,6 +156,9 @@ func (h *Handler) localUploadGet(c *gin.Context) {
 
 // localObjectPath resolves an object key to an on-disk path, rejecting traversal.
 func (h *Handler) localObjectPath(key string) (string, bool) {
+	if decoded, err := url.PathUnescape(key); err == nil {
+		key = decoded
+	}
 	key = strings.TrimPrefix(key, "/")
 	clean := filepath.Clean("/" + key) // collapses any ".."
 	base := filepath.Join(h.cfg.Storage.LocalDir, "objects")

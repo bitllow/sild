@@ -21,6 +21,11 @@ func Fail(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrForbidden):
 		httpx.Forbidden(c, "forbidden")
 	case errors.As(err, &conflict):
+		// A failed precondition is 412; other conflicts are 409.
+		if conflict.Code == domain.CodeStaleVersion {
+			httpx.PreconditionFailed(c, conflict.Msg)
+			return
+		}
 		httpx.Error(c, http.StatusConflict, conflict.Code, conflict.Msg)
 	case errors.Is(err, domain.ErrConflict):
 		httpx.Conflict(c, "operation would leave the conversation in an invalid state")

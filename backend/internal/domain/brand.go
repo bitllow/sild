@@ -229,7 +229,7 @@ func (s *Service) PublicBrand(ctx context.Context, appID string) (Brand, error) 
 // the Appearance UI. activeID selects the active brand (falls back to the first).
 // Every config is normalized; empty input is rejected so a tenant always has at
 // least one brand.
-func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Brand, activeID string) ([]Brand, error) {
+func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Brand, activeID, expectVersion string) ([]Brand, error) {
 	if len(brands) == 0 {
 		return nil, invalid("at least one brand is required")
 	}
@@ -267,7 +267,18 @@ func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Bran
 	if !activeSet {
 		rows[0].Active = true // activeID matched nothing — default to the first
 	}
-	if err := s.store.Brands().Replace(ctx, tenantID, rows); err != nil {
+	// Verify and write in one transaction: checking outside it leaves a window
+	// where two writes from the same version both pass.
+	if err := s.store.Tx(ctx, func(tx store.Store) error {
+		current, err := tx.Brands().List(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if !versionMatches(expectVersion, Version(brandModelsView(current))) {
+			return conflict(CodeStaleVersion, "the brand set changed since you read it")
+		}
+		return tx.Brands().Replace(ctx, tenantID, rows)
+	}); err != nil {
 		return nil, err
 	}
 	// Promote any newly-referenced asset uploads from pending → completed so they
@@ -307,4 +318,26 @@ func (s *Service) seedDefaultBrand(ctx context.Context, tenantID string) (Brand,
 		return Brand{}, err
 	}
 	return toBrand(row), nil
+}
+
+// brandModelsView is the value a brand-set version is computed over. It must be
+// stable and independent of the HTTP rendering, so both sides agree.
+func brandModelsView(rows []models.Brand) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, b := range rows {
+		out = append(out, map[string]any{
+			"id": b.ID, "name": b.Name, "active": b.Active,
+			"position": b.Position, "config": string(b.Config),
+		})
+	}
+	return out
+}
+
+// BrandsVersion is the current version of a tenant's brand set.
+func (s *Service) BrandsVersion(ctx context.Context, tenantID string) (string, error) {
+	rows, err := s.store.Brands().List(ctx, tenantID)
+	if err != nil {
+		return "", mapStoreErr(err)
+	}
+	return Version(brandModelsView(rows)), nil
 }

@@ -20,9 +20,10 @@ func (h *Handler) getEmailChannel(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	view := emailChannelView(ch)
-	apiutil.SetETag(c, view)
-	c.JSON(http.StatusOK, view)
+	if v, err := h.svc.EmailChannelVersion(c.Request.Context(), apiutil.Tenant(c)); err == nil {
+		c.Header("ETag", v)
+	}
+	c.JSON(http.StatusOK, emailChannelView(ch))
 }
 
 // updateEmailChannel applies the Channels-UI toggles / sender fields. Absent
@@ -37,20 +38,21 @@ func (h *Handler) updateEmailChannel(c *gin.Context) {
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	current, err := h.svc.GetEmailChannel(c.Request.Context(), apiutil.Tenant(c))
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	if !apiutil.RequirePreconditionMatch(c, emailChannelView(current)) {
+	expect, ok := apiutil.RequireIfMatch(c)
+	if !ok {
 		return
 	}
 	ch, err := h.svc.UpdateEmailChannel(c.Request.Context(), apiutil.Tenant(c), domain.EmailChannelUpdate{
 		AutoReply: req.AutoReply, SpamFilter: req.SpamFilter, FromName: req.FromName, FromAddress: req.FromAddress,
-	})
+	}, expect)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
+	}
+	// Stamp the NEW version: without it a client stores null and falls back to
+	// If-Match: * on every later edit, silently losing the protection.
+	if v, err := h.svc.EmailChannelVersion(c.Request.Context(), apiutil.Tenant(c)); err == nil {
+		c.Header("ETag", v)
 	}
 	c.JSON(http.StatusOK, emailChannelView(ch))
 }

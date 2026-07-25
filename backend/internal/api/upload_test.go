@@ -76,8 +76,10 @@ func mustPath(t *testing.T, raw string) string {
 	if err != nil {
 		t.Fatalf("parse url %q: %v", raw, err)
 	}
+	// EscapedPath, not Path: an object key keeps its %-escapes, and decoding them
+	// here would build a different (and malformed) request than the client sends.
 	if u.RawQuery != "" {
-		return u.Path + "?" + u.RawQuery
+		return u.EscapedPath() + "?" + u.RawQuery
 	}
-	return u.Path
+	return u.EscapedPath()
 }

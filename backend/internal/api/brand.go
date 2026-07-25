@@ -49,9 +49,10 @@ func (h *Handler) listBrands(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	view := brandsView(brands)
-	apiutil.SetETag(c, view)
-	c.JSON(http.StatusOK, view)
+	if v, err := h.svc.BrandsVersion(c.Request.Context(), apiutil.Tenant(c)); err == nil {
+		c.Header("ETag", v)
+	}
+	c.JSON(http.StatusOK, brandsView(brands))
 }
 
 // saveBrands replaces the tenant's whole brand set with the staged edits
@@ -64,28 +65,26 @@ func (h *Handler) saveBrands(c *gin.Context) {
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	// PUT replaces the whole set, so a concurrent edit would be discarded
-	// silently without a precondition.
-	current, err := h.svc.ListBrands(c.Request.Context(), apiutil.Tenant(c))
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	if !apiutil.RequirePreconditionMatch(c, brandsView(current)) {
+	// PUT replaces the whole set, so a concurrent edit would be discarded silently
+	// without a precondition. The comparison happens inside SaveBrands' write
+	// transaction; this only insists the client named a version.
+	expect, ok := apiutil.RequireIfMatch(c)
+	if !ok {
 		return
 	}
 	brands := make([]domain.Brand, 0, len(req.Brands))
 	for _, b := range req.Brands {
 		brands = append(brands, domain.Brand{ID: b.ID, Name: b.Name, Config: b.Config})
 	}
-	saved, err := h.svc.SaveBrands(c.Request.Context(), apiutil.Tenant(c), brands, req.ActiveBrandID)
+	saved, err := h.svc.SaveBrands(c.Request.Context(), apiutil.Tenant(c), brands, req.ActiveBrandID, expect)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	view := brandsView(saved)
-	apiutil.SetETag(c, view)
-	c.JSON(http.StatusOK, view)
+	if v, err := h.svc.BrandsVersion(c.Request.Context(), apiutil.Tenant(c)); err == nil {
+		c.Header("ETag", v)
+	}
+	c.JSON(http.StatusOK, brandsView(saved))
 }
 
 // getActiveBrand: GET /v1/brands/active — the active brand for any messenger
