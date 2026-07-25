@@ -35,6 +35,15 @@ type EmailChannelUpdate struct {
 // GetEmailChannel returns the tenant's email-channel config, minting a
 // forwarding token on first access so the Channels UI always has an address to
 // display.
+// GetEmailChannelVersioned returns the channel and the version OF THAT snapshot.
+func (s *Service) GetEmailChannelVersioned(ctx context.Context, tenantID string) (*EmailChannel, string, error) {
+	cfg, err := s.ensureEmailConfig(ctx, tenantID)
+	if err != nil {
+		return nil, "", err
+	}
+	return s.emailChannelView(cfg), Version(emailConfigView(cfg)), nil
+}
+
 func (s *Service) GetEmailChannel(ctx context.Context, tenantID string) (*EmailChannel, error) {
 	cfg, err := s.ensureEmailConfig(ctx, tenantID)
 	if err != nil {
@@ -44,9 +53,9 @@ func (s *Service) GetEmailChannel(ctx context.Context, tenantID string) (*EmailC
 }
 
 // UpdateEmailChannel applies the toggles / sender fields set in the Channels UI.
-func (s *Service) UpdateEmailChannel(ctx context.Context, tenantID string, p EmailChannelUpdate, expectVersion string) (*EmailChannel, error) {
+func (s *Service) UpdateEmailChannel(ctx context.Context, tenantID string, p EmailChannelUpdate, expectVersion string) (*EmailChannel, string, error) {
 	if _, err := s.ensureEmailConfig(ctx, tenantID); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Re-read, verify and write in ONE transaction. Verifying outside it leaves a
@@ -67,9 +76,9 @@ func (s *Service) UpdateEmailChannel(ctx context.Context, tenantID string, p Ema
 		cfg = current
 		return nil
 	}); err != nil {
-		return nil, mapStoreErr(err)
+		return nil, "", mapStoreErr(err)
 	}
-	return s.emailChannelView(cfg), nil
+	return s.emailChannelView(cfg), Version(emailConfigView(cfg)), nil
 }
 
 func (s *Service) emailChannelView(cfg *models.TenantEmailConfig) *EmailChannel {
@@ -112,15 +121,6 @@ func emailConfigView(cfg *models.TenantEmailConfig) map[string]any {
 		"from_name": cfg.FromName, "from_address": cfg.FromAddress,
 		"verified": cfg.Verified, "inbound_token": cfg.InboundToken,
 	}
-}
-
-// EmailChannelVersion is the current version of a tenant's email channel.
-func (s *Service) EmailChannelVersion(ctx context.Context, tenantID string) (string, error) {
-	cfg, err := s.ensureEmailConfig(ctx, tenantID)
-	if err != nil {
-		return "", err
-	}
-	return Version(emailConfigView(cfg)), nil
 }
 
 // apply folds a patch onto a config; absent fields are left alone.

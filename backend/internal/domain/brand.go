@@ -274,7 +274,7 @@ func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Bran
 		if err != nil {
 			return err
 		}
-		if !versionMatches(expectVersion, Version(brandModelsView(current))) {
+		if !versionMatches(expectVersion, brandsVersion(toBrands(current))) {
 			return conflict(CodeStaleVersion, "the brand set changed since you read it")
 		}
 		return tx.Brands().Replace(ctx, tenantID, rows)
@@ -320,24 +320,39 @@ func (s *Service) seedDefaultBrand(ctx context.Context, tenantID string) (Brand,
 	return toBrand(row), nil
 }
 
-// brandModelsView is the value a brand-set version is computed over. It must be
-// stable and independent of the HTTP rendering, so both sides agree.
-func brandModelsView(rows []models.Brand) []map[string]any {
-	out := make([]map[string]any, 0, len(rows))
-	for _, b := range rows {
-		out = append(out, map[string]any{
-			"id": b.ID, "name": b.Name, "active": b.Active,
-			"position": b.Position, "config": string(b.Config),
-		})
+// brandsVersion is the version of a brand set — one definition, used by the read
+// and by the in-transaction precondition, so the two cannot disagree. Computed
+// over identity and ordering only: resolved asset URLs are signed per request
+// and would make the version change on every read.
+func brandsVersion(brands []Brand) string {
+	out := make([]map[string]any, 0, len(brands))
+	for _, b := range brands {
+		out = append(out, map[string]any{"id": b.ID, "name": b.Name, "active": b.Active})
+	}
+	return Version(out)
+}
+
+// toBrands maps rows for versioning — Active/ID/Name only, so no asset
+// resolution is needed.
+func toBrands(rows []models.Brand) []Brand {
+	out := make([]Brand, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toBrand(r))
 	}
 	return out
 }
 
-// BrandsVersion is the current version of a tenant's brand set.
-func (s *Service) BrandsVersion(ctx context.Context, tenantID string) (string, error) {
-	rows, err := s.store.Brands().List(ctx, tenantID)
+// ListBrandsVersioned returns the brand set and the version OF THAT SNAPSHOT.
+// A version from a second read could stamp a body it does not correspond to,
+// and an edit quoting it would overwrite the intervening write.
+func (s *Service) ListBrandsVersioned(ctx context.Context, tenantID string) ([]Brand, string, error) {
+	brands, err := s.ListBrands(ctx, tenantID)
 	if err != nil {
-		return "", mapStoreErr(err)
+		return nil, "", err
 	}
-	return Version(brandModelsView(rows)), nil
+	return brands, brandsVersion(brands), nil
 }
+
+// BrandsVersionOf is the version of a brand set already in hand — used to stamp
+// a write response from the snapshot it returned.
+func (s *Service) BrandsVersionOf(brands []Brand) string { return brandsVersion(brands) }

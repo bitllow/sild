@@ -48,6 +48,12 @@ func (r *conversationRepo) List(ctx context.Context, scope policy.ResourceScope,
 
 	db = applyScope(db, scope)
 	db = applyFilters(db, q)
+	if q.Sort == store.SortWaitingSince {
+		// A row with no assignment has no position on this key; leaving it in
+		// makes the keyset undefined and (NULLs sorting first on Postgres) can
+		// truncate the page.
+		db = db.Where("a.id IS NOT NULL")
+	}
 
 	page, err := Paginate(db, q.PageParams,
 		conversationSortExpr(q.Sort), "conversations.id",
@@ -66,11 +72,9 @@ func (r *conversationRepo) List(ctx context.Context, scope policy.ResourceScope,
 	// query actually ordered by.
 	if q.Sort == store.SortWaitingSince && out.NextCursor != nil && len(out.Items) > 0 {
 		last := out.Items[len(out.Items)-1]
-		if last.Assignment == nil {
-			// No assignment, so no position on this key: stop rather than emit an
-			// unresumable cursor.
-			out.NextCursor, out.HasMore = nil, false
-		} else {
+		// The query excludes assignment-less rows, so the last one always has a
+		// position on this key.
+		if last.Assignment != nil {
 			v := last.Assignment.CreatedAt
 			out.NextCursor.Value = &v
 		}

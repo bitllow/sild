@@ -44,14 +44,12 @@ func brandsView(brands []domain.Brand) gin.H {
 // listBrands returns the tenant's brands + which one is active (owner/admin, §7).
 // Seeds a default brand on first access.
 func (h *Handler) listBrands(c *gin.Context) {
-	brands, err := h.svc.ListBrands(c.Request.Context(), apiutil.Tenant(c))
+	brands, version, err := h.svc.ListBrandsVersioned(c.Request.Context(), apiutil.Tenant(c))
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	if v, err := h.svc.BrandsVersion(c.Request.Context(), apiutil.Tenant(c)); err == nil {
-		c.Header("ETag", v)
-	}
+	c.Header("ETag", version)
 	c.JSON(http.StatusOK, brandsView(brands))
 }
 
@@ -81,9 +79,7 @@ func (h *Handler) saveBrands(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	if v, err := h.svc.BrandsVersion(c.Request.Context(), apiutil.Tenant(c)); err == nil {
-		c.Header("ETag", v)
-	}
+	c.Header("ETag", h.svc.BrandsVersionOf(saved))
 	c.JSON(http.StatusOK, brandsView(saved))
 }
 

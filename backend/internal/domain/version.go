@@ -10,8 +10,12 @@ import (
 // an ETag and as the If-Match precondition on write.
 //
 // Content-derived rather than a stored counter: no column, and it cannot drift
-// from what was served. Compared INSIDE the write transaction, so two operators
-// submitting from the same version cannot both win.
+// from what was served. Compared inside the write transaction, which catches the
+// case that actually happens — a stale tab saving over a newer edit.
+//
+// Two saves landing in the same instant can still both pass on a dialect that
+// does not lock a plain read. Not defended against: it needs a row lock or a
+// version column, and the cost of losing is one settings edit to redo.
 func Version(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
