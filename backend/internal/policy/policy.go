@@ -1,18 +1,8 @@
 package policy
 
 import (
-	"errors"
-
 	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/store/models"
-)
-
-// Denial reasons. Callers map these to HTTP: ErrUnauthenticated → 401, the rest
-// → 403. Reason carries the client-facing message so the wording lives with the
-// rule that produced it.
-var (
-	ErrUnauthenticated = errors.New("authentication required")
-	ErrForbidden       = errors.New("forbidden")
 )
 
 // Denied is a policy refusal with a stable code and a human message.
@@ -30,20 +20,18 @@ func unauthenticated() error {
 	return &Denied{Code: "unauthorized", Message: "authentication required", authn: true}
 }
 
-// ResourceAttrs are the facts about a specific resource a decision depends on.
-// The caller loads them once; policy does no I/O.
+// ResourceAttrs are the resource facts a decision needs. policy does no I/O.
 type ResourceAttrs struct {
 	Kind models.ConversationKind
-	// SupportReachable reports that an agent may reach this support conversation:
-	// it carries an assignment — ANYONE'S, or nobody's, never "assigned to the
-	// caller" — or it is an archived formerly-support conversation.
+	// SupportReachable means an assignment exists (anyone's, not the caller's) or
+	// the conversation is archived formerly-support.
 	SupportReachable bool
 	// IsMember reports whether the user principal is an active or archived member.
 	IsMember bool
 }
 
-// Authorize decides a single action against a known resource. Actions with no
-// resource dimension pass a zero ResourceAttrs.
+// Authorize decides one action. Actions with no resource dimension pass a zero
+// ResourceAttrs.
 func Authorize(p *principal.Principal, a Action, r ResourceAttrs) error {
 	if !holds(p, a) {
 		if p == nil {
@@ -57,8 +45,7 @@ func Authorize(p *principal.Principal, a Action, r ResourceAttrs) error {
 	return authorizeConversation(p, r)
 }
 
-// holds reports whether the principal's kind and role carry the action at all,
-// before any resource attributes are considered.
+// holds reports whether the principal's kind and role carry the action at all.
 func holds(p *principal.Principal, a Action) bool {
 	g, ok := capabilities[a]
 	if !ok {
@@ -92,20 +79,14 @@ func conversationScoped(a Action) bool {
 	return false
 }
 
-// authorizeConversation applies the per-conversation rules (§4.2, §7):
-//   - API key:     tenant-wide
-//   - owner/admin: tenant-wide for non-peer; peer still needs their own peer_access
-//   - agent:       support conversations carrying an assignment, plus archived
-//     formerly-support; peer only with peer_access
-//   - user:        must be an (active or archived) member
+// authorizeConversation applies the per-conversation rules (§4.2, §7).
 func authorizeConversation(p *principal.Principal, r ResourceAttrs) error {
 	switch p.Kind {
 	case principal.KindAPIKey:
 		return nil
 
 	case principal.KindAdmin:
-		// Peer takes precedence over role: peer access is the operator's own
-		// opt-in whatever their platform role, archived peer included.
+		// Peer takes precedence over role: it is the operator's own opt-in.
 		if r.Kind == models.KindPeer {
 			if p.PeerAccess {
 				return nil

@@ -181,12 +181,9 @@ func (s *Service) attachmentURLFunc() views.URLFunc {
 	}
 }
 
-// CatchUpMessages returns messages after an id, oldest-first, bounded by limit.
-//
-// Replaces the old unbounded-looking ListMessagesAfter, which hard-capped at 500
-// and reported nothing: a client that missed more than that got a short answer
-// looking complete and permanently lost the remainder. hasMore tells the caller
-// to re-issue with the last id received.
+// CatchUpMessages returns messages after an id, oldest-first, bounded. hasMore
+// tells the caller to re-issue with the last id received — without it a client
+// that missed more than one page loses the remainder silently.
 func (s *Service) CatchUpMessages(ctx context.Context, tenantID, convID, since string, limit int, includeInternal bool) ([]models.Message, bool, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50

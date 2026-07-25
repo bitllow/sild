@@ -11,15 +11,11 @@ import (
 	"time"
 )
 
-// Local upload URLs are signed capabilities, not addresses. Without a signature
-// the URL is a permanent bearer token: anyone holding it can re-read or overwrite
-// the object forever, and any object key can be guessed.
+// Local upload URLs are signed capabilities, not addresses: unsigned, the URL is
+// a permanent bearer token for any guessable object key.
 //
-// The signature binds the verb, the object key and an expiry, so a GET grant
-// cannot be replayed as a PUT and neither outlives its window. The tenant is
-// bound too — it is the first path segment of every object key (see
-// localBucket.NewObjectKey) — so a valid signature for one tenant's key says
-// nothing about another's.
+// The signature binds the verb, the object key and an expiry. The tenant comes
+// along free — it is the key's first path segment.
 
 // SignedParams are the query parameters carried by a signed local URL.
 const (
@@ -31,8 +27,7 @@ const (
 type LocalSigner struct{ key []byte }
 
 // NewLocalSigner returns a signer for the configured key. An empty key gets a
-// random per-process one: correct for a single dev node, wrong for a fleet,
-// which is why the config documents it.
+// random per-process one — fine for one dev node, wrong for a fleet.
 func NewLocalSigner(key string) *LocalSigner {
 	if key == "" {
 		b := make([]byte, 32)
@@ -67,8 +62,8 @@ func (s *LocalSigner) Verify(method, objectKey, exp, sig string) bool {
 
 func (s *LocalSigner) mac(method, objectKey, exp string) string {
 	m := hmac.New(sha256.New, s.key)
-	// Length-prefix free: the separator can't appear in a method and object keys
-	// are path-cleaned, so the concatenation is unambiguous.
+	// Unambiguous without length prefixes: a method has no newline and keys are
+	// path-cleaned.
 	m.Write([]byte(strings.ToUpper(method) + "\n" + strings.TrimPrefix(objectKey, "/") + "\n" + exp))
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }

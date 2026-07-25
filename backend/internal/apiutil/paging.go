@@ -15,24 +15,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// cursorVersion is the wire format version. It exists so the format can change
-// without guessing at an old cursor's shape.
+// cursorVersion lets the wire format change without guessing at an old shape.
 const cursorVersion = 1
 
-// cursorDTO is the opaque wire form: base64url(JSON). Everything that must not
-// change between pages is carried inside it, so a mismatched replay is a 400
-// rather than a wrong answer under a 200.
+// cursorDTO is the opaque wire form. It carries everything that must not change
+// between pages, so a mismatched replay is a 400 rather than a wrong page.
 type cursorDTO struct {
 	V int    `json:"v"`
 	R string `json:"r"` // resource — rejects cross-resource replay
 	S string `json:"s"` // sort key
 	O string `json:"o"` // direction
 	F string `json:"f"` // fingerprint of the filter set
-	// K is the position value, absent for id-only sorts. Marshalled as RFC3339
-	// with its ORIGINAL offset, never normalized to UTC: SQLite compares
-	// datetimes as strings, so a cursor rendered "…18:24:16+00:00" would not
-	// order correctly against rows stored "…21:24:16+03:00" — same instant,
-	// different string.
+	// K keeps its ORIGINAL offset, never normalized to UTC: SQLite compares
+	// datetimes as strings, so the same instant in another zone sorts wrong.
 	K  *time.Time `json:"k,omitempty"`
 	ID string     `json:"id"`
 }
@@ -48,14 +43,9 @@ type PageDefaults struct {
 	Sorts []store.SortKey
 }
 
-// PageParams reads limit/cursor/sort/order, clamps the limit, decodes the cursor
-// and validates that it was minted for this resource, sort, direction and filter
-// set. Writes a 400 and returns ok=false on a malformed or mismatched cursor.
-//
-// The filter fingerprint covers every non-paging query parameter plus the path
-// parameters, computed generically from the request rather than from a
-// hand-maintained field list — a hand-maintained list is wrong the first time
-// someone adds a filter and forgets to add it.
+// PageParams reads limit/cursor/sort/order and validates that the cursor was
+// minted for this resource, sort, direction and filter set. Writes a 400 and
+// returns ok=false on a mismatch.
 func PageParams(c *gin.Context, d PageDefaults) (store.PageParams, bool) {
 	p := store.PageParams{
 		Limit: store.ClampLimit(atoi(c.Query("limit")), d.Limit),
@@ -120,11 +110,23 @@ func sortAllowed(k store.SortKey, d PageDefaults) bool {
 	return false
 }
 
-// FilterFingerprint hashes every non-paging query parameter plus the path
-// parameters. Path params matter as much as query ones: message ids are
-// comparable ULIDs across conversations, so a cursor minted for conversation A
-// would otherwise return a wrong-but-plausible page on conversation B.
+const fingerprintKey = "sild.filter_fp"
+
+// FilterFingerprint hashes every non-paging query and path parameter — path ones
+// too, since message ids are comparable ULIDs across conversations. Memoized:
+// validating and minting a cursor would otherwise each hash the query.
 func FilterFingerprint(c *gin.Context) string {
+	if v, ok := c.Get(fingerprintKey); ok {
+		if fp, ok := v.(string); ok {
+			return fp
+		}
+	}
+	fp := computeFingerprint(c)
+	c.Set(fingerprintKey, fp)
+	return fp
+}
+
+func computeFingerprint(c *gin.Context) string {
 	parts := make([]string, 0, 8)
 	for k, vs := range c.Request.URL.Query() {
 		if k == "limit" || k == "cursor" {

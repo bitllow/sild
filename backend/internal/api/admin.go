@@ -2,9 +2,7 @@ package api
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"sort"
 	"time"
@@ -151,35 +149,6 @@ func (h *Handler) realtimeToken(c *gin.Context) {
 }
 
 // ── Inbox (§4.3) ────────────────────────────────────────────────────────────
-
-// queueCursorDTO is the wire form of a keyset cursor, base64(JSON).
-type queueCursorDTO struct {
-	V  time.Time `json:"v"`
-	ID string    `json:"id"`
-}
-
-func encodeQueueCursor(c *store.QueueCursor) any {
-	if c == nil {
-		return nil
-	}
-	b, err := json.Marshal(queueCursorDTO{V: c.Value, ID: c.ID})
-	if err != nil {
-		return nil
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func decodeQueueCursor(s string) (*store.QueueCursor, error) {
-	b, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return nil, err
-	}
-	var dto queueCursorDTO
-	if err := json.Unmarshal(b, &dto); err != nil {
-		return nil, err
-	}
-	return &store.QueueCursor{Value: dto.V, ID: dto.ID}, nil
-}
 
 // ── Settings: API keys, webhooks, team (§4.3, owner/admin only) ──────────────
 

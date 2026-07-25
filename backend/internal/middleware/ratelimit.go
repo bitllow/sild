@@ -8,10 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Rate limiting is applied where it is a security control rather than a
-// nicety: credential acquisition (password login, token mint) and
-// unauthenticated ingress (inbound email, local upload). Those are reachable by
-// anyone, and nothing limited them before. General per-route limits on
+// Applied where it is a security control: credential acquisition and
+// unauthenticated ingress, both reachable by anyone. General per-route limits on
 // authenticated endpoints are separate work.
 
 // Rate-limit classes.
@@ -26,9 +24,8 @@ func (a *Auth) RateLimitAuth() gin.HandlerFunc { return rateLimit(rateAuthPerMin
 // RateLimitIngress guards unauthenticated write ingress.
 func (a *Auth) RateLimitIngress() gin.HandlerFunc { return rateLimit(rateIngressPerMinute) }
 
-// rateLimit is a fixed-window per-client-IP counter. In-process and therefore
-// per-replica: it blunts brute force and accidental floods, and is not a
-// distributed quota. A shared limiter belongs with the general rate-limit work.
+// rateLimit is a fixed-window per-IP counter, in-process and so per-replica: it
+// blunts brute force, it is not a distributed quota.
 func rateLimit(perMinute int) gin.HandlerFunc {
 	var (
 		mu      sync.Mutex

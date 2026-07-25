@@ -1,18 +1,12 @@
-// Package policy is the single authorization decision point. Authorization here
-// is attribute-based, not role-based: a decision depends on principal kind,
-// platform role, peer_access, membership, assignment existence, conversation kind
-// and status. Handlers call Authorize or Scope; they never read Role or
-// PeerAccess themselves, and repositories take a ResourceScope only this package
-// can construct.
-//
-// policy imports neither middleware nor store — see internal/principal.
+// Package policy is the single authorization decision point. Decisions are
+// attribute-based: principal kind, role, peer_access, membership, assignment
+// existence, conversation kind and status. It imports neither middleware nor
+// store — see internal/principal.
 package policy
 
 import "slices"
 
-// Action names a thing a caller may attempt. Every route declares the finite set
-// of actions it can select from; the set is API surface and changes with the
-// version.
+// Action names something a caller may attempt. The set is API surface.
 type Action string
 
 const (
@@ -48,9 +42,7 @@ const (
 
 	PushTokensManage Action = "push_tokens.manage"
 
-	// BrandsReadActive is separate from BrandsRead because it is reachable with
-	// no credential at all; collapsing them would give the public path an
-	// operator capability.
+	// Separate from BrandsRead: reachable with no credential at all.
 	BrandsReadActive Action = "brands.read_active"
 	BrandsRead       Action = "brands.read"
 	BrandsWrite      Action = "brands.write"
@@ -66,8 +58,8 @@ const (
 	EmailInbound Action = "email.inbound"
 )
 
-// grant lists which principals hold an action. This table is the only place
-// roles map to capabilities.
+// grant lists which principals hold an action — the only place roles map to
+// capabilities.
 type grant struct {
 	apiKey    bool
 	user      bool
@@ -80,8 +72,8 @@ var capabilities = map[Action]grant{
 	ConversationsList:          {apiKey: true, user: true, admin: true},
 	ConversationsRead:          {apiKey: true, user: true, admin: true},
 	ConversationsCreateSupport: {apiKey: true, user: true, admin: true},
-	// Peer creation stays server-to-server: a peer conversation is visible to
-	// every peer_access operator, so a user must not be able to mint one.
+	// Server-to-server only: a peer conversation is visible to every peer_access
+	// operator.
 	ConversationsCreatePeer: {apiKey: true},
 	ConversationsClose:      {apiKey: true, admin: true},
 
@@ -125,10 +117,6 @@ var capabilities = map[Action]grant{
 
 	EmailInbound: {},
 }
-
-// Actions returns every declared action in a stable order, so tests that assert
-// the catalog covers the manifest do not flake on map iteration.
-func Actions() []Action { return sortedActions() }
 
 func sortedActions() []Action {
 	out := make([]Action, 0, len(capabilities))

@@ -3,15 +3,12 @@ package store
 import "time"
 
 // SortKey names the column a cursor is positioned on. It travels inside the
-// cursor, with the direction, so a cursor can never be replayed under an
-// ordering it was not minted for: reversing direction flips the comparison
-// operator, which would return the rows BEFORE the position instead of after it
-// — a wrong answer under a 200.
+// cursor with the direction, so a cursor cannot be replayed under an ordering it
+// was not minted for — reversing direction would return the preceding rows.
 type SortKey string
 
 const (
-	// SortID is a ULID: chronological AND unique, so it is a complete keyset on
-	// its own — no timestamp, no tiebreak column.
+	// SortID is a ULID: chronological and unique, so a complete keyset alone.
 	SortID           SortKey = "id"
 	SortLastActivity SortKey = "last_activity" // COALESCE(last_message_at, created_at)
 	SortCreated      SortKey = "created"
@@ -54,8 +51,7 @@ type Page[T any] struct {
 	HasMore    bool
 }
 
-// ClampLimit bounds a requested limit to [1,100], falling back to def. Limits
-// clamp rather than error — a client asking for too much gets less, not a 400.
+// ClampLimit bounds a limit to [1,100]. Limits clamp rather than error.
 func ClampLimit(limit, def int) int {
 	if limit <= 0 {
 		return def
@@ -66,12 +62,8 @@ func ClampLimit(limit, def int) int {
 	return limit
 }
 
-// SlicePage keyset-paginates an already-loaded, ordered slice. It is the
-// in-memory twin of gormstore.Paginate, used where the rows do not come from
-// SQL — the archived-message path reads them back from the archive sink. Sharing
-// the has-more/cursor semantics here is what stops the two from drifting.
-//
-// items must already be ordered per p. idOf extracts each row's keyset id.
+// SlicePage keyset-paginates an already-loaded slice, ordered per p — the
+// in-memory twin of gormstore.Paginate.
 func SlicePage[T any](items []T, p PageParams, idOf func(*T) string) Page[T] {
 	limit := ClampLimit(p.Limit, 50)
 

@@ -145,10 +145,7 @@ export interface WidgetState {
   agentName?: string;
 }
 
-/**
- * The list envelope every collection endpoint returns. One shape means one list
- * parser; `next_cursor` is null exactly when `has_more` is false.
- */
+/** The list envelope every collection endpoint returns. */
 export interface ApiPage<T> {
   items: T[];
   next_cursor: string | null;

@@ -10,32 +10,23 @@ import (
 	"gorm.io/gorm"
 )
 
-// Contacts are a derived READ MODEL over conversation_members joined to
-// conversations — there is no contacts table. A contact is the pair
-// (tenant_id, external_user_id); membership ULIDs are never exposed, because
-// they identify a membership, not a person.
-//
-// The scope is applied to membership rows BEFORE aggregation. That ordering is
-// the whole design: a pre-aggregated row per contact cannot be scoped safely,
-// because the metadata winner would be chosen from rows the caller may not see,
-// the ordering value would encode hidden activity (and so would the cursor), and
-// filtering a fetched page yields short pages and skipped rows.
+// Contacts are a derived READ MODEL over conversation_members, keyed
+// (tenant_id, external_user_id). The scope is applied BEFORE aggregation: a
+// pre-aggregated row cannot be scoped safely, because its ordering value and
+// metadata winner would encode rows the caller may not see.
 
 type contactRepo struct{ db *gorm.DB }
 
-// contactRow is the aggregate projected per contact.
-//
-// LastActivity is scanned as `any` because drivers disagree about a computed
-// timestamp: SQLite hands back text (the same reason ListQueue never SELECTs its
-// sort expression), Postgres a real time.Time.
+// contactRow is the aggregate projected per contact. LastActivity is `any`
+// because drivers disagree about a computed timestamp (SQLite text, Postgres
+// time.Time).
 type contactRow struct {
 	ExternalUserID    string
 	LastActivity      any
 	ConversationCount int64
 }
 
-// sqlTimeLayouts covers what the supported drivers hand back for a computed
-// timestamp.
+// sqlTimeLayouts covers the shapes the supported drivers return.
 var sqlTimeLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
@@ -85,20 +76,14 @@ func (r *contactRepo) contactBase(ctx context.Context, tenantID string, scope po
 		q = q.Where("m.external_user_id = ?", pt)
 	}
 	if scope.RequiresAssignment() {
-		// Archived support is exempt — its assignment was purged, and dropping it
-		// here would make archived-only contacts vanish for agents, which is the
-		// case the whole retention change exists to preserve.
+		// Archived support is exempt, or archived-only contacts vanish for agents.
 		q = q.Where("c.kind <> ? OR a.id IS NOT NULL OR c.archived_at IS NOT NULL", models.KindSupport)
 	}
 	return q
 }
 
-// ListContacts returns one page of contacts.
-//
-// Existence and activity are different questions and range over different sets:
-// a contact appears if they have ANY authorized membership (left or archived
-// included), while conversation_count counts only CURRENT ones. That is what
-// keeps an archived-only contact findable with a count of zero.
+// ListContacts returns one page of contacts. Existence spans ANY authorized
+// membership (left or archived included); conversation_count only CURRENT ones.
 func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope policy.ResourceScope, q store.ContactQuery) (store.Page[store.Contact], error) {
 	empty := store.Page[store.Contact]{}
 	if scope.DenyAll() {
@@ -114,8 +99,7 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 		base = base.Where("LOWER(m.member_search_text) LIKE LOWER(?) OR LOWER(m.external_user_id) LIKE LOWER(?)", like, like)
 	}
 
-	// Aggregate over the authorized rows only. The sort value is an aggregate, so
-	// the keyset predicate lives in HAVING rather than WHERE.
+	// The sort value is an aggregate, so the keyset predicate lives in HAVING.
 	agg := base.Select(`m.external_user_id AS external_user_id,
 		MAX(COALESCE(c.last_message_at, c.created_at)) AS last_activity,
 		SUM(CASE WHEN m.left_at IS NULL AND c.archived_at IS NULL THEN 1 ELSE 0 END) AS conversation_count`).
@@ -129,10 +113,8 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 			cur.Value, cur.Value, cur.ID)
 	}
 
-	// Scanned row-by-row rather than through gorm's struct mapping: drivers
-	// disagree about the type of a computed timestamp (SQLite text, Postgres
-	// time.Time) and a struct field typed `any` is left unpopulated. Taking the
-	// driver's own value keeps this portable.
+	// Scanned row-by-row: gorm leaves an `any` field unpopulated, and drivers
+	// disagree about a computed timestamp's type.
 	sqlRows, err := agg.
 		Order("last_activity DESC").
 		Order("m.external_user_id DESC").
@@ -195,13 +177,9 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 	return page, nil
 }
 
-// winningMetadata picks each contact's metadata from their most recently joined
-// AUTHORIZED membership, tiebroken by membership id.
-//
-// One membership's blob wins whole; keys are never unioned across memberships.
-// Merging would fabricate a person who never existed — a phone from one trip, a
-// plate from another — and make the result order-dependent. A single snapshot is
-// explainable: this is what we knew when they last joined.
+// winningMetadata takes each contact's metadata from their most recently joined
+// AUTHORIZED membership. One blob wins whole — merging keys across memberships
+// would fabricate a person who never existed.
 func (r *contactRepo) winningMetadata(ctx context.Context, tenantID string, scope policy.ResourceScope, externalIDs []string) (map[string][]byte, error) {
 	type row struct {
 		ExternalUserID string

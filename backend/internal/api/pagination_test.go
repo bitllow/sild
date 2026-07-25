@@ -26,8 +26,7 @@ func getPage(t *testing.T, h *testutil.Harness, path, tok string) envelope {
 	return e
 }
 
-// Every collection returns {items, next_cursor, has_more}, and next_cursor is
-// null exactly when has_more is false. One list parser, no exceptions.
+// next_cursor is null exactly when has_more is false, on every collection.
 func TestListEnvelopeIsUniform(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -121,9 +120,7 @@ func TestCursorRoundTrip(t *testing.T) {
 	}
 }
 
-// A cursor is bound to the ordering it was minted under. Replaying one under a
-// reversed direction flips the comparison operator, so the query would return
-// the rows BEFORE the position — a wrong answer with a 200.
+// Replaying a cursor under a reversed direction would return the preceding rows.
 func TestCursorRejectsChangedOrdering(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -142,9 +139,8 @@ func TestCursorRejectsChangedOrdering(t *testing.T) {
 	}
 }
 
-// A cursor is bound to its filter set and parent, so it cannot be carried to a
-// different query. Message ids are comparable ULIDs across conversations, so an
-// unbound cursor would silently return a wrong-but-plausible page.
+// Message ids are comparable ULIDs across conversations, so an unbound cursor
+// would return a plausible-but-wrong page.
 func TestCursorRejectsChangedFilters(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -180,9 +176,7 @@ func TestLimitClampsAndBadCursorRejected(t *testing.T) {
 	}
 }
 
-// sort=waiting_since comes from the assignment, which peer and
-// participant-scoped rows do not have; a keyset over a NULL-bearing key is
-// undefined. The client picks the key, so this is a request error.
+// waiting_since lives on the assignment, so a keyset over it needs kind=support.
 func TestWaitingSinceRequiresSupportKind(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()

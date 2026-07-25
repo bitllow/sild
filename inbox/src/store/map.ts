@@ -173,8 +173,7 @@ export function buildConversation(
  *  preview + last activity, but NO history (messages load on open). */
 export function buildQueueRow(conv: ApiQueueConversation): Conversation {
   const lastTs = conv.last_activity;
-  // A search hit previews the MATCHING fragment: a match in an older message
-  // would otherwise render with an unrelated newest-message preview.
+  // Preview the matching fragment, or an old-message hit looks unrelated.
   const preview =
     conv.snippet || (conv.status === "closed" ? "Conversation closed" : conv.last_message?.body || "");
   return {

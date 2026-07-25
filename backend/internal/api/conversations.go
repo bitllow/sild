@@ -12,12 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// listConversations: GET /v1/conversations — the one conversation list.
-//
-// It replaces GET /me/conversations, /admin/assignments,
-// /admin/contacts/conversations, /admin/peer-conversations and /admin/search.
-// Those were the same query with different hard-coded filters and five different
-// response shapes; the credential now decides the subset, not the URL.
+// listConversations: GET /v1/conversations — the one conversation list. The
+// credential decides the subset; kind/participant/assignee/q are just filters.
 func (h *Handler) listConversations(c *gin.Context) {
 	scope := apiutil.Scope(c, policy.ConversationsList)
 	if scope.DenyAll() {
@@ -40,11 +36,16 @@ func (h *Handler) listConversations(c *gin.Context) {
 		Search:        c.Query("q"),
 		CallerActorID: adminIDOf(c),
 	}
-	// Unread counts are what a messenger surface renders; the operator queue
-	// shows assignment state instead and would pay for the extra query.
+	// Only messenger surfaces render unread counts; the queue shows assignment
+	// state and would pay for the extra query.
 	if p := middleware.Get(c); p != nil && p.Kind == principal.KindUser {
 		in.IncludeUnread, in.UnreadFor = true, p.Subject
 	}
+
+	// The badges are independent of the page, so compute them concurrently with
+	// the list rather than adding serial round-trips. Buffered so the goroutine
+	// never blocks if the list below errors out.
+	countsCh := h.queueCounts(c, &q)
 
 	res, err := h.svc.ListConversations(c.Request.Context(), apiutil.Tenant(c), scope, in)
 	if err != nil {
@@ -53,19 +54,17 @@ func (h *Handler) listConversations(c *gin.Context) {
 	}
 
 	extra := gin.H{}
-	if counts, ok := h.queueCounts(c, &q); ok {
-		extra = counts
+	if countsCh != nil {
+		extra = gin.H{"counts": <-countsCh}
 	}
 	apiutil.RespondPageWith(c, resourceConversations, store.Page[map[string]any]{
 		Items: res.Items, NextCursor: res.NextCursor, HasMore: res.HasMore,
 	}, extra)
 }
 
-// applyConversationFilters reads the client's narrowing. Two distinct state
-// machines get two distinct parameters: `status` is the CONVERSATION lifecycle
-// (open|closed) and `assignment_status` is the assignment's
-// (queued→assigned→closed). The inbox's notion of "closed" is the conversation
-// being closed, which is why the old exclude_closed flag maps to status=open.
+// applyConversationFilters reads the client's narrowing. Two state machines, two
+// parameters: `status` is the conversation lifecycle, `assignment_status` the
+// assignment's.
 func applyConversationFilters(c *gin.Context, q *store.ConversationQuery) bool {
 	if raw := c.Query("kind"); raw != "" {
 		k := models.ConversationKind(raw)
@@ -111,10 +110,8 @@ func applyConversationFilters(c *gin.Context, q *store.ConversationQuery) bool {
 	}
 	q.ConvRole = c.Query("role")
 
-	// waiting_since comes from the assignment, which peer and participant-scoped
-	// rows do not have — a keyset over a NULL-bearing key is undefined. The
-	// framework treats an unsupported sort as a programming error, but here the
-	// client picks it, so it is a request error.
+	// waiting_since comes from the assignment, which peer rows lack, and a keyset
+	// over a NULL-bearing key is undefined. The client picks it, so it is a 400.
 	if q.Sort == store.SortWaitingSince && (q.Kind == nil || *q.Kind != models.KindSupport) {
 		httpx.BadRequest(c, "sort=waiting_since requires kind=support")
 		return false
@@ -122,32 +119,33 @@ func applyConversationFilters(c *gin.Context, q *store.ConversationQuery) bool {
 	return true
 }
 
-// queueCounts returns the inbox scope counters, and only for the support queue —
-// they are meaningless for a peer list or a user's own conversations.
-func (h *Handler) queueCounts(c *gin.Context, q *store.ConversationQuery) (gin.H, bool) {
+// queueCounts starts the inbox scope counters, support queue only, and returns a
+// channel to read them from — nil when they do not apply.
+func (h *Handler) queueCounts(c *gin.Context, q *store.ConversationQuery) <-chan gin.H {
 	p := middleware.Get(c)
 	if p == nil || p.Kind != principal.KindAdmin {
-		return nil, false
+		return nil
 	}
 	if q.Kind == nil || *q.Kind != models.KindSupport {
-		return nil, false
+		return nil
 	}
-	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
-	open, _ := h.svc.CountOpenConversations(ctx, tenant)
-	counts, _ := h.svc.CountQueue(ctx, tenant, p.AdminID)
-	return gin.H{"counts": gin.H{
-		"open":       open,
-		"you":        counts.You,
-		"unassigned": counts.Unassigned,
-		"closed":     counts.Closed,
-	}}, true
+	ctx, tenant, actor := c.Request.Context(), apiutil.Tenant(c), p.AdminID
+	ch := make(chan gin.H, 1)
+	go func() {
+		open, _ := h.svc.CountOpenConversations(ctx, tenant)
+		counts, _ := h.svc.CountQueue(ctx, tenant, actor)
+		ch <- gin.H{
+			"open":       open,
+			"you":        counts.You,
+			"unassigned": counts.Unassigned,
+			"closed":     counts.Closed,
+		}
+	}()
+	return ch
 }
 
-// conversationPageDefaults picks the paging contract. A search page is ordered
-// and paged by the SEARCH backend (keyset on conversation id), so the client does
-// not choose the sort — and the cursor is minted and validated as an id cursor,
-// which is what keeps a search cursor from being replayed against the ordinary
-// list.
+// conversationPageDefaults picks the paging contract. A search page is paged by
+// the search backend on conversation id, so the client does not choose the sort.
 func conversationPageDefaults(q string) apiutil.PageDefaults {
 	if q != "" {
 		return apiutil.PageDefaults{

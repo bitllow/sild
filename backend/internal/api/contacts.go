@@ -3,23 +3,19 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
-	"github.com/bitllow/sild/backend/internal/httpx"
+	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/gin-gonic/gin"
 )
 
 // Contacts are people, conversations are threads — both searchable, as separate
-// resources. A contact's history is GET /v1/conversations?participant=<id>, so
-// there is no /contacts/:id/conversations.
+// resources. A contact's history is GET /v1/conversations?participant=<id>.
 
-// contactView renders a contact. The response carries external_user_id and the
-// winning metadata blob; the client derives the display name with the logic it
-// already has, so there is one source of truth for what a person is called.
+// contactView renders a contact. No display name: the client already derives one,
+// and duplicating that rule would give two sources of truth.
 func contactView(c *store.Contact) gin.H {
 	out := gin.H{
 		"external_user_id":   c.ExternalUserID,
@@ -68,9 +64,11 @@ func (h *Handler) listContacts(c *gin.Context) {
 // getContact: GET /v1/contacts/:external_user_id
 func (h *Handler) getContact(c *gin.Context) {
 	scope := apiutil.Scope(c, policy.ContactsRead)
+	// Same rule the write boundaries enforce; gin unescapes the path before
+	// matching, so a "/" sent as %2F never reaches here at all.
 	ext := c.Param("external_user_id")
-	if !validExternalUserID(ext) {
-		httpx.BadRequest(c, "invalid external_user_id")
+	if err := domain.ValidateExternalUserID(ext); err != nil {
+		apiutil.Fail(c, err)
 		return
 	}
 	contact, err := h.svc.GetContact(c.Request.Context(), apiutil.Tenant(c), scope, ext)
@@ -79,24 +77,4 @@ func (h *Handler) getContact(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, contactView(contact))
-}
-
-// validExternalUserID guards the path form. The id is host-supplied and opaque,
-// so the charset rule is enforced where ids ENTER the system (token mint, member
-// add, remap) — gin unescapes the path before matching, so an id containing "/"
-// sent as %2F never reaches a handler that could reject it. This check is the
-// second line, not the first.
-func validExternalUserID(s string) bool {
-	if s == "" || len(s) > 128 || !utf8.ValidString(s) {
-		return false
-	}
-	if strings.ContainsRune(s, '/') || strings.TrimSpace(s) == "" {
-		return false
-	}
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f {
-			return false
-		}
-	}
-	return true
 }

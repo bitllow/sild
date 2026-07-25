@@ -12,9 +12,8 @@ import (
 	"github.com/bitllow/sild/backend/internal/testutil"
 )
 
-// Archived history must page like hot history. The sink stores messages
-// ascending (the archive job drains ListAfter), so slicing it with a generic
-// descending pager reads the wrong end and re-serves page one forever.
+// The sink stores messages ascending, so a descending pager would re-serve
+// page one forever.
 func TestArchivedHistoryPagesToExhaustion(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -70,9 +69,8 @@ func TestArchivedHistoryPagesToExhaustion(t *testing.T) {
 	}
 }
 
-// An archived support conversation keeps no assignment (PurgeHot removes it), so
-// an agent's assignment-requiring scope must exempt it — otherwise the list hides
-// exactly what a direct read allows.
+// PurgeHot removes the assignment, so an assignment-requiring scope must exempt
+// archived support or the list hides what a direct read allows.
 func TestArchivedSupportStaysVisibleToAgents(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -115,9 +113,7 @@ func TestArchivedSupportStaysVisibleToAgents(t *testing.T) {
 	t.Fatalf("archived support conversation missing from the agent's list: %+v", page.Items)
 }
 
-// Search pages through ALL matches. Capping the match set and paginating that
-// fixed slice reports has_more:false once it is exhausted, silently truncating
-// large result sets.
+// Paginating a capped match set would report has_more:false and truncate.
 func TestSearchPagesBeyondTheFirstPage(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -167,9 +163,8 @@ func TestSearchPagesBeyondTheFirstPage(t *testing.T) {
 	}
 }
 
-// sort=waiting_since orders by the ASSIGNMENT's created_at, so its cursor must
-// carry that timestamp — not the conversation's last activity, which would make
-// the next page compare against an unrelated value.
+// The cursor must carry the assignment's created_at, not the conversation's
+// last activity.
 func TestWaitingSinceCursorPagesCorrectly(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -215,9 +210,8 @@ func TestWaitingSinceCursorPagesCorrectly(t *testing.T) {
 	}
 }
 
-// Ids that cannot be addressed later are rejected where they ENTER the system:
-// gin unescapes the path before matching, so an id containing "/" would never
-// reach the handler that could reject it on read.
+// Gin unescapes the path before matching, so an unaddressable id must be
+// rejected at the write boundary.
 func TestExternalUserIDValidatedAtWrite(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()

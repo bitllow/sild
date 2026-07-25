@@ -59,10 +59,7 @@ data class ApiConversation(
 @Serializable
 data class ApiMessagesPage(val items: List<ApiMessage> = emptyList())
 
-/**
- * The list envelope every collection endpoint returns. next_cursor is null
- * exactly when has_more is false, and it is OPAQUE — round-trip it verbatim.
- */
+/** The list envelope every collection endpoint returns; next_cursor is opaque. */
 @Serializable
 data class ApiConversationsPage(
     val items: List<ApiConversation> = emptyList(),

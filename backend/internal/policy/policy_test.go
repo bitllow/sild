@@ -22,8 +22,7 @@ func owner(peer bool) *principal.Principal {
 		Role: models.PlatformOwner, PeerAccess: peer}
 }
 
-// Conversation access across every principal × resource state. This is the
-// matrix that used to be spot-checked in api/auth_rbac_test.go.
+// Conversation access across every principal × resource state.
 func TestAuthorizeConversation(t *testing.T) {
 	support := func(reachable bool) ResourceAttrs {
 		return ResourceAttrs{Kind: models.KindSupport, SupportReachable: reachable}
@@ -44,7 +43,7 @@ func TestAuthorizeConversation(t *testing.T) {
 		{"owner without peer_access denied peer", owner(false), ConversationsRead, peer, false},
 		{"owner with peer_access reads peer", owner(true), ConversationsRead, peer, true},
 
-		// The load-bearing one: "reachable" means an assignment EXISTS, anyone's.
+		// "reachable" means an assignment EXISTS — anyone's.
 		{"agent reads assignment-bearing support", agent(false), ConversationsRead, support(true), true},
 		{"agent denied assignment-less support", agent(false), ConversationsRead, support(false), false},
 		{"agent without peer_access denied peer", agent(false), ConversationsRead, peer, false},
@@ -85,8 +84,8 @@ func TestAuthorizeCapability(t *testing.T) {
 		{"user cannot mint tokens", user("u1"), TokensMint, false},
 		{"agent cannot mint tokens", agent(false), TokensMint, false},
 
-		// Peer creation is server-to-server only: a peer conversation is visible
-		// to every peer_access operator, so a user must not be able to mint one.
+		// Server-to-server only: a peer conversation is visible to every
+		// peer_access operator.
 		{"apikey creates peer", apiKey(), ConversationsCreatePeer, true},
 		{"user cannot create peer", user("u1"), ConversationsCreatePeer, false},
 		{"owner cannot create peer", owner(true), ConversationsCreatePeer, false},
@@ -169,8 +168,7 @@ func TestScope(t *testing.T) {
 		}
 	})
 
-	// An empty kind list means "unrestricted", so a no-capability scope must be
-	// flagged rather than expressed as an empty list.
+	// An empty kinds list means "unrestricted", so no-capability needs a flag.
 	t.Run("no capability denies all", func(t *testing.T) {
 		s := Scope(user("u1"), TeamManage)
 		if !s.DenyAll() {
@@ -192,8 +190,7 @@ func TestScopeGettersReturnCopies(t *testing.T) {
 	}
 }
 
-// Grants drive frontend affordances, so peer visibility must be expressed in the
-// scope rather than left for the client to re-derive from a role flag.
+// Grants drive frontend affordances, so peer visibility lives in the scope.
 func TestGrantsCarryScope(t *testing.T) {
 	find := func(gs []Grant, a Action) *Grant {
 		for i := range gs {

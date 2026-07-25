@@ -12,20 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// patchAssignment: PATCH /v1/assignments/:id, replacing
-// POST /assignments/:id/claim and .../close.
-//
-// This is a spelling change, not a capability change. The accepted values are
-// deliberately narrow:
-//
-//   - assignee_actor_id may only be "me". Claiming for ANOTHER operator has no
-//     route today, and accepting an arbitrary id here would quietly introduce
-//     reassignment — letting a plain agent move another operator's work.
-//   - status may only be "closed". queued/assigned transitions are legal in the
-//     state machine but have no route, so they stay unexposed.
-//
-// Both fields at once is a 400: claim-then-close is two calls, and allowing the
-// combination would need a transactional ordering rule for no gain.
+// patchAssignment: PATCH /v1/assignments/:id. "me" and "closed" are the only
+// accepted values, so this cannot become reassignment or an unexposed transition.
 func (h *Handler) patchAssignment(c *gin.Context) {
 	var req struct {
 		AssigneeActorID *string `json:"assignee_actor_id"`
@@ -42,9 +30,8 @@ func (h *Handler) patchAssignment(c *gin.Context) {
 
 	ctx, tenant, id := c.Request.Context(), apiutil.Tenant(c), c.Param("id")
 
-	// Authorize against the CONVERSATION, not the assignment id: an assignment
-	// carries no access rules of its own, and an id-only check would let an
-	// operator mutate work on a conversation they cannot see.
+	// Authorize against the CONVERSATION: an assignment carries no access rules of
+	// its own.
 	convID, err := h.svc.AssignmentConversation(ctx, tenant, id)
 	if err != nil {
 		apiutil.Fail(c, err)

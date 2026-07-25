@@ -87,9 +87,8 @@ export interface ApiMessagesPage {
 
 // One inbox queue row: the conversation (members + last message preview + last
 // activity) WITHOUT history — opening it fetches the thread lazily (§4.3).
-// A row from GET /v1/conversations. It IS a conversation — the assignment is a
-// nested field, not a wrapper — so the queue, the peer list, contact history and
-// search all render the same shape.
+// A row from GET /v1/conversations — the assignment is a nested field, so the
+// queue, peer list, contact history and search share one shape.
 export interface ApiQueueConversation extends ApiConversation {
   last_activity: string;
   last_message?: { body: string; created_at: string | null };
@@ -97,18 +96,12 @@ export interface ApiQueueConversation extends ApiConversation {
   kind?: "support" | "peer";
   agent_name?: string;
   unread_count?: number;
-  /** Search annotations — present only on rows returned for a ?q= query. */
+  /** The matching fragment, present only on rows returned for a ?q= query. */
   snippet?: string;
-  matched_fields?: string[];
 }
 
-export interface ApiQueuePage {
-  items: ApiQueueConversation[];
-  next_cursor: string | null;
-  has_more: boolean;
-  // Inbox scope counters, emitted only for the support queue. you = assigned to
-  // me, unassigned = queued, closed = closed CONVERSATIONS (the inbox's notion
-  // of closed is the conversation, not the assignment).
+export interface ApiQueuePage extends ApiPage<ApiQueueConversation> {
+  // Support queue only. closed counts closed CONVERSATIONS, not assignments.
   counts?: {
     open: number;
     you: number;
@@ -159,9 +152,8 @@ export interface ApiTeamMember {
 }
 
 /**
- * The list envelope every collection endpoint returns. One shape means one list
- * parser; `next_cursor` is null exactly when `has_more` is false, and the cursor
- * is opaque — round-trip it verbatim, never parse it.
+ * The list envelope every collection endpoint returns. `next_cursor` is null
+ * exactly when `has_more` is false, and is opaque — round-trip it verbatim.
  */
 export interface ApiPage<T> {
   items: T[];
@@ -172,8 +164,7 @@ export interface ApiPage<T> {
 /** Filters for GET /v1/conversations — the one conversation list. */
 export interface ConversationParams {
   kind?: "support" | "peer";
-  /** Conversation lifecycle. Distinct from assignmentStatus: the inbox's notion
-   *  of "closed" is the CONVERSATION being closed. */
+  /** Conversation lifecycle — the inbox's notion of "closed". */
   status?: "open" | "closed";
   /** Assignment state machine (queued → assigned → closed). */
   assignmentStatus?: "queued" | "assigned" | "closed";
@@ -200,10 +191,8 @@ export interface ApiGrant {
 /**
  * GET /v1/principal — who am I, for any credential.
  *
- * `grants` carry the SCOPE of each action, not just its name: an agent with peer
- * access and one without both hold conversations.list, and only the scope tells
- * them apart. Rendering affordances from this keeps the frontend from
- * re-deriving policy from role flags.
+ * `grants` carry the SCOPE of each action, not just its name: two agents can both
+ * hold conversations.list and only the scope tells them apart.
  */
 export interface ApiPrincipal {
   kind: "admin" | "user" | "apikey";
@@ -286,8 +275,7 @@ export const adminApi = {
   googleLoginUrl: () => "/v1/admin/auth/google",
 
   // ── Conversations ─────────────────────────────────────────────────────
-  // One endpoint backs the support queue, the peer inbox, contact history and
-  // search. The credential decides the subset; these are just filters.
+  // One endpoint backs the queue, the peer inbox, contact history and search.
   listConversations: (params?: ConversationParams) => {
     const q = new URLSearchParams();
     if (params?.kind) q.set("kind", params.kind);
@@ -315,8 +303,7 @@ export const adminApi = {
   // Issue a signed direct-to-bucket PUT URL for an attachment (§11).
   issueUpload: (mimeType: string, sizeBytes: number, filename: string) =>
     api.post<ApiUploadGrant>("/uploads", { mime_type: mimeType, size_bytes: sizeBytes, filename }),
-  // Claiming is a partial update of the assignment; "me" is the only accepted
-  // assignee, so this cannot become reassignment by accident.
+  // "me" is the only accepted assignee, so this cannot become reassignment.
   claimAssignment: (id: string) =>
     api.patch<ApiAssignment>(`/assignments/${id}`, { assignee_actor_id: "me" }),
   closeAssignment: (id: string) =>
@@ -339,9 +326,8 @@ export const adminApi = {
   deleteWebhook: (id: string) => api.del<void>(`/webhooks/${id}`),
 
   // ── Signed-in principal ───────────────────────────────────────────────
-  // Grants carry the SCOPE each action is held over, so the peer surface is
-  // rendered from the same decision the backend enforces rather than from a
-  // duplicated peer_access rule.
+  // Grants carry each action's scope, so the peer surface renders from the
+  // decision the backend enforces.
   me: () => api.get<ApiPrincipal>("/principal"),
 
   // ── Settings: team ────────────────────────────────────────────────────

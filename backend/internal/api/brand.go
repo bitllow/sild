@@ -76,17 +76,15 @@ func (h *Handler) saveBrands(c *gin.Context) {
 }
 
 // getActiveBrand: GET /v1/brands/active — the active brand for any messenger
-// surface. Replaces GET /v1/public/brand and GET /v1/me/brand, which returned
-// the same thing to different consumers.
+// surface.
 //
-// Public when keyed by app_id (the web drop-in's first paint, before any token
-// exists), tenant-scoped when a credential is present. A credential that is
-// present but invalid never reaches here — OptionalAuth 401s it rather than
-// downgrading, so an expired session cannot become a silent tenant switch.
+// Public when keyed by app_id (the drop-in's first paint, before a token exists),
+// tenant-scoped with a credential. An invalid credential never reaches here:
+// OptionalAuth 401s rather than downgrading, so an expired session cannot become
+// a silent tenant switch.
 func (h *Handler) getActiveBrand(c *gin.Context) {
-	// Credential first; app_id is only consulted when there is none. An
-	// authenticated caller's app_id is ignored, so the public path cannot be used
-	// to read another tenant's brand while authenticated.
+	// Credential first: an authenticated caller's app_id is ignored, so the public
+	// path cannot read another tenant's brand.
 	if tenant := apiutil.Tenant(c); tenant != "" {
 		b, err := h.svc.ActiveBrand(c.Request.Context(), tenant)
 		if err != nil {
@@ -101,9 +99,8 @@ func (h *Handler) getActiveBrand(c *gin.Context) {
 		return
 	}
 
-	// PublicBrand resolves an empty app_id against a single-tenant deployment and
-	// 404s when it is ambiguous, so the widget's first paint works in dev without
-	// one. Rejecting it here instead would break that path.
+	// An empty app_id resolves against a single-tenant deployment and 404s when
+	// ambiguous, so the dev widget works without one.
 	b, err := h.svc.PublicBrand(c.Request.Context(), c.Query("app_id"))
 	if err != nil {
 		apiutil.Fail(c, err)

@@ -214,6 +214,9 @@ type MessageRepo interface {
 	ListAfter(ctx context.Context, tenantID, convID, after string, limit int, includeInternal bool) ([]models.Message, error)
 	Last(ctx context.Context, tenantID, convID string, includeInternal bool) (*models.Message, error)
 	UnreadCount(ctx context.Context, tenantID, convID, lastReadMessageID string, includeInternal bool) (int, error)
+	// UnreadCounts returns conversation id → unread count for one user across a
+	// page, so a list render costs two queries instead of two per row.
+	UnreadCounts(ctx context.Context, tenantID string, convIDs []string, externalUserID string) (map[string]int, error)
 }
 
 type ReceiptRepo interface {
@@ -260,6 +263,9 @@ type EmailRepo interface {
 	// + normalized subject among OPEN conversations (§6.2 threading).
 	FindOpenBySenderSubject(ctx context.Context, tenantID, sender, subjectKey string) (*models.EmailThread, error)
 	Get(ctx context.Context, tenantID, convID string) (*models.EmailThread, error)
+	// Subjects returns conversation id → subject for a page of conversations, so
+	// a list render costs one query instead of one per row.
+	Subjects(ctx context.Context, tenantID string, convIDs []string) (map[string]string, error)
 	Update(ctx context.Context, t *models.EmailThread) error
 }
 

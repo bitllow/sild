@@ -24,15 +24,12 @@ func (r *archiveRepo) GetTombstone(ctx context.Context, tenantID, convID string)
 	return &a, nil
 }
 
-// PurgeHot removes a conversation's message BULK (§12 step 3) and marks the
-// conversation archived. Must run inside the archival transaction, after the
-// sink write is confirmed.
+// PurgeHot removes a conversation's message BULK (§12 step 3) and marks it
+// archived. Must run inside the archival transaction, after the sink write.
 //
-// The conversation row and its members are deliberately RETAINED. Archival
-// exists to reclaim unbounded message history, not the handful of rows
-// describing who took part — and deleting those is what made contacts vanish on
-// a retention job and forced archived-conversation authorization to rehydrate a
-// membership snapshot out of the tombstone JSON.
+// The conversation and its members are RETAINED: archival reclaims unbounded
+// message history, not the handful of rows describing who took part — and
+// contacts plus archived-read authorization both need those rows.
 func (r *archiveRepo) PurgeHot(ctx context.Context, tenantID, convID string) error {
 	tx := r.db.WithContext(ctx)
 	// attachments first (FK to messages), then the rest of the bulk.

@@ -75,16 +75,14 @@ internal class SildApi(private val cfg: SildConfig) {
 
     // ── endpoints ────────────────────────────────────────────────────────────
 
-    /** GET /v1/brands/active → { name, config }. Same URL the web drop-in uses;
-     *  a credential scopes it to our tenant.
-     *  The logo URL is re-based onto our base so it loads from any host (see rebaseLocalUrl). */
+    /** GET /v1/brands/active → { name, config }; a credential scopes it to our
+     *  tenant. The logo URL is re-based so it loads from any host. */
     suspend fun fetchBrand(): BrandResponse {
         val res: BrandResponse = json.decodeFromString(api("GET", "/brands/active"))
         return res.copy(config = res.config.copy(logoUrl = rebaseLocalUrl(cfg.base, res.config.logoUrl)))
     }
 
-    /** GET /v1/conversations → the standard list envelope. The credential scopes
-     *  it to the caller's own conversations, so there is no /me variant. */
+    /** GET /v1/conversations → the standard list envelope, scoped by credential. */
     suspend fun listConversations(): List<ApiConversation> =
         json.decodeFromString<ApiConversationsPage>(api("GET", "/conversations")).items
 
@@ -92,8 +90,7 @@ internal class SildApi(private val cfg: SildConfig) {
     suspend fun listMessages(id: String): ApiMessagesPage =
         json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100"))
 
-    /** POST /v1/conversations { metadata } → { id }. open_assignment is forced
-     *  true for a user credential, so this always opens a support request. */
+    /** POST /v1/conversations { metadata } → { id }; always a support request. */
     suspend fun openSupportRequest(): String {
         val body = buildJsonObject {
             put("metadata", JsonObject(cfg.metadata.mapValues { JsonPrimitive(it.value) }))

@@ -44,8 +44,7 @@ func (h *Handler) Mount(e *gin.Engine) {
 		c.Data(http.StatusOK, "application/javascript; charset=utf-8", webasset.Widget)
 	})
 
-	// Every JSON route is capped; the raw-body routes below carry their own,
-	// larger limits. A cap inside the JSON decoder would miss them entirely.
+	// The raw-body routes below carry their own, larger limits.
 	v1 := e.Group("/v1", middleware.BodyLimit(middleware.BodyLimitJSON))
 
 	// Email inbound (§6.2): provider posts here, signature is the gate.
@@ -60,14 +59,11 @@ func (h *Handler) Mount(e *gin.Engine) {
 
 	// ── Resource routes ────────────────────────────────────────────────────
 	//
-	// Paths name the DATA MODEL, not the consumer. The credential decides which
-	// subset of a resource a caller sees, never which URL they call — the inbox,
-	// the web drop-in, the native SDK and a host backend all GET /v1/conversations.
-	// The one deliberate exception is /v1/admin/auth/*: obtaining a credential is
-	// genuinely consumer-specific.
+	// Paths name the DATA MODEL, not the consumer; the credential decides which
+	// subset a caller sees. /v1/admin/auth/* is the deliberate exception —
+	// obtaining a credential IS consumer-specific.
 	//
-	// The prefix no longer carries authentication, so the GROUP does: each route
-	// is registered into the group holding its credential requirement.
+	// The prefix no longer carries authentication, so the GROUP does.
 
 	// Any credential (API key | user JWT | admin session).
 	any := v1.Group("", h.mw.Any())
@@ -83,8 +79,8 @@ func (h *Handler) Mount(e *gin.Engine) {
 	any.POST("/uploads", h.issueUpload)
 	any.GET("/principal", h.getPrincipal)
 
-	// Optional credential: the active brand is public when keyed by app_id, and
-	// tenant-scoped when a credential is present. Any() would 401 the public form.
+	// Public when keyed by app_id, tenant-scoped with a credential. Any() would
+	// 401 the public form.
 	v1.GET("/brands/active", h.mw.OptionalAuth(), h.getActiveBrand)
 
 	// Integration (API key only), §4.1.
@@ -116,8 +112,7 @@ func (h *Handler) Mount(e *gin.Engine) {
 	admin.GET("/contacts", h.listContacts)
 	admin.GET("/contacts/:external_user_id", h.getContact)
 
-	// Owner/admin only, §7. RBAC moved from the path prefix to the middleware
-	// chain — which is where it was already enforced.
+	// Owner/admin only, §7.
 	priv := v1.Group("", h.mw.Admin(), middleware.RequireRole(models.PlatformOwner, models.PlatformAdmin))
 	priv.POST("/api-keys", h.createAPIKey)
 	priv.GET("/api-keys", h.listAPIKeys)

@@ -227,9 +227,8 @@ export class RootStore {
       const me = await adminApi.me();
       runInAction(() => {
         this.meId = me.subject?.id ?? "";
-        // Peer visibility comes from the SCOPE the operator holds
-        // conversations.list over — the same decision the backend enforces —
-        // rather than a peer_access flag re-interpreted here.
+        // Peer visibility is the scope of conversations.list, not a flag
+        // re-interpreted here.
         const list = me.grants.find((g) => g.action === "conversations.list");
         const kinds = list?.scope?.kinds;
         this.peerAccess = !!list && (!kinds || kinds.includes("peer"));
@@ -312,12 +311,9 @@ export class RootStore {
   // Map the active filter to server-side query params. Filtering + sorting +
   // pagination all happen on the backend (§4.3); the list endpoint returns the
   // last message per row, not history.
-  // Two state machines, two parameters. `status` is the CONVERSATION lifecycle
-  // and `assignment_status` is the assignment's — "closed" in the inbox has
-  // always meant the conversation is closed, which is what the old
-  // exclude_closed flag filtered on. Every scope also pins kind=support: an
-  // unfiltered list would admit peer rows for a peer_access operator and change
-  // the All tab's row set.
+  // Two state machines, two parameters: `status` is the conversation lifecycle
+  // (the inbox's "closed"), `assignment_status` the assignment's. Every scope
+  // pins kind=support, or a peer_access operator's All tab would admit peer rows.
   private get queueParams(): ConversationParams {
     const base: ConversationParams = {
       kind: "support",

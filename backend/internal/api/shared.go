@@ -49,13 +49,10 @@ func (h *Handler) postMessage(c *gin.Context) {
 	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesSend, convID) {
 		return
 	}
-	// Read once: it selects the send path below and is reused as in.Conv by
-	// SendMessage.
+	// Read once: it selects the send path below and is reused as in.Conv.
 	conv, _ := h.svc.Conversation(c.Request.Context(), apiutil.Tenant(c), convID)
-	// An operator sending into a peer conversation implicitly joins it (adds the
-	// agent participant + a system join-note). That is a property of the DATA —
-	// operator + peer conversation — not of the URL the client chose, so it fires
-	// here rather than behind a separate route.
+	// An operator sending into a peer conversation implicitly joins it. That is a
+	// property of the data, not of the URL, so it fires on the shared route.
 	if p := middleware.Get(c); p != nil && p.Kind == principal.KindAdmin &&
 		conv != nil && conv.Kind == models.KindPeer {
 		h.postPeerMessage(c)
@@ -131,22 +128,13 @@ func (h *Handler) postMessage(c *gin.Context) {
 	c.JSON(http.StatusCreated, out)
 }
 
-// listMessages: GET /v1/conversations/:id/messages?before=&after=&limit= (§4.2).
 // listMessages: GET /v1/conversations/:id/messages
 //
-// Two different reads, deliberately spelled differently:
+//	?cursor=  pagination — newest-first, bounded by limit
+//	?since=   catch-up   — oldest-first, everything after a message id (§5.4)
 //
-//	?cursor=  pagination — newest-first, bounded by limit, standard envelope
-//	?since=   catch-up   — oldest-first, everything after a message id
-//
-// ?since= is the realtime reconnect primitive (§5.4), NOT a page: it answers
-// "give me everything I missed". Sharing one handler with ?before=/?after= is
-// what produced the old asymmetry where one returned has_more and the other
-// silently truncated at 500 with no way to tell.
-//
-// Continuation for ?since= is the message id itself — re-issue with the last id
-// received while has_more is true. There is no cursor, because the id IS the
-// position.
+// ?since= is a sync read, not a page: continuation is the last message id
+// received, because the id IS the position.
 func (h *Handler) listMessages(c *gin.Context) {
 	convID := c.Param("id")
 	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesRead, convID) {
@@ -166,9 +154,8 @@ func (h *Handler) listMessages(c *gin.Context) {
 		return
 	}
 
-	// §12 read fallback: an archived conversation's history lives in the sink.
-	// It pages through the same contract via store.SlicePage, so "every
-	// collection" has no exception here.
+	// §12 read fallback: an archived conversation's history lives in the sink, and
+	// pages through the same wire contract.
 	if msgs, archived, err := h.svc.ArchivedMessages(ctx, tenant, convID, includeInternal); archived {
 		if err != nil {
 			apiutil.Fail(c, err)
@@ -210,7 +197,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 	apiutil.RespondPage(c, resourceMessages, out)
 }
 
-// cursorID is the keyset position for message history ("" on the first page).
+// cursorID is the keyset position ("" on the first page).
 func cursorID(p store.PageParams) string {
 	if p.Cursor == nil {
 		return ""
@@ -218,25 +205,14 @@ func cursorID(p store.PageParams) string {
 	return p.Cursor.ID
 }
 
-func archivedMessageID(m *map[string]any) string {
-	id, _ := (*m)["id"].(string)
-	return id
-}
-
-// archivedBefore mirrors messageRepo.ListBefore over a rehydrated archive: the
-// newest `limit` messages strictly before the cursor, returned OLDEST-FIRST with
-// the cursor set to the page's oldest id.
-//
-// The sink stores messages ascending (the archive job drains ListAfter), so a
-// generic descending slicer would read the wrong end and re-serve page one
-// forever. Matching the hot path exactly is what lets a client page an archived
-// conversation without knowing it is archived.
+// archivedBefore mirrors messageRepo.ListBefore over a rehydrated archive. The
+// sink stores messages ascending, so store.SlicePage would read the wrong end.
 func archivedBefore(msgs []map[string]any, before string, limit int) store.Page[map[string]any] {
 	end := len(msgs)
 	if before != "" {
 		end = 0
 		for i := range msgs {
-			if archivedMessageID(&msgs[i]) >= before {
+			if mapID(&msgs[i]) >= before {
 				break
 			}
 			end = i + 1
@@ -252,18 +228,17 @@ func archivedBefore(msgs []map[string]any, before string, limit int) store.Page[
 	page.Items = window
 	if page.HasMore && len(window) > 0 {
 		page.NextCursor = &store.Cursor{
-			Key: store.SortID, Order: store.OrderDesc, ID: archivedMessageID(&window[0]),
+			Key: store.SortID, Order: store.OrderDesc, ID: mapID(&window[0]),
 		}
 	}
 	return page
 }
 
-// archivedSince is the catch-up read over a rehydrated archive: everything after
-// an id, oldest-first, bounded.
+// archivedSince is the catch-up read over a rehydrated archive.
 func archivedSince(msgs []map[string]any, since string, limit int) store.Page[map[string]any] {
 	out := make([]map[string]any, 0, limit)
 	for i := range msgs {
-		if archivedMessageID(&msgs[i]) > since {
+		if mapID(&msgs[i]) > since {
 			out = append(out, msgs[i])
 		}
 	}
@@ -397,21 +372,4 @@ func (h *Handler) renderMessagesAuthored(c *gin.Context, msgs []models.Message, 
 		}
 	}
 	return out
-}
-
-func atoiDefault(s string, def int) int {
-	if s == "" {
-		return def
-	}
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return def
-		}
-		n = n*10 + int(r-'0')
-	}
-	if n == 0 {
-		return def
-	}
-	return n
 }

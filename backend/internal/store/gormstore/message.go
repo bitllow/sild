@@ -106,3 +106,34 @@ func (r *messageRepo) UnreadCount(ctx context.Context, tenantID, convID, lastRea
 }
 
 var _ store.MessageRepo = (*messageRepo)(nil)
+
+// UnreadCounts batch-counts participant-visible unread messages per conversation
+// for one user, from that user's read receipts.
+func (r *messageRepo) UnreadCounts(ctx context.Context, tenantID string, convIDs []string, externalUserID string) (map[string]int, error) {
+	out := make(map[string]int, len(convIDs))
+	if len(convIDs) == 0 || externalUserID == "" {
+		return out, nil
+	}
+	var rows []struct {
+		ConversationID string
+		N              int
+	}
+	// LEFT JOIN the receipt so a conversation the user has never read still counts
+	// every message; internal notes are excluded (§5.6).
+	err := r.db.WithContext(ctx).Model(&models.Message{}).
+		Select("messages.conversation_id, COUNT(*) AS n").
+		Joins(`LEFT JOIN read_receipts rr ON rr.conversation_id = messages.conversation_id
+			AND rr.tenant_id = messages.tenant_id AND rr.external_user_id = ?`, externalUserID).
+		Where("messages.tenant_id = ? AND messages.conversation_id IN ?", tenantID, convIDs).
+		Where("messages.visibility <> ?", models.VisibilityInternal).
+		Where("rr.last_read_message_id IS NULL OR messages.id > rr.last_read_message_id").
+		Group("messages.conversation_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ConversationID] = row.N
+	}
+	return out, nil
+}

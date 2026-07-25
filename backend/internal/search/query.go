@@ -18,10 +18,8 @@ type Query struct {
 	Meta     map[string]string // member-metadata filters (phone, app_version, meta.<key>)
 	Keywords []string          // free text → partial match on body + member text
 
-	// Kinds is the policy scope's allowed conversation kinds. Empty means every
-	// kind. The support/peer split used to be decided inside buildFilters; it is
-	// a scope decision, made once, and passed in — restating it per query builder
-	// is how a new list path forgets it.
+	// Kinds is the scope's allowed conversation kinds; empty means every kind. The
+	// support/peer split is a scope decision, passed in rather than re-derived.
 	Kinds []models.ConversationKind
 	// MatchRawMetadata widens keyword matching to the raw member metadata blob,
 	// beyond the tenant's searchable_metadata_keys allowlist. Peer search sets it

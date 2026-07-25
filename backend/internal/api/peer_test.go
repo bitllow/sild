@@ -575,10 +575,7 @@ func TestAddAssignmentRejectedOnPeerConversation(t *testing.T) {
 	}
 }
 
-// searchAs builds the scope+kind pair matching the old peerOnly boolean:
-// peerOnly=false is an operator WITHOUT peer_access (support scope), peerOnly=true
-// is one WITH it, asking for peer. The support/peer boundary now comes from the
-// scope rather than a flag inside the query builder — same rule, one owner.
+// searchAs builds the scope+kind pair for an operator with or without peer_access.
 func searchAs(peerOnly bool) (policy.ResourceScope, domain.SearchInput) {
 	p := &principal.Principal{TenantID: "t", Kind: principal.KindAdmin, AdminID: "a",
 		Role: models.PlatformOwner, PeerAccess: peerOnly}

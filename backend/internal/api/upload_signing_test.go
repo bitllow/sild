@@ -26,9 +26,7 @@ func issueUpload(t *testing.T, h *testutil.Harness, tok string) (objectKey, putP
 	return up.ObjectKey, mustPath(t, up.UploadURL)
 }
 
-// A local upload URL is a signed capability, not an address. Without a valid
-// signature it must not be usable — otherwise the URL is a permanent bearer
-// token for any object key that can be guessed.
+// Unsigned, the URL would be a permanent bearer token for any guessable key.
 func TestLocalUploadRejectsUnsignedURL(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -83,9 +81,8 @@ func TestLocalUploadSignatureBindsObjectKey(t *testing.T) {
 	}
 }
 
-// An oversized body must not destroy the object already at that key. os.Create
-// truncates before the copy, so a naive cap would turn "upload something huge"
-// into a way to delete any attachment whose key you can guess.
+// os.Create truncates before the copy, so a naive cap would turn an oversized
+// upload into a way to delete any attachment whose key you can guess.
 func TestOversizedUploadLeavesExistingObjectIntact(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()

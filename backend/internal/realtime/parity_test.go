@@ -8,14 +8,11 @@ import (
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
-// REST/realtime parity. Not a set-equality check: the channel set mixes
-// granularities — agents:<tenant> and peer:<tenant> are tenant-wide while
-// conv:<id> is per-conversation — so there is no conversation-id set to compare
-// a scope against. What must hold is that an event reaches an operator iff
-// policy would let them read it.
+// REST/realtime parity. Not set equality: the channel set mixes granularities
+// (agents:<tenant> vs conv:<id>), so what must hold is that an event reaches an
+// operator iff policy would let them read it.
 //
-// operatorChannels mirrors what agentSubscriptions builds, driven by the same
-// policy.Scope, so a divergence between the two shows up here.
+// operatorChannels mirrors agentSubscriptions off the same policy.Scope.
 func operatorChannels(p *principal.Principal, assignedConvIDs []string) map[string]bool {
 	scope := policy.Scope(p, policy.ConversationsList)
 	if scope.DenyAll() {
@@ -91,9 +88,7 @@ func TestEventDeliveryMatchesPolicy(t *testing.T) {
 	}
 }
 
-// A peer event must never reach an operator without peer_access, whatever their
-// platform role. Owner/admin are tenant-wide for support but peer is their own
-// opt-in.
+// Peer is the operator's own opt-in, whatever their platform role.
 func TestPeerEventNeverReachesNonPeerOperator(t *testing.T) {
 	for _, role := range []models.PlatformRole{models.PlatformAgent, models.PlatformAdmin, models.PlatformOwner} {
 		subs := operatorChannels(operator(role, false), nil)
@@ -103,8 +98,7 @@ func TestPeerEventNeverReachesNonPeerOperator(t *testing.T) {
 	}
 }
 
-// peer_access changes take effect on a live socket, not only at reconnect — a
-// revoke must stop delivery immediately.
+// A peer_access revoke must stop delivery on a live socket, not at reconnect.
 func TestPeerAccessReconciliation(t *testing.T) {
 	fn := &fakeNode{}
 	p := &CentrifugePublisher{node: fn}
@@ -124,8 +118,7 @@ func TestPeerAccessReconciliation(t *testing.T) {
 	}
 }
 
-// The channel set must follow the scope, so granting peer_access is the only
-// thing that adds the peer channel.
+// Granting peer_access is the only thing that adds the peer channel.
 func TestChannelSetFollowsScope(t *testing.T) {
 	without := operatorChannels(operator(models.PlatformAgent, false), nil)
 	with := operatorChannels(operator(models.PlatformAgent, true), nil)

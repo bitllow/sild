@@ -10,13 +10,8 @@ import (
 	"github.com/bitllow/sild/backend/internal/testutil"
 )
 
-// The support/peer boundary used to be restated inside buildFilters; it now
-// comes from policy.Scope. This is the regression guard for that move: an
-// operator without peer_access must see zero peer rows through the unified list,
-// by every route into it.
-//
-// Each sub-case is a distinct door into the same data, and each one leaked in an
-// earlier iteration of this refactor.
+// An operator without peer_access must see zero peer rows, by every door into
+// the list — the guard on the kind boundary policy.Scope owns.
 func TestUnifiedListNeverLeaksPeerToNonPeerOperator(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant("plate")
@@ -69,8 +64,7 @@ func TestUnifiedListNeverLeaksPeerToNonPeerOperator(t *testing.T) {
 	}
 }
 
-// The same operator WITH peer_access sees the peer conversation — proving the
-// probes above actually reach it and are not passing on an empty dataset.
+// Proves the probes above reach real data rather than passing on an empty set.
 func TestPeerAccessOperatorSeesPeerRows(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()

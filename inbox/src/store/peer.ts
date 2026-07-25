@@ -208,8 +208,7 @@ export class PeerStore {
     }
   };
 
-  // runSearch replaces the list with server search hits. Search is a filter on
-  // the same list endpoint, so it returns full rows — no per-hit hydration.
+  // Search is a filter on the same list endpoint, so it returns full rows.
   private runSearch = async (q: string) => {
     const seq = ++this.searchSeq;
     runInAction(() => {
@@ -322,8 +321,7 @@ export class PeerStore {
       id: c.id,
       reference: c.reference || c.id,
       participants,
-      // A search hit previews the MATCHING fragment, not the newest message —
-      // otherwise a match in an old message looks unrelated.
+      // Preview the matching fragment, or an old-message hit looks unrelated.
       preview: snippet || c.last_message?.body || "",
       time: relativeTime(c.last_activity),
       lastActivity: c.last_activity,
@@ -390,8 +388,7 @@ export class PeerStore {
     // silently lost. Attachments are likewise cleared only on success (refs()).
     const refs = this.atts.refs();
     try {
-      // Peer sends are ordinary participant messages; the implicit join happens
-      // server-side because the caller is an operator and the conversation is peer.
+      // The implicit join happens server-side, from operator + peer conversation.
       const msg = await adminApi.postMessage(id, body, "participants", refs);
       runInAction(() => {
         this.composer = "";

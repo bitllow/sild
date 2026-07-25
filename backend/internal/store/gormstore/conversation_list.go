@@ -10,20 +10,16 @@ import (
 	"gorm.io/gorm"
 )
 
-// repAssignment keeps one row per conversation: a conversation can carry several
-// assignments (AddAssignment), but a list row is per-conversation. The subquery
-// scans ALL of a conversation's assignments — no status filter — so the
-// representative is the true latest; status/assignee filters then apply to it.
-// Without this a conversation duplicates rows, pagination slots and React keys.
+// repAssignment keeps one row per conversation by joining only the latest
+// assignment. The subquery is unfiltered so the representative is the true
+// latest; status/assignee filters then apply to it.
 const repAssignment = `LEFT JOIN assignments a ON a.conversation_id = conversations.id
 	AND NOT EXISTS (SELECT 1 FROM assignments a2
 		WHERE a2.conversation_id = a.conversation_id
 		  AND (a2.created_at > a.created_at OR (a2.created_at = a.created_at AND a2.id > a.id)))`
 
-// lastActivityExpr is the denormalized ordering key. It is MUTABLE — every
-// inbound message rewrites last_message_at — so paging on it is live-view, not
-// snapshot: rows can move between pages while a client scrolls. Clients
-// deduplicate by conversation id and refresh page one on a realtime reorder.
+// lastActivityExpr is MUTABLE — every inbound message rewrites it — so paging on
+// it is live-view: rows can move between pages while a client scrolls.
 const lastActivityExpr = `COALESCE(conversations.last_message_at, conversations.created_at)`
 
 func conversationSortExpr(k store.SortKey) string {
@@ -37,18 +33,14 @@ func conversationSortExpr(k store.SortKey) string {
 	}
 }
 
-// List is the single conversation list. It replaces ListQueue, ListPeers and
-// ListForUser, which were this query with different hard-coded filters.
-//
-// scope is the policy ceiling and is applied first; q can only narrow it.
+// List is the one conversation list. scope is the policy ceiling; q narrows it.
 func (r *conversationRepo) List(ctx context.Context, scope policy.ResourceScope, q store.ConversationQuery) (store.Page[store.ConversationItem], error) {
 	empty := store.Page[store.ConversationItem]{}
 	if scope.DenyAll() {
 		return empty, nil
 	}
 
-	// Select explicitly: the assignment join also has an `id`, and an unqualified
-	// SELECT * across the join lets the scan pick the wrong one.
+	// Explicit select: the assignment join also has an `id`.
 	db := r.db.WithContext(ctx).Model(&models.Conversation{}).
 		Select("conversations.*").
 		Joins(repAssignment).
@@ -69,16 +61,14 @@ func (r *conversationRepo) List(ctx context.Context, scope policy.ResourceScope,
 	if err != nil {
 		return empty, err
 	}
-	// waiting_since orders by the ASSIGNMENT's created_at, which is not a column
-	// on the conversation row Paginate scanned — so its cursor value would be the
-	// conversation's last activity and the next page would compare it against an
-	// unrelated timestamp. enrich has just loaded the representative assignment,
-	// so re-mint the cursor from the value the query actually ordered by.
+	// waiting_since orders by the assignment's created_at, which is not on the
+	// conversation row Paginate scanned — so re-mint the cursor from the value the
+	// query actually ordered by.
 	if q.Sort == store.SortWaitingSince && out.NextCursor != nil && len(out.Items) > 0 {
 		last := out.Items[len(out.Items)-1]
 		if last.Assignment == nil {
-			// No assignment means no position on this sort key; stopping is
-			// correct rather than emitting a cursor that cannot be resumed.
+			// No assignment, so no position on this key: stop rather than emit an
+			// unresumable cursor.
 			out.NextCursor, out.HasMore = nil, false
 		} else {
 			v := last.Assignment.CreatedAt
@@ -88,9 +78,8 @@ func (r *conversationRepo) List(ctx context.Context, scope policy.ResourceScope,
 	return out, nil
 }
 
-// applyScope translates the policy ceiling into SQL. Everything downstream sees
-// only rows the caller may see, so aggregates and ordering cannot leak what a
-// later filter would have hidden.
+// applyScope translates the policy ceiling into SQL, so nothing downstream sees
+// a row the caller may not.
 func applyScope(db *gorm.DB, scope policy.ResourceScope) *gorm.DB {
 	if kinds := scope.AllowedKinds(); len(kinds) > 0 {
 		db = db.Where("conversations.kind IN ?", kinds)
@@ -101,13 +90,8 @@ func applyScope(db *gorm.DB, scope policy.ResourceScope) *gorm.DB {
 			  AND sm.external_user_id = ?)`, pt)
 	}
 	if scope.RequiresAssignment() {
-		// An assignment must EXIST — anyone's, or nobody's. Not "assigned to the
-		// caller": that is a client filter and lives on the query.
-		//
-		// Archived support conversations are exempt: PurgeHot deletes assignments
-		// while retaining the conversation, and single-object policy admits an
-		// archived formerly-support conversation for ANY agent. Without this the
-		// list would hide exactly what a direct read allows.
+		// An assignment must EXIST — anyone's, not the caller's. Archived support is
+		// exempt: PurgeHot drops its assignment, and policy still admits it.
 		db = db.Where("conversations.kind <> ? OR a.id IS NOT NULL OR conversations.archived_at IS NOT NULL",
 			models.KindSupport)
 	}
@@ -153,8 +137,7 @@ func convSortValue(c *models.Conversation, k store.SortKey) time.Time {
 	return convLastActivity(*c)
 }
 
-// enrich batch-loads members and representative assignments for a page — one
-// query each, never per row.
+// enrich batch-loads members and assignments — one query each, never per row.
 func (r *conversationRepo) enrich(ctx context.Context, tenantID string, page store.Page[models.Conversation]) (store.Page[store.ConversationItem], error) {
 	out := store.Page[store.ConversationItem]{NextCursor: page.NextCursor, HasMore: page.HasMore}
 	if len(page.Items) == 0 {
@@ -177,18 +160,21 @@ func (r *conversationRepo) enrich(ctx context.Context, tenantID string, page sto
 		byConv[m.ConversationID] = append(byConv[m.ConversationID], m)
 	}
 
+	// Only the representative, matching repAssignment — fetching a conversation's
+	// whole assignment history just to discard all but the latest is waste.
 	var assignments []models.Assignment
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND conversation_id IN ?", tenantID, ids).
-		Order("created_at asc, id asc").
+		Where(`NOT EXISTS (SELECT 1 FROM assignments a2
+			WHERE a2.conversation_id = assignments.conversation_id
+			  AND (a2.created_at > assignments.created_at
+			    OR (a2.created_at = assignments.created_at AND a2.id > assignments.id)))`).
 		Find(&assignments).Error; err != nil {
 		return out, err
 	}
-	// Last write wins, matching repAssignment's "latest is representative".
 	repByConv := make(map[string]*models.Assignment, len(ids))
 	for i := range assignments {
-		a := assignments[i]
-		repByConv[a.ConversationID] = &a
+		repByConv[assignments[i].ConversationID] = &assignments[i]
 	}
 
 	out.Items = make([]store.ConversationItem, 0, len(page.Items))

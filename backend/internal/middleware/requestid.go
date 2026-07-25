@@ -9,13 +9,11 @@ import (
 // InboundRequestIDHeader is accepted as a correlation hint only.
 const InboundRequestIDHeader = "X-Request-Id"
 
-// RequestID stamps every response — and every error body — with a canonical
-// server-generated id.
+// RequestID stamps every response and error body with a server-generated id.
 //
-// An inbound X-Request-Id is never echoed as the response id: reflecting an
-// unvalidated client string into every log line and error body is log injection
-// with extra steps. It is validated and carried as a separate correlation field
-// instead.
+// An inbound X-Request-Id is never echoed back: reflecting an unvalidated client
+// string into every log line is log injection. It is kept as a separate
+// correlation field.
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rid := id.New(id.Request)
@@ -28,8 +26,7 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
-// validCorrelationID accepts a conservative charset and length, so a hostile
-// value cannot forge log structure.
+// validCorrelationID keeps a hostile value from forging log structure.
 func validCorrelationID(s string) bool {
 	if s == "" || len(s) > 64 {
 		return false

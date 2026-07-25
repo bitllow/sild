@@ -6,13 +6,11 @@ import (
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/search"
 	"github.com/bitllow/sild/backend/internal/store"
-	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
 )
 
-// ListConversationsInput is one unified list request. It backs every surface
-// that used to have its own endpoint: the support queue, the peer inbox, a
-// user's own conversations, a contact's history, and search.
+// ListConversationsInput is one list request, backing the support queue, the peer
+// inbox, a user's own conversations, a contact's history and search.
 type ListConversationsInput struct {
 	Query store.ConversationQuery
 	// Search, when non-empty, narrows the page to conversations matching the
@@ -36,11 +34,7 @@ type ConversationPage struct {
 }
 
 // ListConversations returns one page of conversations visible to the scope.
-//
-// Search is layered onto the same query rather than forking a second one: the
-// search backend returns matching ids, which narrow the list. That keeps
-// filtering, ordering, scope and pagination in one place — the previous split
-// meant search results were unpaginated and shaped differently from the queue.
+// Search narrows the same query rather than forking a second one.
 func (s *Service) ListConversations(ctx context.Context, tenantID string, scope policy.ResourceScope, in ListConversationsInput) (ConversationPage, error) {
 	if scope.DenyAll() {
 		return ConversationPage{Items: []map[string]any{}}, nil
@@ -58,24 +52,66 @@ func (s *Service) ListConversations(ctx context.Context, tenantID string, scope 
 		return ConversationPage{}, err
 	}
 
+	return s.renderPage(ctx, tenantID, page.Items, in, nil, page.NextCursor, page.HasMore)
+}
+
+// rowExtras holds the per-page lookups a row needs, batched. Resolving these per
+// row cost one query each — 30 rows meant up to 120 extra queries per page.
+type rowExtras struct {
+	subjects   map[string]string
+	agentNames map[string]string
+	unread     map[string]int
+	snippets   map[string]search.ConversationHit
+}
+
+// renderPage batches every per-row lookup, then renders.
+func (s *Service) renderPage(ctx context.Context, tenantID string, items []store.ConversationItem, in ListConversationsInput, snippets map[string]search.ConversationHit, next *store.Cursor, hasMore bool) (ConversationPage, error) {
 	out := ConversationPage{
-		Items:      make([]map[string]any, 0, len(page.Items)),
-		NextCursor: page.NextCursor,
-		HasMore:    page.HasMore,
+		Items:      make([]map[string]any, 0, len(items)),
+		NextCursor: next,
+		HasMore:    hasMore,
 	}
-	for i := range page.Items {
-		out.Items = append(out.Items, s.renderRow(ctx, tenantID, &page.Items[i], in, nil))
+	if len(items) == 0 {
+		return out, nil
+	}
+
+	ids := make([]string, 0, len(items))
+	actors := make([]string, 0, len(items))
+	for i := range items {
+		ids = append(ids, items[i].Conversation.ID)
+		if a := items[i].Assignment; a != nil && a.AssigneeActorID != nil {
+			actors = append(actors, *a.AssigneeActorID)
+		}
+	}
+
+	x := rowExtras{snippets: snippets}
+	x.subjects, _ = s.store.Email().Subjects(ctx, tenantID, ids)
+	x.agentNames = s.agentNames(ctx, tenantID, actors)
+	if in.IncludeUnread && in.UnreadFor != "" {
+		x.unread, _ = s.store.Messages().UnreadCounts(ctx, tenantID, ids, in.UnreadFor)
+	}
+
+	for i := range items {
+		out.Items = append(out.Items, s.renderRow(&items[i], x))
 	}
 	return out, nil
 }
 
-// searchConversations pages the SEARCH, then hydrates that page.
-//
-// The search backend is keyset-pageable on conversation id, so it owns the
-// paging; the list query only turns the page's ids into rows. Taking a fixed
-// slice of matches and paginating THAT would cap results at the slice size and
-// then report has_more:false — the silent truncation this endpoint exists to
-// remove.
+// agentNames resolves distinct actor ids in one pass.
+func (s *Service) agentNames(ctx context.Context, tenantID string, actorIDs []string) map[string]string {
+	out := make(map[string]string, len(actorIDs))
+	for _, id := range actorIDs {
+		if _, done := out[id]; done {
+			continue
+		}
+		out[id] = s.AgentDisplayName(ctx, tenantID, id)
+	}
+	return out
+}
+
+// searchConversations pages the SEARCH, then hydrates that page: the backend is
+// keyset-pageable on conversation id, so it owns the paging. Paginating a fixed
+// slice of matches instead would cap the result set and lie about has_more.
 func (s *Service) searchConversations(ctx context.Context, tenantID string, scope policy.ResourceScope, in ListConversationsInput, q store.ConversationQuery) (ConversationPage, error) {
 	limit := store.ClampLimit(q.Limit, 30)
 	before := ""
@@ -124,24 +160,24 @@ func (s *Service) searchConversations(ctx context.Context, tenantID string, scop
 		byID[page.Items[i].Conversation.ID] = &page.Items[i]
 	}
 	// Preserve the search's ranking rather than the list's ordering.
+	ordered := make([]store.ConversationItem, 0, len(ids))
 	for _, id := range ids {
-		it, ok := byID[id]
-		if !ok {
-			continue // scope dropped it between the two queries
+		if it, ok := byID[id]; ok { // scope may drop one between the two queries
+			ordered = append(ordered, *it)
 		}
-		out.Items = append(out.Items, s.renderRow(ctx, tenantID, it, in, snippets))
 	}
+
+	var next *store.Cursor
 	if out.HasMore {
-		out.NextCursor = &store.Cursor{
-			Key: store.SortID, Order: store.OrderDesc, ID: ids[len(ids)-1],
-		}
+		next = &store.Cursor{Key: store.SortID, Order: store.OrderDesc, ID: ids[len(ids)-1]}
 	}
-	return out, nil
+	return s.renderPage(ctx, tenantID, ordered, in, snippets, next, out.HasMore)
 }
 
 // renderRow builds one list row through the shared view builders, so the queue,
 // the widget and search all render the same shape.
-func (s *Service) renderRow(ctx context.Context, tenantID string, it *store.ConversationItem, in ListConversationsInput, snippets map[string]search.ConversationHit) map[string]any {
+func (s *Service) renderRow(it *store.ConversationItem, x rowExtras) map[string]any {
+	id := it.Conversation.ID
 	conv := views.Conversation(&it.Conversation, it.Members, it.Assignment)
 	conv["kind"] = it.Conversation.Kind
 	conv["last_activity"] = it.LastActivity
@@ -151,48 +187,28 @@ func (s *Service) renderRow(ctx context.Context, tenantID string, it *store.Conv
 			"created_at": it.Conversation.LastMessageAt,
 		}
 	}
-	if subject := s.EmailSubject(ctx, tenantID, it.Conversation.ID); subject != "" {
+	if subject := x.subjects[id]; subject != "" {
 		conv["subject"] = subject
 	}
 
-	// The handling agent's display name, so a messenger surface can label the
-	// row with a real person instead of "Support".
-	if it.Assignment != nil && it.Assignment.AssigneeActorID != nil {
-		if name := s.AgentDisplayName(ctx, tenantID, *it.Assignment.AssigneeActorID); name != "" {
+	// The handling agent's name, so a messenger surface labels the row with a
+	// real person instead of "Support".
+	if a := it.Assignment; a != nil && a.AssigneeActorID != nil {
+		if name := x.agentNames[*a.AssigneeActorID]; name != "" {
 			conv["agent_name"] = name
 		}
 	}
 
-	// Search annotations describe why THIS row matched. Without them a hit on an
-	// older message renders with the newest message as its preview and the
-	// operator cannot see the connection.
-	if hit, ok := snippets[it.Conversation.ID]; ok {
-		if hit.Snippet != "" {
-			conv["snippet"] = hit.Snippet
-		}
-		conv["matched_fields"] = hit.MatchedFields
+	// A search hit previews the MATCHING fragment: a match in an older message
+	// would otherwise render with an unrelated newest-message preview.
+	if hit, ok := x.snippets[id]; ok && hit.Snippet != "" {
+		conv["snippet"] = hit.Snippet
 	}
 
-	if in.IncludeUnread && in.UnreadFor != "" {
-		conv["unread_count"] = s.unreadFor(ctx, tenantID, it.Conversation.ID, in.UnreadFor)
+	if x.unread != nil {
+		conv["unread_count"] = x.unread[id]
 	}
 	return conv
-}
-
-func (s *Service) unreadFor(ctx context.Context, tenantID, convID, externalUserID string) int {
-	const includeInternal = false
-	uid := externalUserID
-	var lastReadID string
-	if rr, err := s.store.Receipts().Get(ctx, tenantID, convID, store.Participant{
-		Kind: models.MemberUser, ExternalUserID: &uid,
-	}); err == nil {
-		lastReadID = rr.LastReadMessageID
-	}
-	n, err := s.store.Messages().UnreadCount(ctx, tenantID, convID, lastReadID, includeInternal)
-	if err != nil {
-		return 0
-	}
-	return n
 }
 
 // ListContacts returns one page of the tenant's contacts, scoped.

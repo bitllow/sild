@@ -8,9 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Body size defaults. Limits differ by route — a JSON mutation gets kilobytes,
-// an attachment PUT gets the upload cap — which is why the limit belongs in the
-// per-route descriptor rather than inside one decoder.
+// Body size defaults, per route: a JSON mutation gets kilobytes, an attachment
+// PUT the upload cap.
 const (
 	BodyLimitJSON    int64 = 256 << 10 // 256 KiB
 	BodyLimitEmail   int64 = 25 << 20  // 25 MiB — inbound mail carries attachments
@@ -18,12 +17,9 @@ const (
 	BodyLimitDefault int64 = 1 << 20   // 1 MiB
 )
 
-// BodyLimit caps the request body before the handler reads it.
-//
-// This is middleware and not part of JSON decoding on purpose: localUploadPut
-// copies the raw body and never decodes JSON, so a decoder-level cap would not
-// run on precisely the unauthenticated unbounded write it was meant to close.
-// Inbound email has the same shape.
+// BodyLimit caps the request body before the handler reads it. Middleware rather
+// than part of JSON decoding, because the raw upload and inbound-email paths
+// never decode JSON — and those are the unbounded writes.
 func BodyLimit(max int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if max > 0 {
@@ -33,8 +29,7 @@ func BodyLimit(max int64) gin.HandlerFunc {
 	}
 }
 
-// IsBodyTooLarge reports whether an error came from the body cap, so handlers
-// can answer 413 rather than a generic read failure.
+// IsBodyTooLarge reports whether an error came from the body cap (413, not 500).
 func IsBodyTooLarge(err error) bool {
 	if err == nil {
 		return false

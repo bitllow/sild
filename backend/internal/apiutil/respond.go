@@ -7,15 +7,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RespondPage writes the uniform list envelope:
-//
-//	{ "items": [...], "next_cursor": "<opaque>|null", "has_more": bool }
-//
-// Every collection endpoint returns this shape, so a client can write one list
-// parser. Resource-specific extras (the queue's counters) sit beside the
-// envelope via RespondPageWith, never inside it.
-//
-// next_cursor is null exactly when has_more is false.
+// RespondPage writes the uniform list envelope — {items, next_cursor, has_more}
+// — so a client needs one list parser. next_cursor is null exactly when has_more
+// is false; resource extras go beside it via RespondPageWith, never inside it.
 func RespondPage[T any](c *gin.Context, resource string, page store.Page[T]) {
 	RespondPageWith(c, resource, page, nil)
 }
@@ -37,9 +31,8 @@ func RespondPageWith[T any](c *gin.Context, resource string, page store.Page[T],
 	c.JSON(http.StatusOK, body)
 }
 
-// RespondCatchUp writes a ?since= reconnect read. It keeps the same envelope so
-// clients need only one list parser, but next_cursor is always null: the
-// continuation token is the last message id, not a cursor.
+// RespondCatchUp writes a ?since= reconnect read. Same envelope, but next_cursor
+// is always null: the continuation token is the last message id.
 func RespondCatchUp[T any](c *gin.Context, page store.Page[T]) {
 	items := page.Items
 	if items == nil {

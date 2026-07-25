@@ -10,15 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// getPrincipal: GET /v1/principal — who am I, for any credential.
-//
-// Replaces GET /v1/admin/me, which was consumer-shaped ("me the operator").
-// The response is discriminated by kind rather than the route being restricted.
-//
-// Grants carry the SCOPE each action is held over, not just its name: an agent
-// with peer_access and one without both hold conversations.list, and only the
-// scope distinguishes them. A flat list would send the inbox back to reading
-// peer_access itself — the duplicate policy logic this exists to remove.
+// getPrincipal: GET /v1/principal — who am I, discriminated by kind. Grants carry
+// each action's SCOPE, not just its name: two agents can both hold
+// conversations.list and only the scope tells them apart.
 func (h *Handler) getPrincipal(c *gin.Context) {
 	p := middleware.Get(c)
 	if p == nil {

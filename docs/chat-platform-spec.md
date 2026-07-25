@@ -216,10 +216,8 @@ meaningful alongside `kind=support`.
 `sort=waiting_since` requires `kind=support` (400 otherwise): the key comes from
 the assignment, and a keyset over a NULL-bearing key is undefined.
 
-Rows returned for a `?q=` query carry **representation annotations** — `snippet`
-(the matching fragment) and `matched_fields` (`message.body`,
-`member.metadata`, `member.external_user_id`). Without them a hit in an older
-message renders with an unrelated preview.
+Rows returned for a `?q=` query carry a `snippet` — the matching fragment.
+Without it a hit in an older message renders with an unrelated preview.
 
 ```
 POST   /v1/conversations              -- create; see §4.1
