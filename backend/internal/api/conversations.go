@@ -116,6 +116,23 @@ func applyConversationFilters(c *gin.Context, q *store.ConversationQuery) bool {
 		httpx.BadRequest(c, "sort=waiting_since requires kind=support")
 		return false
 	}
+
+	// A search page is produced by the search query, which cannot express these.
+	// Applying them afterwards would thin the page and make has_more lie, so the
+	// combination is refused rather than answered wrongly.
+	if c.Query("q") != "" {
+		switch {
+		case q.AssignmentStatus != nil:
+			httpx.BadRequest(c, "q cannot be combined with assignment_status")
+			return false
+		case q.Participant != "":
+			httpx.BadRequest(c, "q cannot be combined with participant")
+			return false
+		case q.Unassigned:
+			httpx.BadRequest(c, "q cannot be combined with assignee=none")
+			return false
+		}
+	}
 	return true
 }
 
@@ -149,10 +166,11 @@ func (h *Handler) queueCounts(c *gin.Context, q *store.ConversationQuery) <-chan
 func conversationPageDefaults(q string) apiutil.PageDefaults {
 	if q != "" {
 		return apiutil.PageDefaults{
-			Resource: resourceConversations,
-			Limit:    30,
-			Sort:     store.SortID,
-			Order:    store.OrderDesc,
+			Resource:   resourceConversations,
+			Limit:      30,
+			Sort:       store.SortID,
+			Order:      store.OrderDesc,
+			FixedOrder: true, // the search backend queries newest-first only
 		}
 	}
 	return apiutil.PageDefaults{

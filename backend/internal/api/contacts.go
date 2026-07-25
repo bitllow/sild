@@ -36,10 +36,11 @@ func (h *Handler) listContacts(c *gin.Context) {
 		return
 	}
 	page, ok := apiutil.PageParams(c, apiutil.PageDefaults{
-		Resource: resourceContacts,
-		Limit:    30,
-		Sort:     store.SortLastActivity,
-		Order:    store.OrderDesc,
+		Resource:   resourceContacts,
+		Limit:      30,
+		Sort:       store.SortLastActivity,
+		Order:      store.OrderDesc,
+		FixedOrder: true,
 	})
 	if !ok {
 		return

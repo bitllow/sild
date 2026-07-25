@@ -358,10 +358,11 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 // seed 150 keys and the second page works, because nothing here is special-cased.
 func settingsPageDefaults(resource string) apiutil.PageDefaults {
 	return apiutil.PageDefaults{
-		Resource: resource,
-		Limit:    100,
-		Sort:     store.SortID,
-		Order:    store.OrderDesc,
+		Resource:   resource,
+		Limit:      100,
+		Sort:       store.SortID,
+		Order:      store.OrderDesc,
+		FixedOrder: true,
 	}
 }
 

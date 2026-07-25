@@ -22,9 +22,18 @@ const (
 // never decode JSON — and those are the unbounded writes.
 func BodyLimit(max int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if max > 0 {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, max)
+		if max <= 0 {
+			c.Next()
+			return
 		}
+		// Reject on the declared length before reading a byte; MaxBytesReader then
+		// covers a chunked or lying Content-Length. Answering here keeps the 413
+		// contract, since handlers map every decode failure to 400.
+		if c.Request.ContentLength > max {
+			FailBodyTooLarge(c)
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, max)
 		c.Next()
 	}
 }

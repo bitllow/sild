@@ -41,6 +41,10 @@ type PageDefaults struct {
 	// Sorts lists the sort keys this resource accepts from a client. Empty means
 	// only the default.
 	Sorts []store.SortKey
+	// FixedOrder rejects ?order= — set for collections whose storage queries in
+	// one direction, so a cursor cannot be labelled with an order the query
+	// never applied.
+	FixedOrder bool
 }
 
 // PageParams reads limit/cursor/sort/order and validates that the cursor was
@@ -67,6 +71,10 @@ func PageParams(c *gin.Context, d PageDefaults) (store.PageParams, bool) {
 	if raw := c.Query("order"); raw != "" {
 		if raw != string(store.OrderAsc) && raw != string(store.OrderDesc) {
 			httpx.BadRequest(c, "order must be asc or desc")
+			return p, false
+		}
+		if d.FixedOrder && store.Order(raw) != p.Order {
+			httpx.BadRequest(c, "this collection does not support an order override")
 			return p, false
 		}
 		p.Order = store.Order(raw)

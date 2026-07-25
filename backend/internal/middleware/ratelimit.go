@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net"
 	"sync"
 	"time"
 
@@ -34,7 +35,7 @@ func rateLimit(perMinute int) gin.HandlerFunc {
 	)
 	return func(c *gin.Context) {
 		now := time.Now().Truncate(time.Minute)
-		key := c.ClientIP()
+		key := limiterKey(c)
 
 		mu.Lock()
 		if now.After(window) {
@@ -52,4 +53,16 @@ func rateLimit(perMinute int) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// limiterKey is the socket peer address, NOT ClientIP(): gin honours
+// X-Forwarded-For from any peer unless trusted proxies are configured, so a
+// key derived from it is attacker-chosen and the limit is trivially bypassed.
+// Behind a real proxy this collapses to the proxy — a coarser but honest bucket.
+func limiterKey(c *gin.Context) string {
+	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	if err != nil {
+		return c.Request.RemoteAddr
+	}
+	return host
 }

@@ -157,6 +157,11 @@ func (h *Handler) removeMember(c *gin.Context) {
 
 // addAssignment: POST /v1/conversations/:id/assignments (§4.1).
 func (h *Handler) addAssignment(c *gin.Context) {
+	// Authorized against the conversation: the route accepts any credential, and
+	// only a key or an operator may queue one.
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.AssignmentsCreate, c.Param("id")) {
+		return
+	}
 	a, err := h.svc.AddAssignment(c.Request.Context(), apiutil.Tenant(c), c.Param("id"))
 	if err != nil {
 		apiutil.Fail(c, err)

@@ -30,6 +30,12 @@ type SearchInput struct {
 	Before        string
 	Limit         int
 	Kind          *models.ConversationKind
+	// Structured filters the backend can express in SQL. They must be applied
+	// inside the search query: applying them afterwards, to an already-limited
+	// page of ids, yields sparse pages and a lying has_more.
+	Status   *models.ConversationStatus
+	Assignee string
+	ConvRole string
 }
 
 // Search executes a query against hot data only (§4.3). The policy scope decides
@@ -45,6 +51,18 @@ func (s *SearchService) Search(ctx context.Context, tenantID string, scope polic
 	}
 	q := search.Parse(in.Query)
 	q.ResolveAssignee(in.CallerActorID)
+	if in.Status != nil {
+		v := string(*in.Status)
+		q.Status = &v
+	}
+	if in.Assignee != "" {
+		v := in.Assignee
+		q.Assignee = &v
+	}
+	if in.ConvRole != "" {
+		v := in.ConvRole
+		q.Role = &v
+	}
 	q.Kinds = searchKinds(scope, in.Kind)
 	// Only a peer-scoped search widens to raw metadata; support search stays
 	// bound to the tenant's searchable_metadata_keys allowlist.

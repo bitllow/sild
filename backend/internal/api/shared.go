@@ -145,10 +145,11 @@ func (h *Handler) listMessages(c *gin.Context) {
 	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
 
 	page, ok := apiutil.PageParams(c, apiutil.PageDefaults{
-		Resource: resourceMessages,
-		Limit:    50,
-		Sort:     store.SortID,
-		Order:    store.OrderDesc,
+		Resource:   resourceMessages,
+		Limit:      50,
+		Sort:       store.SortID,
+		Order:      store.OrderDesc,
+		FixedOrder: true,
 	})
 	if !ok {
 		return
