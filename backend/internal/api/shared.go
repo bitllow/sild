@@ -178,7 +178,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 			apiutil.RespondCatchUp(c, archivedSince(msgs, since, page.Limit))
 			return
 		}
-		apiutil.RespondPage(c, resourceMessages, store.SlicePage(msgs, page, archivedMessageID))
+		apiutil.RespondPage(c, resourceMessages, archivedBefore(msgs, cursorID(page), page.Limit))
 		return
 	}
 
@@ -221,6 +221,41 @@ func cursorID(p store.PageParams) string {
 func archivedMessageID(m *map[string]any) string {
 	id, _ := (*m)["id"].(string)
 	return id
+}
+
+// archivedBefore mirrors messageRepo.ListBefore over a rehydrated archive: the
+// newest `limit` messages strictly before the cursor, returned OLDEST-FIRST with
+// the cursor set to the page's oldest id.
+//
+// The sink stores messages ascending (the archive job drains ListAfter), so a
+// generic descending slicer would read the wrong end and re-serve page one
+// forever. Matching the hot path exactly is what lets a client page an archived
+// conversation without knowing it is archived.
+func archivedBefore(msgs []map[string]any, before string, limit int) store.Page[map[string]any] {
+	end := len(msgs)
+	if before != "" {
+		end = 0
+		for i := range msgs {
+			if archivedMessageID(&msgs[i]) >= before {
+				break
+			}
+			end = i + 1
+		}
+	}
+	window := msgs[:end]
+
+	page := store.Page[map[string]any]{}
+	if len(window) > limit {
+		page.HasMore = true
+		window = window[len(window)-limit:]
+	}
+	page.Items = window
+	if page.HasMore && len(window) > 0 {
+		page.NextCursor = &store.Cursor{
+			Key: store.SortID, Order: store.OrderDesc, ID: archivedMessageID(&window[0]),
+		}
+	}
+	return page
 }
 
 // archivedSince is the catch-up read over a rehydrated archive: everything after

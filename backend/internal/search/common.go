@@ -132,7 +132,10 @@ func collectHits(ctx context.Context, db, filtered *gorm.DB, q Query, dialect co
 		filtered = filtered.Where("c.id < ?", q.Before)
 	}
 	var ids []string
-	if err := filtered.Order("c.created_at DESC").Limit(q.Limit).Pluck("c.id", &ids).Error; err != nil {
+	// Order by the same column the keyset predicate above filters on. ULIDs are
+	// chronological, so this is still newest-first, but ordering by created_at
+	// while paging on id would let rows sharing a timestamp be skipped.
+	if err := filtered.Order("c.id DESC").Limit(q.Limit).Pluck("c.id", &ids).Error; err != nil {
 		return Results{}, err
 	}
 	res := Results{Conversations: make([]ConversationHit, 0, len(ids))}

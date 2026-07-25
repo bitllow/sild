@@ -25,13 +25,7 @@ func (h *Handler) listConversations(c *gin.Context) {
 		return
 	}
 
-	page, ok := apiutil.PageParams(c, apiutil.PageDefaults{
-		Resource: resourceConversations,
-		Limit:    30,
-		Sort:     store.SortLastActivity,
-		Order:    store.OrderDesc,
-		Sorts:    []store.SortKey{store.SortCreated, store.SortWaitingSince},
-	})
+	page, ok := apiutil.PageParams(c, conversationPageDefaults(c.Query("q")))
 	if !ok {
 		return
 	}
@@ -147,6 +141,29 @@ func (h *Handler) queueCounts(c *gin.Context, q *store.ConversationQuery) (gin.H
 		"unassigned": counts.Unassigned,
 		"closed":     counts.Closed,
 	}}, true
+}
+
+// conversationPageDefaults picks the paging contract. A search page is ordered
+// and paged by the SEARCH backend (keyset on conversation id), so the client does
+// not choose the sort — and the cursor is minted and validated as an id cursor,
+// which is what keeps a search cursor from being replayed against the ordinary
+// list.
+func conversationPageDefaults(q string) apiutil.PageDefaults {
+	if q != "" {
+		return apiutil.PageDefaults{
+			Resource: resourceConversations,
+			Limit:    30,
+			Sort:     store.SortID,
+			Order:    store.OrderDesc,
+		}
+	}
+	return apiutil.PageDefaults{
+		Resource: resourceConversations,
+		Limit:    30,
+		Sort:     store.SortLastActivity,
+		Order:    store.OrderDesc,
+		Sorts:    []store.SortKey{store.SortCreated, store.SortWaitingSince},
+	}
 }
 
 func adminIDOf(c *gin.Context) string {

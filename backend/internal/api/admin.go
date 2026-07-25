@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
@@ -212,7 +213,7 @@ func (h *Handler) listAPIKeys(c *gin.Context) {
 			"created_at": k.CreatedAt, "revoked_at": k.RevokedAt,
 		})
 	}
-	apiutil.RespondPage(c, resourceAPIKeys, store.SlicePage(out, page, mapID))
+	apiutil.RespondPage(c, resourceAPIKeys, store.SlicePage(descByID(out), page, mapID))
 }
 
 func (h *Handler) revokeAPIKey(c *gin.Context) {
@@ -258,7 +259,7 @@ func (h *Handler) listWebhooks(c *gin.Context) {
 		}
 		out = append(out, map[string]any{"id": e.ID, "url": e.URL, "events": events, "active": e.Active, "created_at": e.CreatedAt})
 	}
-	apiutil.RespondPage(c, resourceWebhooks, store.SlicePage(out, page, mapID))
+	apiutil.RespondPage(c, resourceWebhooks, store.SlicePage(descByID(out), page, mapID))
 }
 
 func (h *Handler) deleteWebhook(c *gin.Context) {
@@ -279,6 +280,7 @@ func (h *Handler) listDeliveries(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
+	sort.Slice(ds, func(i, j int) bool { return ds[i].ID > ds[j].ID })
 	apiutil.RespondPage(c, resourceDeliveries, store.SlicePage(ds, page, func(d *models.WebhookDelivery) string { return d.ID }))
 }
 
@@ -302,7 +304,7 @@ func (h *Handler) listTeam(c *gin.Context) {
 			"has_password": a.PasswordHash != nil, "created_at": a.CreatedAt,
 		})
 	}
-	apiutil.RespondPage(c, resourceTeam, store.SlicePage(out, page, mapID))
+	apiutil.RespondPage(c, resourceTeam, store.SlicePage(descByID(out), page, mapID))
 }
 
 func (h *Handler) updateWebhook(c *gin.Context) {
@@ -398,4 +400,12 @@ func settingsPageDefaults(resource string) apiutil.PageDefaults {
 func mapID(m *map[string]any) string {
 	id, _ := (*m)["id"].(string)
 	return id
+}
+
+// descByID orders rendered settings rows newest-first, matching the descending
+// cursor SlicePage mints. The repos return them oldest-first, and a cursor taken
+// from an ascending slice would re-serve page one instead of advancing.
+func descByID(rows []map[string]any) []map[string]any {
+	sort.Slice(rows, func(i, j int) bool { return mapID(&rows[i]) > mapID(&rows[j]) })
+	return rows
 }

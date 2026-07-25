@@ -9,8 +9,8 @@ import (
 // call with a host-generated id (§4.5) — no special handling here. TTL is
 // clamped to the configured bounds.
 func (s *Service) MintToken(ctx context.Context, tenantID, userID string, ttlSeconds int) (string, time.Time, error) {
-	if userID == "" {
-		return "", time.Time{}, invalid("user_id is required")
+	if err := ValidateExternalUserID(userID); err != nil {
+		return "", time.Time{}, err
 	}
 	if ttlSeconds <= 0 {
 		ttlSeconds = s.cfg.Auth.DefaultTokenTTLSecs

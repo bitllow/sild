@@ -107,8 +107,8 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 
 // buildMember constructs a member row with materialized search text.
 func (s *Service) buildMember(ctx context.Context, tenantID, convID string, mi MemberInput) (*models.ConversationMember, error) {
-	if mi.UserID == "" {
-		return nil, invalid("member user_id is required")
+	if err := ValidateExternalUserID(mi.UserID); err != nil {
+		return nil, err
 	}
 	kind := mi.Kind
 	if kind == "" {
@@ -233,8 +233,11 @@ func (s *Service) CloseConversation(ctx context.Context, tenantID, convID string
 
 // Remap rewrites a guest id to a real user, preserving history (§4.5).
 func (s *Service) Remap(ctx context.Context, tenantID, convID, fromUserID, toUserID string) error {
-	if fromUserID == "" || toUserID == "" {
-		return invalid("from_user_id and to_user_id are required")
+	if err := ValidateExternalUserID(fromUserID); err != nil {
+		return err
+	}
+	if err := ValidateExternalUserID(toUserID); err != nil {
+		return err
 	}
 	if err := s.store.Members().Remap(ctx, tenantID, convID, fromUserID, toUserID); err != nil {
 		return mapStoreErr(err)

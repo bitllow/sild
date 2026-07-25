@@ -49,23 +49,8 @@ func (s *Service) ListConversations(ctx context.Context, tenantID string, scope 
 	q := in.Query
 	q.TenantID = tenantID
 
-	snippets := map[string]search.ConversationHit{}
 	if in.Search != "" {
-		res, err := s.search.Search(ctx, tenantID, scope, SearchInput{
-			Query: in.Search, CallerActorID: in.CallerActorID, Kind: q.Kind, Limit: 100,
-		})
-		if err != nil {
-			return ConversationPage{}, err
-		}
-		ids := make([]string, 0, len(res.Conversations))
-		for _, hit := range res.Conversations {
-			ids = append(ids, hit.ConversationID)
-			snippets[hit.ConversationID] = hit
-		}
-		if len(ids) == 0 {
-			return ConversationPage{Items: []map[string]any{}}, nil
-		}
-		q.IDs = ids
+		return s.searchConversations(ctx, tenantID, scope, in, q)
 	}
 
 	page, err := s.store.Conversations().List(ctx, scope, q)
@@ -79,7 +64,77 @@ func (s *Service) ListConversations(ctx context.Context, tenantID string, scope 
 		HasMore:    page.HasMore,
 	}
 	for i := range page.Items {
-		out.Items = append(out.Items, s.renderRow(ctx, tenantID, &page.Items[i], in, snippets))
+		out.Items = append(out.Items, s.renderRow(ctx, tenantID, &page.Items[i], in, nil))
+	}
+	return out, nil
+}
+
+// searchConversations pages the SEARCH, then hydrates that page.
+//
+// The search backend is keyset-pageable on conversation id, so it owns the
+// paging; the list query only turns the page's ids into rows. Taking a fixed
+// slice of matches and paginating THAT would cap results at the slice size and
+// then report has_more:false — the silent truncation this endpoint exists to
+// remove.
+func (s *Service) searchConversations(ctx context.Context, tenantID string, scope policy.ResourceScope, in ListConversationsInput, q store.ConversationQuery) (ConversationPage, error) {
+	limit := store.ClampLimit(q.Limit, 30)
+	before := ""
+	if q.Cursor != nil {
+		before = q.Cursor.ID
+	}
+
+	res, err := s.search.Search(ctx, tenantID, scope, SearchInput{
+		Query: in.Search, CallerActorID: in.CallerActorID, Kind: q.Kind,
+		Before: before, Limit: limit + 1, // +1 probes for another page
+	})
+	if err != nil {
+		return ConversationPage{}, err
+	}
+
+	hits := res.Conversations
+	out := ConversationPage{Items: []map[string]any{}}
+	if len(hits) > limit {
+		out.HasMore = true
+		hits = hits[:limit]
+	}
+	if len(hits) == 0 {
+		return out, nil
+	}
+
+	snippets := make(map[string]search.ConversationHit, len(hits))
+	ids := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		ids = append(ids, hit.ConversationID)
+		snippets[hit.ConversationID] = hit
+	}
+
+	// Hydrate exactly this page: the ids are already the page, so the list query
+	// must not paginate again.
+	hydrate := q
+	hydrate.IDs = ids
+	hydrate.Cursor = nil
+	hydrate.Limit = len(ids)
+	page, err := s.store.Conversations().List(ctx, scope, hydrate)
+	if err != nil {
+		return ConversationPage{}, err
+	}
+
+	byID := make(map[string]*store.ConversationItem, len(page.Items))
+	for i := range page.Items {
+		byID[page.Items[i].Conversation.ID] = &page.Items[i]
+	}
+	// Preserve the search's ranking rather than the list's ordering.
+	for _, id := range ids {
+		it, ok := byID[id]
+		if !ok {
+			continue // scope dropped it between the two queries
+		}
+		out.Items = append(out.Items, s.renderRow(ctx, tenantID, it, in, snippets))
+	}
+	if out.HasMore {
+		out.NextCursor = &store.Cursor{
+			Key: store.SortID, Order: store.OrderDesc, ID: ids[len(ids)-1],
+		}
 	}
 	return out, nil
 }

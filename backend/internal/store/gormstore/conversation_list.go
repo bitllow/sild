@@ -65,7 +65,27 @@ func (r *conversationRepo) List(ctx context.Context, scope policy.ResourceScope,
 	if err != nil {
 		return empty, err
 	}
-	return r.enrich(ctx, q.TenantID, page)
+	out, err := r.enrich(ctx, q.TenantID, page)
+	if err != nil {
+		return empty, err
+	}
+	// waiting_since orders by the ASSIGNMENT's created_at, which is not a column
+	// on the conversation row Paginate scanned — so its cursor value would be the
+	// conversation's last activity and the next page would compare it against an
+	// unrelated timestamp. enrich has just loaded the representative assignment,
+	// so re-mint the cursor from the value the query actually ordered by.
+	if q.Sort == store.SortWaitingSince && out.NextCursor != nil && len(out.Items) > 0 {
+		last := out.Items[len(out.Items)-1]
+		if last.Assignment == nil {
+			// No assignment means no position on this sort key; stopping is
+			// correct rather than emitting a cursor that cannot be resumed.
+			out.NextCursor, out.HasMore = nil, false
+		} else {
+			v := last.Assignment.CreatedAt
+			out.NextCursor.Value = &v
+		}
+	}
+	return out, nil
 }
 
 // applyScope translates the policy ceiling into SQL. Everything downstream sees
@@ -83,7 +103,13 @@ func applyScope(db *gorm.DB, scope policy.ResourceScope) *gorm.DB {
 	if scope.RequiresAssignment() {
 		// An assignment must EXIST — anyone's, or nobody's. Not "assigned to the
 		// caller": that is a client filter and lives on the query.
-		db = db.Where("conversations.kind <> ? OR a.id IS NOT NULL", models.KindSupport)
+		//
+		// Archived support conversations are exempt: PurgeHot deletes assignments
+		// while retaining the conversation, and single-object policy admits an
+		// archived formerly-support conversation for ANY agent. Without this the
+		// list would hide exactly what a direct read allows.
+		db = db.Where("conversations.kind <> ? OR a.id IS NOT NULL OR conversations.archived_at IS NOT NULL",
+			models.KindSupport)
 	}
 	return db
 }

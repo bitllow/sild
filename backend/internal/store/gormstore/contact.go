@@ -85,7 +85,10 @@ func (r *contactRepo) contactBase(ctx context.Context, tenantID string, scope po
 		q = q.Where("m.external_user_id = ?", pt)
 	}
 	if scope.RequiresAssignment() {
-		q = q.Where("c.kind <> ? OR a.id IS NOT NULL", models.KindSupport)
+		// Archived support is exempt — its assignment was purged, and dropping it
+		// here would make archived-only contacts vanish for agents, which is the
+		// case the whole retention change exists to preserve.
+		q = q.Where("c.kind <> ? OR a.id IS NOT NULL OR c.archived_at IS NOT NULL", models.KindSupport)
 	}
 	return q
 }
