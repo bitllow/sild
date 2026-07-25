@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import java.net.URLEncoder
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -82,9 +83,21 @@ internal class SildApi(private val cfg: SildConfig) {
         return res.copy(config = res.config.copy(logoUrl = rebaseLocalUrl(cfg.base, res.config.logoUrl)))
     }
 
-    /** GET /v1/conversations → the standard list envelope, scoped by credential. */
-    suspend fun listConversations(): List<ApiConversation> =
-        json.decodeFromString<ApiConversationsPage>(api("GET", "/conversations")).items
+    /** GET /v1/conversations → every page, scoped by credential. The messenger
+     *  renders its whole recent list, so stopping at page one would hide older
+     *  conversations. */
+    suspend fun listConversations(): List<ApiConversation> {
+        val out = mutableListOf<ApiConversation>()
+        var cursor: String? = null
+        repeat(50) {
+            val path = if (cursor == null) "/conversations" else "/conversations?cursor=${URLEncoder.encode(cursor, "UTF-8")}"
+            val page: ApiConversationsPage = json.decodeFromString(api("GET", path))
+            out += page.items
+            if (!page.hasMore || page.nextCursor == null) return out
+            cursor = page.nextCursor
+        }
+        return out
+    }
 
     /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope. */
     suspend fun listMessages(id: String): ApiMessagesPage =

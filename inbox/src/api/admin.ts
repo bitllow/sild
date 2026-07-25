@@ -1,7 +1,7 @@
 // Typed bindings for the Sild admin API (§4.3). Shapes mirror internal/views
 // and internal/api/admin.go on the Go side.
 
-import { api } from "./client";
+import { api, collectAll } from "./client";
 
 export type ApiAssignmentStatus = "queued" | "assigned" | "closed";
 export type ApiConvStatus = "open" | "closed";
@@ -276,6 +276,12 @@ export const adminApi = {
 
   // ── Conversations ─────────────────────────────────────────────────────
   // One endpoint backs the queue, the peer inbox, contact history and search.
+  // Drains the cursor: the Details-panel history and the contact filter render a
+  // whole list, with no scroll affordance to continue from.
+  listAllConversations: (params?: ConversationParams) =>
+    collectAll<ApiQueueConversation>((cursor) =>
+      adminApi.listConversations({ ...params, cursor })
+    ),
   listConversations: (params?: ConversationParams) => {
     const q = new URLSearchParams();
     if (params?.kind) q.set("kind", params.kind);
@@ -315,12 +321,19 @@ export const adminApi = {
     api.get<ApiPage<ApiContact>>(`/contacts${q ? `?q=${encodeURIComponent(q)}` : ""}`),
 
   // ── Settings: API keys ────────────────────────────────────────────────
-  listApiKeys: () => api.get<ApiPage<ApiKeyRecord>>("/api-keys"),
+  // Settings screens render a whole collection, so they drain the cursor.
+  listApiKeys: () =>
+    collectAll<ApiKeyRecord>((cursor) =>
+      api.get<ApiPage<ApiKeyRecord>>(`/api-keys${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
+    ),
   createApiKey: (label: string) => api.post<ApiKeyCreated>("/api-keys", { label }),
   revokeApiKey: (id: string) => api.del<void>(`/api-keys/${id}`),
 
   // ── Settings: webhooks ────────────────────────────────────────────────
-  listWebhooks: () => api.get<ApiPage<ApiWebhook>>("/webhooks"),
+  listWebhooks: () =>
+    collectAll<ApiWebhook>((cursor) =>
+      api.get<ApiPage<ApiWebhook>>(`/webhooks${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
+    ),
   setWebhookActive: (id: string, active: boolean) =>
     api.patch<void>(`/webhooks/${id}`, { active }),
   deleteWebhook: (id: string) => api.del<void>(`/webhooks/${id}`),
@@ -331,7 +344,10 @@ export const adminApi = {
   me: () => api.get<ApiPrincipal>("/principal"),
 
   // ── Settings: team ────────────────────────────────────────────────────
-  listTeam: () => api.get<ApiPage<ApiTeamMember>>("/team"),
+  listTeam: () =>
+    collectAll<ApiTeamMember>((cursor) =>
+      api.get<ApiPage<ApiTeamMember>>(`/team${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
+    ),
   setTeamRole: (id: string, role: ApiPlatformRole) =>
     api.patch<void>(`/team/${id}`, { platform_role: role }),
   setTeamPeerAccess: (id: string, peerAccess: boolean) =>

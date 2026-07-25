@@ -56,3 +56,25 @@ export const api = {
   patch: <T>(path: string, body?: Json) => request<T>("PATCH", path, body ?? {}),
   del: <T>(path: string, body?: Json) => request<T>("DELETE", path, body),
 };
+
+/**
+ * Drain every page of a paginated collection.
+ *
+ * Bounded settings lists and a contact's history are rendered whole, with no
+ * scroll UI to continue from — reading only the first page would silently hide
+ * the rest. `pages` caps the walk so a runaway cursor cannot loop forever.
+ */
+export async function collectAll<T>(
+  fetchPage: (cursor: string | null) => Promise<{ items: T[]; next_cursor: string | null; has_more: boolean }>,
+  pages = 50
+): Promise<T[]> {
+  const out: T[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < pages; i++) {
+    const page = await fetchPage(cursor);
+    out.push(...page.items);
+    if (!page.has_more || !page.next_cursor) return out;
+    cursor = page.next_cursor;
+  }
+  return out;
+}

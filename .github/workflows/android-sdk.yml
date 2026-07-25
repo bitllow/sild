@@ -140,6 +140,12 @@ jobs:
           script: echo "Generated AVD snapshot."
 
       - name: Run instrumented E2E
+        # Bounded so a wedged emulator shutdown can't burn the job's whole budget
+        # after the tests themselves have already passed.
+        timeout-minutes: 20
+        env:
+          # Force-kill rather than waiting the 20s default for a graceful exit.
+          ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: "5"
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
@@ -148,7 +154,12 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
           working-directory: sdks/kotlin
-          script: ./gradlew :sample:connectedDebugAndroidTest
+          # Stop sild-dev before the action tears the emulator down: the device
+          # holds live HTTP/WebSocket connections to it, and an emulator that
+          # cannot close them hangs in shutdown instead of exiting.
+          script: |
+            ./gradlew :sample:connectedDebugAndroidTest
+            pkill -f sild-dev || true
 
       - name: Dump sild-dev log on failure
         if: failure()

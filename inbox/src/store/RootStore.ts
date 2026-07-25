@@ -770,7 +770,7 @@ export class RootStore {
       return;
     }
     try {
-      const { items } = await adminApi.listConversations({ participant: contact.extId });
+      const items = await adminApi.listAllConversations({ participant: contact.extId });
       const built = items.map(buildQueueRow);
       runInAction(() => {
         // Drop a response that a newer active-contact switch has superseded.
@@ -986,9 +986,9 @@ export class RootStore {
         adminApi.getBrands(),
       ]);
       runInAction(() => {
-        this.keys = keys.items.filter((k) => !k.revoked_at).map(mapApiKey);
-        this.webhooks = webhooks.items.map(mapWebhook);
-        this.team = team.items.map(mapTeamMember);
+        this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
+        this.webhooks = webhooks.map(mapWebhook);
+        this.team = team.map(mapTeamMember);
         this.emailChannel = mapEmailChannel(email);
         this.applyBrands(brands.brands, brands.active_brand_id);
         this.settingsLoaded = true;
@@ -1190,7 +1190,7 @@ export class RootStore {
   private reloadKeys = async () => {
     const keys = await adminApi.listApiKeys();
     runInAction(() => {
-      this.keys = keys.items.filter((k) => !k.revoked_at).map(mapApiKey);
+      this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
     });
   };
   revokeKey = async (id: string) => {

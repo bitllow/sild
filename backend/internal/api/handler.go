@@ -44,18 +44,21 @@ func (h *Handler) Mount(e *gin.Engine) {
 		c.Data(http.StatusOK, "application/javascript; charset=utf-8", webasset.Widget)
 	})
 
-	// The raw-body routes below carry their own, larger limits.
-	v1 := e.Group("/v1", middleware.BodyLimit(middleware.BodyLimitJSON))
+	// Raw-body routes get their own, larger caps — on a group WITHOUT the JSON cap,
+	// because a nested MaxBytesReader can only lower a limit, never raise it.
+	raw := e.Group("/v1")
 
 	// Email inbound (§6.2): provider posts here, signature is the gate.
-	v1.POST("/email/inbound", middleware.BodyLimit(middleware.BodyLimitEmail), h.mw.RateLimitIngress(), h.emailInbound)
+	raw.POST("/email/inbound", middleware.BodyLimit(middleware.BodyLimitEmail), h.mw.RateLimitIngress(), h.emailInbound)
 
 	// Local storage backend serves attachment bytes here (§11). GCS/S3 use
 	// direct-to-bucket signed URLs and don't mount these.
 	if h.cfg.Storage.Backend == "local" || h.cfg.Storage.Backend == "" {
-		v1.PUT("/uploads/local/*objectKey", middleware.BodyLimit(middleware.BodyLimitUpload), h.mw.RateLimitIngress(), h.localUploadPut)
-		v1.GET("/uploads/local/*objectKey", h.localUploadGet)
+		raw.PUT("/uploads/local/*objectKey", middleware.BodyLimit(middleware.BodyLimitUpload), h.mw.RateLimitIngress(), h.localUploadPut)
+		raw.GET("/uploads/local/*objectKey", h.localUploadGet)
 	}
+
+	v1 := e.Group("/v1", middleware.BodyLimit(middleware.BodyLimitJSON))
 
 	// ── Resource routes ────────────────────────────────────────────────────
 	//
