@@ -118,6 +118,10 @@ var capabilities = map[Action]grant{
 	EmailInbound: {},
 }
 
+// Actions returns every declared action, so the route manifest can be checked
+// against the catalog.
+func Actions() []Action { return sortedActions() }
+
 func sortedActions() []Action {
 	out := make([]Action, 0, len(capabilities))
 	for a := range capabilities {

@@ -67,7 +67,7 @@ itself — matching the widget and the platform's design.
 
 ## Appearance
 
-The messenger is themed from the tenant's active brand (`GET /v1/me/brand`): brand
+The messenger is themed from the tenant's active brand (`GET /v1/brands/active`): brand
 color (accents + hover derive from it), light/dark/auto theme, corner radius, and
 the welcome heading/subtext — the same `BrandConfig` the web widget consumes, so
 the two surfaces look consistent. Launcher geometry (`launcherPos`/`launcherSize`/

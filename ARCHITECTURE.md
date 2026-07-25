@@ -339,7 +339,7 @@ row* — is enforced structurally:
 
 ULIDs with a type prefix (`c_…`, `m_…`), generated in `internal/id`.
 Lexicographic order == chronological order, which is load-bearing for:
-- cursor pagination (`?before=` / `?after=`), and
+- keyset cursor pagination (`?cursor=`) and reconnect catch-up (`?since=`), and
 - the monotonic read-receipt guard (compare ids directly).
 
 ---
@@ -352,7 +352,7 @@ These came out of spec review; this records their resolution in the structure.
 |---|---|
 | `tenant_id` missing on `conversation_members`, `message_attachments`, `read_receipts` | column added to every model; repo signatures take `tenantID` |
 | Archive read auth vs. deleted `conversation_members` | `archive` persists a **membership snapshot** in the tombstone; archived reads authorize against the snapshot, not hot membership |
-| Reconnect catch-up misses convos added while offline | SDK contract: re-fetch `/v1/me/conversations` **before** per-conv `after=` catch-up (doc-only; no backend change) |
+| Reconnect catch-up misses convos added while offline | SDK contract: re-fetch `/v1/conversations` **before** per-conv `since=` catch-up (doc-only; no backend change) |
 | Unsortable message ids break pagination & `GREATEST` | ULID ids (`internal/id`) — sortable strings |
 | Admin tenant resolution underspecified | admin session carries tenant + platform role; multi-tenant admins use an explicit tenant selector (open spec decision, surfaced in P2) |
 | Guests not distinguishable from users | explicit `guest:true` member metadata + token scope hint; widget gates the list-view affordance on it (open spec decision, surfaced in P3) |

@@ -1562,23 +1562,23 @@ and the inbox *replaces* the ordinary last-message preview with it:
 searching for a phrase in an old message returns a row previewing the newest
 message instead, and the operator cannot see why the row matched.
 
-So: rows returned for a `?q=` query carry optional **representation annotations**
-— the resource stays a conversation, and these describe *why this row is here*:
+So: rows returned for a `?q=` query carry an optional **representation
+annotation** — the resource stays a conversation, and it describes *why this row
+is here*:
 
 ```json
 { "id": "c_01J…", "status": "open", "members": [ … ],
-  "snippet": "…refund for trip 8842…",
-  "matched_fields": ["message.body"] }
+  "snippet": "…refund for trip 8842…" }
 ```
 
-`matched_fields` is new and worth the small cost: `buildFilters` matches across
-message bodies, `member_search_text`, `external_user_id` and — in peer search —
-raw metadata, so a row can appear for reasons the snippet cannot show. A hit on a
-phone number in member metadata currently renders as a conversation with an
-unrelated preview and no explanation. Values mirror the filter sources:
-`message.body`, `member.metadata`, `member.external_user_id`.
+A `matched_fields` list naming the source (`message.body`, `member.metadata`,
+`member.external_user_id`) was considered and **rejected**: knowing which source
+matched needs a per-source EXISTS probe per row, and no surface consumes it. A
+metadata-only hit is already legible, because the row is labelled with the
+matched member's name. Revisit it only if the inbox grows a "matched contact
+details" affordance.
 
-Both fields are omitted entirely when there is no `?q=`, so the queue payload is
+`snippet` is omitted entirely when there is no `?q=`, so the queue payload is
 unchanged.
 
 The acceptance test must match on a term appearing **only in an older message** —
@@ -1676,7 +1676,7 @@ breaking change:
 
 | | must precede first release | can follow |
 |---|---|---|
-| **A. Contract** | route paths, pagination envelope + cursor format, error codes, `since`/`cursor` split, `/v1/principal`, brand caching rules, snippet/`matched_fields`, per-principal writable fields | — |
+| **A. Contract** | route paths, pagination envelope + cursor format, error codes, `since`/`cursor` split, `/v1/principal`, brand caching rules, search `snippet`, per-principal writable fields | — |
 | **B. Enforcement** | policy layer + realtime parity (a leak, not a rename) | lint rule banning `PeerAccess` outside `policy/` |
 | **C. Machinery** | body-limit middleware (`SECURITY-REVIEW.md:58` is live); **ETag + required `If-Match`**; rate limits on auth + unauthenticated ingress | general rate limiting, idempotency keys, audit records, metrics |
 
@@ -1744,7 +1744,7 @@ first group.
 7. `ConversationRepo.List` + `ConversationQuery`; port `ListQueue`/`ListPeers`/
    `ListForUser` tests onto it before deleting them.
 8. `domain.ListConversations`; wire search through the scope, delete `PeerOnly`;
-   snippet + `matched_fields`.
+   search `snippet`.
 9. Route manifest + `Mount` generated from it; `GET /v1/conversations`; then the
    remaining route moves. The contract test enumerating every route lands here —
    it is what makes the moves safe.
@@ -1857,8 +1857,7 @@ and the route-manifest contract test, not review, is what catches it.
   a contact who exists only in peer conversations — the contacts-shaped twin of
   the `buildFilters` regression guard.
 - New test: `?q=` matching a term that appears **only in an older message**
-  returns that message's snippet, not the last-message preview; a match on member
-  metadata reports `matched_fields: ["member.metadata"]`.
+  returns that message's snippet, not the last-message preview.
 - **The authorization table test** — every principal kind × role × `peer_access`
   × action × resource state (support/peer, open/closed, member/non-member,
   assigned/unassigned, own/cross tenant), with the expected outcome per row.

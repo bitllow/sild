@@ -88,7 +88,7 @@ func (h *Handler) Mount(e *gin.Engine) {
 
 	// Integration (API key only), §4.1.
 	key := v1.Group("", h.mw.APIKey())
-	key.POST("/tokens", h.mintToken)
+	key.POST("/tokens", h.mw.RateLimitAuth(), h.mintToken)
 	key.POST("/conversations/:id/members", h.addMember)
 	key.DELETE("/conversations/:id/members/:user_id", h.removeMember)
 	key.POST("/conversations/:id/members/remap", h.remap)

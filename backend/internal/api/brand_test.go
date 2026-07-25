@@ -86,7 +86,7 @@ func TestBrandsSaveNormalizeAndActivate(t *testing.T) {
 		},
 	}
 	var got brandsJSON
-	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).JSON(body).Do()
+	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).Header("If-Match", "*").JSON(body).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body)
 	}
@@ -126,10 +126,10 @@ func TestBrandsRejectEmpty(t *testing.T) {
 	h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
 	owner := loginAs(t, h, "owner@test")
 
-	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).
+	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).Header("If-Match", "*").
 		JSON(map[string]any{"active_brand_id": "", "brands": []any{}}).Do()
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for empty set, got %d %s", w.Code, w.Body)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for empty set, got %d %s", w.Code, w.Body)
 	}
 }
 
@@ -143,7 +143,7 @@ func TestMyBrandReturnsActive(t *testing.T) {
 	tok := h.MintToken(tenant.ID, "u_widget")
 
 	// Save a single custom active brand.
-	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).JSON(map[string]any{
+	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).Header("If-Match", "*").JSON(map[string]any{
 		"active_brand_id": "keep",
 		"brands": []map[string]any{
 			{"id": "keep", "name": "Acme Business", "config": map[string]any{"brand": "#7C3AED", "heading": "Hello!"}},
@@ -177,7 +177,7 @@ func TestBrandsRequireOwnerAdmin(t *testing.T) {
 	if w := h.Request("GET", "/v1/brands").Cookie("sild_admin", agent).Do(); w.Code != http.StatusForbidden {
 		t.Fatalf("agent GET: expected 403, got %d", w.Code)
 	}
-	if w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", agent).
+	if w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", agent).Header("If-Match", "*").
 		JSON(map[string]any{"brands": []any{}}).Do(); w.Code != http.StatusForbidden {
 		t.Fatalf("agent PUT: expected 403, got %d", w.Code)
 	}
@@ -235,7 +235,7 @@ func TestBrandLogoStoredAsObjectKeyResolvedToURL(t *testing.T) {
 	testutil.DecodeJSON(t, gw, &grant)
 	key := grant.ObjectKey
 
-	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).JSON(map[string]any{
+	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).Header("If-Match", "*").JSON(map[string]any{
 		"active_brand_id": "a",
 		"brands": []map[string]any{
 			{"id": "a", "name": "Acme", "config": map[string]any{"brand": "#2563FD", "logo": key}},
@@ -297,7 +297,7 @@ func TestBrandCrossTenantAssetNotSigned(t *testing.T) {
 	owner := loginAs(t, h, "owner@test")
 
 	foreignKey := "t_other/obj_stolen/secret.png" // not this tenant's upload
-	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).JSON(map[string]any{
+	w := h.Request("PUT", "/v1/brands").Cookie("sild_admin", owner).Header("If-Match", "*").JSON(map[string]any{
 		"active_brand_id": "a",
 		"brands": []map[string]any{
 			{"id": "a", "name": "X", "config": map[string]any{"brand": "#2563FD", "logo": foreignKey}},

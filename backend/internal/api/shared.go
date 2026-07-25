@@ -71,9 +71,20 @@ func (h *Handler) postMessage(c *gin.Context) {
 			Disposition models.Disposition `json:"disposition"`
 		} `json:"attachments"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
+	}
+	// A shared URL is not a shared body: only an API key may name the sender.
+	// Dropping these silently is how a client comes to believe it posted as an
+	// agent when it did not.
+	if p := middleware.Get(c); p != nil && p.Kind != principal.KindAPIKey {
+		if !httpx.RejectFields(c, map[string]bool{
+			"sender_kind":       req.SenderKind != "",
+			"internal_actor_id": req.InternalActorID != "",
+			"external_user_id":  req.ExternalUserID != "",
+		}, "sender_kind", "internal_actor_id", "external_user_id") {
+			return
+		}
 	}
 
 	in := domain.SendInput{

@@ -42,7 +42,7 @@ func TestEmailChannelGetAndUpdate(t *testing.T) {
 	firstAddr := got.ForwardingAddress
 
 	// PATCH the toggles.
-	w = h.Request("PATCH", "/v1/channels/email").Cookie("sild_admin", owner).
+	w = h.Request("PATCH", "/v1/channels/email").Cookie("sild_admin", owner).Header("If-Match", "*").
 		JSON(map[string]any{"auto_reply": true, "spam_filter": false}).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("patch: %d %s", w.Code, w.Body)
@@ -60,7 +60,7 @@ func TestEmailChannelGetAndUpdate(t *testing.T) {
 
 	// Toggling a bool back off must persist too — booleans carry DB defaults, and
 	// a naive upsert would omit the false value and leave the old value in place.
-	w = h.Request("PATCH", "/v1/channels/email").Cookie("sild_admin", owner).
+	w = h.Request("PATCH", "/v1/channels/email").Cookie("sild_admin", owner).Header("If-Match", "*").
 		JSON(map[string]any{"auto_reply": false}).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("patch off: %d %s", w.Code, w.Body)

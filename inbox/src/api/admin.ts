@@ -354,12 +354,14 @@ export const adminApi = {
     api.patch<void>(`/team/${id}`, { peer_access: peerAccess }),
 
   // ── Settings: channels (§6.2) ─────────────────────────────────────────
-  getEmailChannel: () => api.get<ApiEmailChannel>("/channels/email"),
-  updateEmailChannel: (patch: EmailChannelPatch) =>
-    api.patch<ApiEmailChannel>("/channels/email", patch as Record<string, unknown>),
+  // Read returns the version; the write quotes it back, so a concurrent edit
+  // fails loudly (412) instead of being overwritten.
+  getEmailChannel: () => api.getVersioned<ApiEmailChannel>("/channels/email"),
+  updateEmailChannel: (patch: EmailChannelPatch, etag: string) =>
+    api.patchIfMatch<ApiEmailChannel>("/channels/email", patch as Record<string, unknown>, etag),
 
   // ── Settings: appearance (§8) — brands saved as one staged set ─────────
-  getBrands: () => api.get<ApiBrands>("/brands"),
-  saveBrands: (brands: ApiBrand[], activeBrandId: string) =>
-    api.put<ApiBrands>("/brands", { brands, active_brand_id: activeBrandId }),
+  getBrands: () => api.getVersioned<ApiBrands>("/brands"),
+  saveBrands: (brands: ApiBrand[], activeBrandId: string, etag: string) =>
+    api.putIfMatch<ApiBrands>("/brands", { brands, active_brand_id: activeBrandId }, etag),
 };

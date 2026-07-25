@@ -20,7 +20,9 @@ func (h *Handler) getEmailChannel(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, emailChannelView(ch))
+	view := emailChannelView(ch)
+	apiutil.SetETag(c, view)
+	c.JSON(http.StatusOK, view)
 }
 
 // updateEmailChannel applies the Channels-UI toggles / sender fields. Absent
@@ -32,8 +34,15 @@ func (h *Handler) updateEmailChannel(c *gin.Context) {
 		FromName    *string `json:"from_name"`
 		FromAddress *string `json:"from_address"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	current, err := h.svc.GetEmailChannel(c.Request.Context(), apiutil.Tenant(c))
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	if !apiutil.RequirePreconditionMatch(c, emailChannelView(current)) {
 		return
 	}
 	ch, err := h.svc.UpdateEmailChannel(c.Request.Context(), apiutil.Tenant(c), domain.EmailChannelUpdate{

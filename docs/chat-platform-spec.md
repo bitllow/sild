@@ -14,7 +14,7 @@ short-lived JWTs.
 
 - **Postgres is canonical; the socket is an egress-only nudge.** Server→client push only — clients
   write via REST and never publish/subscribe over the socket. No delivery guarantees: reconnect =
-  re-auth + REST catch-up (`messages?after=`).
+  re-auth + REST catch-up (`messages?since=`).
 - **Conversations are untyped and created server-side.** Multi-party conversations come from the host
   backend (API key); clients/agents may only open a **support request** (a conversation with self +
   an assignment). Clients never add arbitrary members.

@@ -179,6 +179,10 @@ export class RootStore {
   webhooks: Webhook[] = [];
   team: TeamMember[] = [];
   emailChannel: EmailChannel | null = null;
+  // Versions of the two whole-document config resources, quoted back on write so
+  // a concurrent edit fails loudly instead of being overwritten.
+  emailChannelVersion: string | null = null;
+  brandsVersion: string | null = null;
   channelCopied = false;
   settingsLoaded = false;
   keyDialog = false;
@@ -989,8 +993,10 @@ export class RootStore {
         this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
         this.webhooks = webhooks.map(mapWebhook);
         this.team = team.map(mapTeamMember);
-        this.emailChannel = mapEmailChannel(email);
-        this.applyBrands(brands.brands, brands.active_brand_id);
+        this.emailChannel = mapEmailChannel(email.data);
+        this.emailChannelVersion = email.etag;
+        this.applyBrands(brands.data.brands, brands.data.active_brand_id);
+        this.brandsVersion = brands.etag;
         this.settingsLoaded = true;
       });
     } catch {
@@ -1111,10 +1117,12 @@ export class RootStore {
     try {
       const res = await adminApi.saveBrands(
         this.brands.map((b) => ({ id: b.id, name: b.name, config: this.persistedConfig(b.config) })),
-        this.activeBrandId
+        this.activeBrandId,
+        this.brandsVersion ?? "*"
       );
       runInAction(() => {
-        this.applyBrands(res.brands, res.active_brand_id);
+        this.applyBrands(res.data.brands, res.data.active_brand_id);
+        this.brandsVersion = res.etag;
         this.brandEditingName = false;
       });
     } catch (e) {
@@ -1156,7 +1164,10 @@ export class RootStore {
     const prev = { ...ch };
     runInAction(() => Object.assign(ch, local));
     try {
-      await adminApi.updateEmailChannel(patch);
+      const res = await adminApi.updateEmailChannel(patch, this.emailChannelVersion ?? "*");
+      runInAction(() => {
+        this.emailChannelVersion = res.etag;
+      });
     } catch {
       runInAction(() => Object.assign(ch, prev));
     }

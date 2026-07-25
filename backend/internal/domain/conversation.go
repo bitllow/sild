@@ -196,7 +196,8 @@ func (s *Service) RemoveMember(ctx context.Context, tenantID, convID, userID str
 			return err
 		}
 		if n <= 1 {
-			return ErrConflict // would leave an open conversation empty
+			return conflict(CodeLastMemberRemoval,
+				"removing the last member of an open conversation") // close it instead
 		}
 	}
 	if err := s.store.Members().RemoveExternal(ctx, tenantID, convID, userID); err != nil {

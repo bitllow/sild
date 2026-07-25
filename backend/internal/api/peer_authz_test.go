@@ -240,8 +240,8 @@ func TestLastOwnerCannotBeDemoted(t *testing.T) {
 
 	w := h.Request("PATCH", "/v1/team/"+owner.ID).
 		Cookie("sild_admin", cookie).JSON(map[string]any{"platform_role": "admin"}).Do()
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("sole owner self-demotion = %d %s, want 400", w.Code, w.Body)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("sole owner self-demotion = %d %s, want 422", w.Code, w.Body)
 	}
 	if a, err := h.Store.Admins().Get(ctx, tenant.ID, owner.ID); err != nil || a.PlatformRole != models.PlatformOwner {
 		t.Fatalf("owner must still be owner (err=%v)", err)

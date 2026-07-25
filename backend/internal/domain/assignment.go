@@ -112,7 +112,7 @@ func (s *Service) AssignmentConversation(ctx context.Context, tenantID, assignme
 func (s *Service) ClaimAssignment(ctx context.Context, tenantID, assignmentID, agentActorID string) (*models.Assignment, error) {
 	return s.transition(ctx, tenantID, assignmentID, func(a *models.Assignment) error {
 		if a.Status == models.AssignmentClosed {
-			return ErrConflict
+			return conflict(CodeAssignmentAlreadyClosed, "assignment is already closed")
 		}
 		a.Status = models.AssignmentAssigned
 		a.AssigneeActorID = &agentActorID
@@ -137,7 +137,7 @@ func (s *Service) CloseAssignment(ctx context.Context, tenantID, assignmentID st
 func (s *Service) ReturnToQueue(ctx context.Context, tenantID, assignmentID string) (*models.Assignment, error) {
 	return s.transition(ctx, tenantID, assignmentID, func(a *models.Assignment) error {
 		if a.Status != models.AssignmentAssigned {
-			return ErrConflict
+			return conflict(CodeAssignmentAlreadyClosed, "assignment is not currently assigned")
 		}
 		a.Status = models.AssignmentQueued
 		a.AssigneeActorID = nil

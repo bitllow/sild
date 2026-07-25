@@ -22,6 +22,10 @@ func NewSearch(st store.Store, backend search.Backend) *SearchService {
 	return &SearchService{store: st, backend: backend}
 }
 
+// maxSearchLimit bounds one search page. It exceeds the API's 100-row ceiling by
+// one so a has-more probe at the maximum page size still fits.
+const maxSearchLimit = 101
+
 // SearchInput is one search request. Kind must already have been intersected
 // with the caller's scope.
 type SearchInput struct {
@@ -45,9 +49,14 @@ func (s *SearchService) Search(ctx context.Context, tenantID string, scope polic
 	if scope.DenyAll() {
 		return search.Results{}, nil
 	}
+	// Clamp rather than reset: a caller asking for limit+1 as a has-more probe
+	// would otherwise silently drop to 25 at the boundary.
 	limit := in.Limit
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 {
 		limit = 25
+	}
+	if limit > maxSearchLimit {
+		limit = maxSearchLimit
 	}
 	q := search.Parse(in.Query)
 	q.ResolveAssignee(in.CallerActorID)

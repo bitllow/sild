@@ -49,7 +49,9 @@ func (h *Handler) listBrands(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, brandsView(brands))
+	view := brandsView(brands)
+	apiutil.SetETag(c, view)
+	c.JSON(http.StatusOK, view)
 }
 
 // saveBrands replaces the tenant's whole brand set with the staged edits
@@ -59,8 +61,17 @@ func (h *Handler) saveBrands(c *gin.Context) {
 		Brands        []brandBody `json:"brands"`
 		ActiveBrandID string      `json:"active_brand_id"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	// PUT replaces the whole set, so a concurrent edit would be discarded
+	// silently without a precondition.
+	current, err := h.svc.ListBrands(c.Request.Context(), apiutil.Tenant(c))
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	if !apiutil.RequirePreconditionMatch(c, brandsView(current)) {
 		return
 	}
 	brands := make([]domain.Brand, 0, len(req.Brands))
@@ -72,7 +83,9 @@ func (h *Handler) saveBrands(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, brandsView(saved))
+	view := brandsView(saved)
+	apiutil.SetETag(c, view)
+	c.JSON(http.StatusOK, view)
 }
 
 // getActiveBrand: GET /v1/brands/active — the active brand for any messenger
