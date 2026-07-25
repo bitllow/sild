@@ -26,7 +26,11 @@ android {
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     buildTypes {
-        release { isMinifyEnabled = false }
+        // The only build that runs R8 over the SDK — validates ui/consumer-rules.pro.
+        release {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+        }
     }
 }
 

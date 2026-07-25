@@ -29,8 +29,14 @@ core-library desugaring is required in your app.
 
 ## Quick start
 
+Call `Sild.init` from `Application.onCreate`, not from an Activity: the config holds a
+`TokenProvider` (not parcelable), so it lives in memory rather than in saved state. If
+Android restarts your process while the messenger is in the back stack — a routine
+low-memory event — an `Application.onCreate` init is back in place before the messenger
+is recreated, whereas an Activity-scoped one isn't and the messenger closes itself.
+
 ```kotlin
-// Once, e.g. in Application.onCreate. The token provider mints a user JWT via YOUR
+// Once, in Application.onCreate. The token provider mints a user JWT via YOUR
 // backend (which holds the Sild API key) — never ship the API key in the app.
 Sild.init(
     SildConfig(
@@ -49,6 +55,11 @@ SildMessenger.openConversation(context, conversationId)
 // Or the conversation list:
 SildMessenger.openList(context)
 ```
+
+The messenger keeps its state across configuration changes (rotation, system dark-mode
+toggle, locale or font-size change): the client lives in a `ViewModel`, and the open
+thread plus the composer's text and attachments are restored, so nothing the user typed
+is lost. No `android:configChanges` is needed in your manifest.
 
 Peer conversations are created by the host backend via `POST /v1/conversations`
 (`open_assignment: false`); the SDK opens them by id. It never creates peer chats
@@ -73,13 +84,15 @@ messenger in its own navigation.
 ```bash
 cd sdks/kotlin
 
-# Pure-JVM core tests. Integration tests need a running sild-dev; without
-# SILD_BASE_URL only the offline logic tests run.
-./gradlew :core:test                                   # logic tests only
+# Pure-JVM core tests. The REST surface (auth retry, upload grant → PUT) is covered
+# offline with MockWebServer; the wire/realtime tests need a running sild-dev and are
+# skipped without SILD_BASE_URL.
+./gradlew :core:test                                   # logic + offline REST tests
 SILD_BASE_URL=http://localhost:8080 ./gradlew :core:test   # + wire/realtime tests
 
-# Build the library + sample APK
-./gradlew :ui:assembleRelease :sample:assembleDebug
+# Build the library + sample APK. :sample:assembleRelease is minified (R8) — it is
+# what validates ui/consumer-rules.pro against the shrinker a real host app runs.
+./gradlew :ui:assembleRelease :sample:assembleDebug :sample:assembleRelease
 
 # Publish the artifacts locally
 ./gradlew :core:publishToMavenLocal :ui:publishToMavenLocal

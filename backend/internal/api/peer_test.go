@@ -85,8 +85,8 @@ func TestPeerConversationsExcludedFromQueue(t *testing.T) {
 }
 
 // Peer access is per-user: a plain agent without it is denied the list and any
-// peer conversation; granting it admits both. Owner/admin retain tenant-wide
-// conversation access regardless, but the list endpoint is still their opt-in.
+// peer conversation; granting it admits both. Owner/admin are not exempt — their
+// tenant-wide scope covers support conversations only (TestPeerAccessGatesEveryRole).
 func TestPeerAccessGating(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()

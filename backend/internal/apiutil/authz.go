@@ -50,9 +50,11 @@ func CallerParticipant(c *gin.Context) store.Participant {
 // AuthorizeConversation ensures the caller may access a conversation (§4.2, §7).
 // Scope by principal:
 //   - API key:        tenant-wide (server backend)
-//   - owner/admin:    tenant-wide (all conversations)
+//   - owner/admin:    tenant-wide for support conversations; peer conversations
+//     still require their own peer_access, like any operator
 //   - agent:          support inbox only — conversation must carry an assignment
-//     (or be an archived, formerly-support conversation)
+//     (or be an archived, formerly-support conversation) — plus peer conversations
+//     when peer_access is enabled for them
 //   - user:           must be an (active or archived) member
 //
 // Writes a 403/401 and returns false on denial.
@@ -69,22 +71,21 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, convID string) b
 		return true
 
 	case middleware.KindAdmin:
-		if p.Role == models.PlatformOwner || p.Role == models.PlatformAdmin {
-			return true
-		}
-		// One classification pass (a single hot lookup + at most one tombstone)
-		// rather than overlapping peer/assignment/archive lookups on this hot path.
-		access := svc.ClassifyAgentAccess(ctx, t, convID)
-		// A peer conversation (open, closed, or archived) is gated on the operator's
-		// own peer_access — even a formerly-support archived read must NOT admit a
-		// non-peer agent to peer history. Checked first so the support branch can't
-		// leak it.
+		tenantWide := p.Role == models.PlatformOwner || p.Role == models.PlatformAdmin
+		// One classification pass; owner/admin skip the assignment lookup.
+		access := svc.ClassifyAgentAccess(ctx, t, convID, !tenantWide)
+		// Peer conversations are gated on the operator's own peer_access, whatever
+		// their role — hence before the role scope below, archived ones included.
 		if access.Peer {
 			if p.PeerAccess {
 				return true
 			}
 			httpx.Forbidden(c, "peer access is not enabled for this operator")
 			return false
+		}
+		// owner/admin: tenant-wide across everything that isn't peer.
+		if tenantWide {
+			return true
 		}
 		// agent: otherwise limited to support conversations (§7) — a live assignment
 		// or an archived formerly-support conversation.

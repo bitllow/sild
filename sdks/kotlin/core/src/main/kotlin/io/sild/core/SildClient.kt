@@ -26,7 +26,6 @@ class SildClient(
     private val api = SildApi(cfg)
     private val json = Json { ignoreUnknownKeys = true }
     private val selfId = cfg.userId
-    private var activeNames: Map<String, String> = emptyMap()
 
     // The in-flight support-request creation, so leaving the draft (backToList) can
     // cancel it — otherwise its activeId update would reopen the thread after the user
@@ -95,7 +94,6 @@ class SildClient(
     /** Set [id] active and load its thread. Suspends until the page is applied so a
      *  caller can safely send afterwards without the load clobbering the new message. */
     private suspend fun loadThread(id: String) {
-        activeNames = _state.value.conversations.firstOrNull { it.id == id }?.names ?: emptyMap()
         _state.update { it.copy(activeId = id, loadingThread = true, messages = emptyList()) }
         runCatching { api.listMessages(id) }
             .onSuccess { page ->
@@ -103,7 +101,8 @@ class SildClient(
                 // applying it now would render this thread under another's header and
                 // resolve its authors against the wrong members. Drop the stale result.
                 if (!isActive(id)) return
-                val msgs = page.messages.sortedBy { it.createdAt }.map { mapMessage(it) }
+                val names = namesOf(id)
+                val msgs = page.messages.sortedBy { it.createdAt }.map { mapMessage(it, names) }
                 _state.update { it.copy(messages = msgs, loadingThread = false, agentName = agentNameOf(msgs) ?: it.agentName) }
             }
             .onFailure { e ->
@@ -151,7 +150,7 @@ class SildClient(
                     // Only append to the thread the send targeted: the user may have
                     // navigated to another conversation while the POST was in flight.
                     if (isActive(id)) {
-                        val mapped = mapMessage(msg)
+                        val mapped = mapMessage(msg, namesOf(id))
                         _state.update { s ->
                             val msgs = if (s.messages.any { it.id == mapped.id }) s.messages
                                        else s.messages + mapped
@@ -197,30 +196,42 @@ class SildClient(
 
     // ── realtime ─────────────────────────────────────────────────────────────
 
-    /** Whether [id] is still the open conversation. Guards async results (thread
-     *  loads, sends, realtime events) that may land after the user switched away. */
-    private fun isActive(id: String?): Boolean = _state.value.activeId == id
+    /** Whether [id] is the open conversation — guards async results that land after
+     *  the user switched away. */
+    private fun isActive(id: String): Boolean = _state.value.activeId == id
+
+    /** external_user_id → display name for [id]'s members. Read at use time so an
+     *  interleaved open() can't resolve authors against another conversation. */
+    private fun namesOf(id: String): Map<String, String> =
+        _state.value.conversations.firstOrNull { it.id == id }?.names ?: emptyMap()
 
     private fun onEvent(env: RealtimeEnvelope) {
+        // No conversation_id → can't attribute it to a thread.
+        val convId = env.conversationId ?: return
         when (env.type) {
             "message.created" -> {
-                if (!isActive(env.conversationId)) return
                 val api = env.data?.let { runCatching { json.decodeFromJsonElement(ApiMessage.serializer(), it) }.getOrNull() } ?: return
-                val msg = mapMessage(api)
+                // Mapped only for the open thread — other authors would resolve against
+                // the wrong members.
+                val msg = if (isActive(convId)) mapMessage(api, namesOf(convId)) else null
                 var appended = false
+                // One emission for both effects: each one recomposes the collectors.
                 _state.update { s ->
-                    if (s.messages.any { it.id == msg.id }) return@update s // dedupe own echo
+                    // The list row stays fresh even for a background conversation.
+                    val convs = s.conversations.map {
+                        if (it.id == convId) it.copy(preview = api.body.ifEmpty { "No messages yet" }, time = clock(api.createdAt)) else it
+                    }
+                    // Not the open thread, or our own echo.
+                    if (msg == null || s.messages.any { it.id == msg.id }) return@update s.copy(conversations = convs)
                     appended = true
                     val agent = if (msg.direction == Direction.IN && !msg.system && msg.author != null) msg.author else s.agentName
-                    s.copy(messages = s.messages + msg, agentName = agent)
+                    s.copy(conversations = convs, messages = s.messages + msg, agentName = agent)
                 }
-                if (appended && msg.direction == Direction.IN && !msg.system && _state.value.soundOn) onChime()
+                if (appended && msg != null && msg.direction == Direction.IN && !msg.system && _state.value.soundOn) onChime()
             }
-            "conversation.closed" -> {
-                if (!isActive(env.conversationId)) return
-                _state.update { s ->
-                    s.copy(conversations = s.conversations.map { if (it.id == env.conversationId) it.copy(closed = true) else it })
-                }
+            // Ungated: it only mutates the list row, which Home shows too.
+            "conversation.closed" -> _state.update { s ->
+                s.copy(conversations = s.conversations.map { if (it.id == convId) it.copy(closed = true) else it })
             }
         }
     }
@@ -252,14 +263,14 @@ class SildClient(
         )
     }
 
-    private fun mapMessage(m: ApiMessage): Message {
+    private fun mapMessage(m: ApiMessage, names: Map<String, String>): Message {
         val system = m.senderKind == "system"
         val isAgent = m.senderKind == "agent" || m.senderKind == "bot" || m.internalActorId != null
         val mine = m.senderKind == "user" && (selfId == null || m.externalUserId == selfId)
         val author: String? = when {
             system || mine -> null
             isAgent -> m.authorName ?: "Support"
-            else -> (m.externalUserId?.let { activeNames[it] }) ?: m.authorName ?: m.externalUserId ?: "User"
+            else -> (m.externalUserId?.let { names[it] }) ?: m.authorName ?: m.externalUserId ?: "User"
         }
         return Message(
             id = m.id,

@@ -8,5 +8,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.24" apply false
 }
 
-group = "io.sild"
-version = "0.1.0"
+// One source of truth for the published coordinates; keep SDK_VERSION in step.
+allprojects {
+    group = "io.sild"
+    version = "0.1.0"
+}

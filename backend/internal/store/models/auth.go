@@ -42,11 +42,10 @@ type AdminUser struct {
 	FirstName    string       `gorm:"size:120"`
 	LastName     string       `gorm:"size:120"`
 	PlatformRole PlatformRole `gorm:"size:16;not null"`
-	// PeerAccess gates the operator's view of peer conversations (direct chats
-	// between end-user parties with no assignment). It is a per-user flag,
-	// independent of PlatformRole — every operator toggles it individually in
-	// Settings → Team, and it controls whether the "Peer conversations" nav item
-	// is visible and whether a plain agent may open/step into a peer conversation.
+	// PeerAccess gates the peer-conversation surface for ONE operator, whatever their
+	// role: no role grants it implicitly (an owner without it cannot read a peer
+	// conversation by id) and it suffices alone (an agent with it needs no assignment).
+	// Only the owner may change it — see api.guardOwnerMutation.
 	PeerAccess bool `gorm:"not null;default:false"`
 	// PasswordHash is set when the admin uses email/password login (§2.4
 	// alternative to Google OIDC); nil for OIDC-only admins.

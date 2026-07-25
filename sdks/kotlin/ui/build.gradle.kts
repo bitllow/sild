@@ -21,7 +21,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
-    publishing { singleVariant("release") }
+    publishing { singleVariant("release") { withSourcesJar() } }
 }
 
 dependencies {
@@ -32,19 +32,17 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    // No material-icons: SildIcons builds the widget's own Feather glyphs.
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.2")
     implementation("io.coil-kt:coil-compose:2.6.0")
 }
 
 publishing {
     publications {
         register<MavenPublication>("release") {
-            groupId = "io.sild"
             artifactId = "sild-ui"
-            version = "0.1.0"
             afterEvaluate { from(components["release"]) }
         }
     }

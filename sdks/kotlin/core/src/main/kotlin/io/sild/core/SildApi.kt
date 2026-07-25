@@ -12,10 +12,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 /** Thrown for a non-2xx REST response; message is the server's `error.message`. */
 class SildApiException(val status: Int, message: String) : RuntimeException(message)
@@ -25,10 +23,7 @@ class SildApiException(val status: Int, message: String) : RuntimeException(mess
 // refreshes the token exactly once and retries. Blocking OkHttp calls run on the
 // IO dispatcher; every method is suspend.
 internal class SildApi(private val cfg: SildConfig) {
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val http = SildHttp.client
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val jsonMedia = "application/json".toMediaType()
 
@@ -50,6 +45,8 @@ internal class SildApi(private val cfg: SildConfig) {
                 val builder = Request.Builder()
                     .url(cfg.base + "/v1" + path)
                     .header("Authorization", "Bearer $tok")
+                    // API surface only — an extra header can break a signed upload URL.
+                    .header("X-Sild-SDK", "android/$SDK_VERSION")
                 val reqBody = body?.toRequestBody(jsonMedia)
                 when (method) {
                     "GET" -> builder.get()

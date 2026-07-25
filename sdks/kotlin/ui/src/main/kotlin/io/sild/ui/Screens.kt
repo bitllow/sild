@@ -1,6 +1,7 @@
 package io.sild.ui
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
@@ -33,7 +34,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -185,15 +189,20 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
     val colors = LocalSildColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var pending by remember { mutableStateOf<List<PendingAttachment>>(emptyList()) }
+    var pending by rememberSaveable(stateSaver = PendingAttachmentsSaver) { mutableStateOf(emptyList<PendingAttachment>()) }
+    // Not saved: a restored non-zero counter would disable send forever.
     var uploading by remember { mutableIntStateOf(0) }
+    var attachError by remember { mutableStateOf<String?>(null) }
 
     val openUrl: (String) -> Unit = { url ->
-        runCatching {
-            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)))
+        // Tenant-supplied data: any other scheme could redirect the user out of the app.
+        val uri = Uri.parse(url)
+        if (uri.scheme?.lowercase() in setOf("http", "https")) {
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
         }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNotEmpty()) attachError = null
         uris.forEach { uri ->
             uploading++
             scope.launch {
@@ -201,8 +210,12 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
                     val file = withContext(Dispatchers.IO) { readFile(context, uri, client.uploadSizeLimitBytes) }
                     val att = client.upload(file.bytes, file.name, file.mime)
                     pending = pending + att
-                } catch (_: Exception) {
-                    // Upload failed: drop it silently (web does the same); the user can retry.
+                } catch (e: Exception) {
+                    // Say why — an oversized camera photo is the common case.
+                    attachError = when (e) {
+                        is IllegalArgumentException -> "That file is too large (max ${client.uploadSizeLimitBytes / (1024 * 1024)} MB)."
+                        else -> "Couldn't attach that file. Please try again."
+                    }
                 } finally {
                     uploading--
                 }
@@ -221,7 +234,11 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
     }
     val closed = active?.closed == true
     val listState = rememberScrollState()
-    LaunchedEffect(state.messages.size) { listState.scrollTo(listState.maxValue) }
+    // Observing maxValue follows the content; keying on message count races the layout
+    // and leaves the newest bubble below the fold.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.maxValue }.collect { listState.animateScrollTo(it) }
+    }
 
     Column(Modifier.fillMaxSize().background(colors.page)) {
         SildHeader(
@@ -248,10 +265,10 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
                 modifier = Modifier.fillMaxWidth().background(colors.card).padding(14.dp),
             )
         }
-        // Surface a send/create failure here (the composer keeps the draft on failure),
-        // so a message can't be silently lost with no feedback and no retry.
-        if (state.error != null) {
-            SildError(state.error!!, Modifier.fillMaxWidth().background(colors.card).padding(horizontal = 14.dp))
+        // Send/create/attachment failures surface here; the composer keeps the draft.
+        val problem = state.error ?: attachError
+        if (problem != null) {
+            SildError(problem, Modifier.fillMaxWidth().background(colors.card).padding(horizontal = 14.dp))
         }
         SildComposer(
             pending = pending,
@@ -294,6 +311,12 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
         )
     }
 }
+
+// The bytes are already on the server, so four strings each survive a rotation.
+private val PendingAttachmentsSaver = listSaver<List<PendingAttachment>, String>(
+    save = { atts -> atts.flatMap { listOf(it.objectKey, it.disposition, it.mimeType, it.filename) } },
+    restore = { flat -> flat.chunked(4).filter { it.size == 4 }.map { PendingAttachment(it[0], it[1], it[2], it[3]) } },
+)
 
 private class PickedFile(val bytes: ByteArray, val name: String, val mime: String)
 

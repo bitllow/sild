@@ -51,6 +51,14 @@ func (h *Handler) postMessage(c *gin.Context) {
 	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
 		return
 	}
+	// Read once: it decides the guard below and is reused as in.Conv by SendMessage.
+	conv, _ := h.svc.Conversation(c.Request.Context(), apiutil.Tenant(c), convID)
+	// Operators must use the peer route — only PeerAgentSend does the implicit join.
+	if p := middleware.Get(c); p != nil && p.Kind == middleware.KindAdmin &&
+		conv != nil && conv.Kind == models.KindPeer {
+		httpx.Forbidden(c, "use POST /v1/admin/peer-conversations/:id/messages for peer conversations")
+		return
+	}
 	var req struct {
 		Body            string            `json:"body"`
 		ClientMsgID     string            `json:"client_msg_id"`
@@ -71,7 +79,7 @@ func (h *Handler) postMessage(c *gin.Context) {
 
 	in := domain.SendInput{
 		Body: req.Body, Visibility: req.Visibility, Channel: req.Channel,
-		AllowInternal: apiutil.IsAgent(c),
+		AllowInternal: apiutil.IsAgent(c), Conv: conv,
 	}
 	if req.ClientMsgID != "" {
 		in.ClientMsgID = &req.ClientMsgID
@@ -198,6 +206,10 @@ func (h *Handler) typing(c *gin.Context) {
 func (h *Handler) closeConversation(c *gin.Context) {
 	if !apiutil.IsAgent(c) {
 		httpx.Forbidden(c, "only agents may close a conversation")
+		return
+	}
+	// Being an agent isn't enough — closing needs the same scope check as reading.
+	if !apiutil.AuthorizeConversation(c, h.svc, c.Param("id")) {
 		return
 	}
 	if err := h.svc.CloseConversation(c.Request.Context(), apiutil.Tenant(c), c.Param("id")); err != nil {

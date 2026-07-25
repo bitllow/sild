@@ -71,14 +71,41 @@ func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, passw
 	return mapStoreErr(s.store.Admins().SetPassword(ctx, tenantID, adminID, hash))
 }
 
-// SetAdminRole updates an admin's platform role (Settings → Team, §7).
+// SetAdminRole updates an admin's platform role (Settings → Team, §7). Caller rules
+// live in api.guardOwnerMutation; the last-owner invariant below holds for all paths.
 func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole) error {
 	switch role {
 	case models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent:
 	default:
 		return invalid("invalid platform role")
 	}
+	// A tenant must keep an owner: only owners can grant peer access or appoint
+	// another owner, so demoting the last one locks the tenant out irreversibly.
+	if role != models.PlatformOwner {
+		current, err := s.store.Admins().Get(ctx, tenantID, adminID)
+		if err != nil {
+			return mapStoreErr(err)
+		}
+		if current.PlatformRole == models.PlatformOwner && !s.hasOtherOwner(ctx, tenantID, adminID) {
+			return invalid("the tenant must keep at least one owner")
+		}
+	}
 	return mapStoreErr(s.store.Admins().SetRole(ctx, tenantID, adminID, role))
+}
+
+// hasOtherOwner reports whether another owner exists. Rosters are small, so this
+// lists rather than adding a counting query.
+func (s *Service) hasOtherOwner(ctx context.Context, tenantID, exceptID string) bool {
+	admins, err := s.store.Admins().List(ctx, tenantID)
+	if err != nil {
+		return false // can't prove another owner exists — refuse the demotion
+	}
+	for i := range admins {
+		if admins[i].ID != exceptID && admins[i].PlatformRole == models.PlatformOwner {
+			return true
+		}
+	}
+	return false
 }
 
 // SetPeerAccess toggles an operator's access to peer conversations (Settings →

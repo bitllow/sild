@@ -11,6 +11,7 @@ plugins {
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
 }
 
 kotlin {
@@ -28,14 +29,16 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    // Offline REST tests (auth retry, upload grant → PUT) — see SildApiTest.
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
 publishing {
     publications {
         register<MavenPublication>("release") {
-            groupId = "io.sild"
+            // groupId/version come from the root allprojects block. Keep SDK_VERSION
+            // (Version.kt) in step.
             artifactId = "sild-core"
-            version = "0.1.0"
             from(components["java"])
         }
     }

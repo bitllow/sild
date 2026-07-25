@@ -136,6 +136,18 @@ func (s *Service) buildMember(ctx context.Context, tenantID, convID string, mi M
 }
 
 // GetConversation loads a conversation with members and current assignment.
+// Conversation reads just the conversation row — no members, no assignment. It is
+// the cheap accessor for callers that need only the classifier or status (e.g. the
+// shared send route, which then hands the row to SendMessage so the send needn't
+// read it a second time). Use GetConversation when the full view is wanted.
+func (s *Service) Conversation(ctx context.Context, tenantID, convID string) (*models.Conversation, error) {
+	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
+	if err != nil {
+		return nil, mapStoreErr(err)
+	}
+	return conv, nil
+}
+
 func (s *Service) GetConversation(ctx context.Context, tenantID, convID string) (*models.Conversation, []models.ConversationMember, *models.Assignment, error) {
 	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
 	if err != nil {

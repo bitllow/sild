@@ -11,8 +11,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewModelScope
 import io.sild.core.SildClient
 import io.sild.core.SildConfig
 
@@ -58,19 +60,39 @@ object SildMessenger {
     }
 }
 
-// SildMessengerActivity hosts the Compose messenger for one launch. It owns a
-// SildClient bound to the activity's lifecycle scope, themed from the live brand.
-class SildMessengerActivity : ComponentActivity() {
-    private lateinit var client: SildClient
-    private var tone: ToneGenerator? = null
+// SildSession owns the SildClient in a ViewModel, not the Activity, so a
+// configuration change doesn't drop the connection or bounce the user back to Home.
+internal class SildSession(cfg: SildConfig) : ViewModel() {
+    private val tone = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60) }.getOrNull()
 
+    val client = SildClient(cfg, viewModelScope, onChime = { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 150) })
+
+    private var started = false
+
+    /** First creation only: a rotation must not re-run start() and re-open the target. */
+    fun startOnce(conversationId: String?) {
+        if (started) return
+        started = true
+        client.start(conversationId)
+    }
+
+    override fun onCleared() {
+        client.destroy()
+        tone?.release()
+    }
+
+    class Factory(private val cfg: SildConfig) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = SildSession(cfg) as T
+    }
+}
+
+// SildMessengerActivity hosts the Compose messenger, themed from the live brand.
+class SildMessengerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val config = SildRuntime.config
         if (config == null) { finish(); return }
-
-        tone = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60) }.getOrNull()
-        client = SildClient(config, lifecycleScope, onChime = { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 150) })
 
         // TARGET_LIST/TARGET_SUPPORT both land on Home (welcome + New conversation +
         // Recent), like the web launcher — the support request is created lazily on
@@ -78,7 +100,10 @@ class SildMessengerActivity : ComponentActivity() {
         // mode: back finishes rather than returning to a Home that wasn't in the stack).
         val target = intent.getStringExtra(SildMessenger.EXTRA_TARGET) ?: SildMessenger.TARGET_LIST
         val rootIsHome = target == SildMessenger.TARGET_LIST || target == SildMessenger.TARGET_SUPPORT
-        if (rootIsHome) client.start() else client.start(target.removePrefix(SildMessenger.CONV_PREFIX))
+
+        val session = ViewModelProvider(this, SildSession.Factory(config))[SildSession::class.java]
+        session.startOnce(if (rootIsHome) null else target.removePrefix(SildMessenger.CONV_PREFIX))
+        val client = session.client
 
         setContent {
             val state by client.state.collectAsStateWithLifecycle()
@@ -108,13 +133,5 @@ class SildMessengerActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    override fun onDestroy() {
-        // client is lateinit — it stays uninitialized when onCreate finish()ed early
-        // (no config, e.g. launched before Sild.init or recreated after process death).
-        if (::client.isInitialized) client.destroy()
-        tone?.release()
-        super.onDestroy()
     }
 }

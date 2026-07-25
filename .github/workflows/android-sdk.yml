@@ -31,7 +31,10 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      # Checks the committed gradle-wrapper.jar against known Gradle checksums.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
 
       # Boot sild-dev (SQLite + in-memory broker) so the core integration tests
       # have a backend at :8080; wait for /healthz before running them.
@@ -42,17 +45,24 @@ jobs:
             STORAGE_BACKEND=local SILD_ENV=development \
             go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
           for i in $(seq 1 60); do
-            curl -sf http://localhost:8080/healthz && break
+            curl -sf http://localhost:8080/healthz && { healthy=1; break; }
             sleep 1
           done
+          # Fail here, with the log, rather than as a confusing test error later.
+          [ -n "$healthy" ] || {
+            echo "::error::sild-dev did not become healthy within 60s"
+            cat /tmp/sild-dev.log
+            exit 1
+          }
 
       - name: Core tests (against sild-dev)
         env:
           SILD_BASE_URL: http://localhost:8080
         run: ./gradlew :core:test
 
-      - name: Assemble SDK (ui AAR + sample APK)
-        run: ./gradlew :ui:assembleRelease :sample:assembleDebug
+      # :sample:assembleRelease is minified (R8) — it validates consumer-rules.pro.
+      - name: Assemble SDK (ui AAR + sample APK, debug + minified release)
+        run: ./gradlew :ui:assembleRelease :sample:assembleDebug :sample:assembleRelease
 
       - name: Publish artifacts to Maven local (smoke test packaging)
         run: ./gradlew :core:publishToMavenLocal :ui:publishToMavenLocal
@@ -79,6 +89,8 @@ jobs:
           cache-dependency-path: backend/go.sum
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
 
       # KVM must be writable for a hardware-accelerated emulator.
       - name: Enable KVM
@@ -95,9 +107,16 @@ jobs:
             STORAGE_BACKEND=local SILD_ENV=development \
             go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
           for i in $(seq 1 60); do
-            curl -sf http://localhost:8080/healthz && break
+            curl -sf http://localhost:8080/healthz && { healthy=1; break; }
             sleep 1
           done
+          # Fail before spending ~10 minutes booting an emulator against a backend
+          # that isn't there.
+          [ -n "$healthy" ] || {
+            echo "::error::sild-dev did not become healthy within 60s"
+            cat /tmp/sild-dev.log
+            exit 1
+          }
 
       # Cache the AVD system image + snapshot so reruns skip the cold boot.
       - name: AVD cache

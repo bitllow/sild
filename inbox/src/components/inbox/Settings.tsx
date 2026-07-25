@@ -31,6 +31,8 @@ const rowBorder = "1px solid var(--border-subtle)";
 export const Settings = observer(function Settings() {
   const store = useStore();
   const tab = store.settingsTab;
+  // Read off the team list we already render rather than adding session state.
+  const viewerIsOwner = store.team.find((t) => t.id === store.meId)?.role === "owner";
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
@@ -159,7 +161,12 @@ export const Settings = observer(function Settings() {
                     <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t.email}</div>
                   </div>
                   <div style={{ width: 120, flex: "none", display: "flex", justifyContent: "flex-end" }}>
-                    <Switch checked={t.peerAccess} onChange={(v) => store.setPeerAccess(t.id, v)} />
+                    {/* Owner-only server-side, so an admin sees it read-only. */}
+                    <Switch
+                      checked={t.peerAccess}
+                      disabled={!viewerIsOwner}
+                      onChange={(v) => store.setPeerAccess(t.id, v)}
+                    />
                   </div>
                   <div style={{ width: 130, flex: "none" }}>
                     <Select

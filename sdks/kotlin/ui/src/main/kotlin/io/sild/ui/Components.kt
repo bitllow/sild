@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,14 +43,16 @@ import io.sild.core.Attachment
 import io.sild.core.Direction
 import io.sild.core.Message
 import io.sild.core.PendingAttachment
+import java.util.Locale
 
 private val AVATAR_PALETTE = listOf(
     0xFF3D63FF, 0xFFFF7A45, 0xFF18A957, 0xFF7C5CFF, 0xFF0EA5A5, 0xFFE0599B, 0xFFD9881A, 0xFF2440B8,
 )
 
 // A single uppercase initial — the web widget's rowInitial/headInitial (first char).
+// Locale.ROOT so a Turkish device doesn't render a non-Turkish "i" as "İ".
 private fun initials(name: String): String =
-    name.trim().firstOrNull()?.uppercase() ?: "?"
+    name.trim().firstOrNull()?.toString()?.uppercase(Locale.ROOT) ?: "?"
 
 private fun colorFor(name: String): Color {
     var h = 0
@@ -228,7 +231,8 @@ fun SildComposer(
 ) {
     val colors = LocalSildColors.current
     val radii = LocalSildRadii.current
-    var text by remember { mutableStateOf("") }
+    // `sending` deliberately isn't saved: restoring it true would wedge the button.
+    var text by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     val canSend = enabled && !sending && uploading == 0 && (text.isNotBlank() || pending.isNotEmpty())
     // .composer: card surface with a top hairline border.

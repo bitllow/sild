@@ -1,5 +1,7 @@
 package io.sild.sample
 
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -12,6 +14,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.sild.core.Direction
 import io.sild.core.SildClient
 import io.sild.core.SildConfig
+import io.sild.ui.Sild
+import io.sild.ui.SildMessengerActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -63,6 +67,33 @@ class SildMessengerE2ETest {
             val body = "e2e-hello"
             compose.onNodeWithContentDescription("Message input").performTextInput(body)
             compose.onNodeWithContentDescription("Send").performClick()
+            compose.awaitText(body, substring = true)
+        }
+    }
+
+    // Launched directly because only the scenario owning an Activity can recreate() it;
+    // with no target extra it defaults to Home, same as SildMessenger.openList.
+    @Test
+    fun draftSurvivesRecreation() {
+        Sild.init(SildConfig(DevBackend.BASE, DevBackend.tokenProvider, userId = DevBackend.USER_ID))
+        ActivityScenario.launch(SildMessengerActivity::class.java).use { messenger ->
+            compose.awaitText("New conversation")
+            compose.onNodeWithText("New conversation").performClick()
+            compose.awaitText("Message…")
+
+            val body = "survives-${System.nanoTime().toString(36)}"
+            compose.onNodeWithContentDescription("Message input").performTextInput(body)
+            compose.awaitText(body, substring = true)
+
+            messenger.recreate()
+
+            // The placeholder would be back if the draft had been dropped.
+            compose.onNodeWithContentDescription("Message input").assert(hasText(body))
+            compose.onNodeWithText("Message…").assertDoesNotExist()
+
+            // The surviving session still sends into the right conversation.
+            compose.onNodeWithContentDescription("Send").performClick()
+            compose.awaitText("Message…")
             compose.awaitText(body, substring = true)
         }
     }
@@ -132,10 +163,16 @@ class SildMessengerE2ETest {
 // Network round-trips (token mint, brand fetch, realtime connect, send) aren't
 // tracked by Compose's idling, so poll for the expected text with a ceiling
 // generous enough for a cold emulator + backend rather than relying on waitForIdle.
+//
+// The predicate must not throw: mid activity transition there is no composition and
+// fetchSemanticsNodes() raises instead of returning empty.
 private fun ComposeTestRule.awaitText(
     text: String,
     substring: Boolean = false,
     timeoutMs: Long = 30_000L,
-) = waitUntil(timeoutMs) {
-    onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
-}
+) = waitUntil(timeoutMs) { hasNodeWithText(text, substring) }
+
+/** True when a composition currently shows [text]; false while none is up. */
+private fun ComposeTestRule.hasNodeWithText(text: String, substring: Boolean = false): Boolean =
+    runCatching { onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty() }
+        .getOrDefault(false)
