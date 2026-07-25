@@ -142,9 +142,8 @@ jobs:
       - name: Run instrumented E2E
         # Bounded so a wedged emulator shutdown can't burn the job's whole budget
         # after the tests themselves have already passed.
-        timeout-minutes: 20
+        timeout-minutes: 15
         env:
-          # Force-kill rather than waiting the 20s default for a graceful exit.
           ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: "5"
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -154,12 +153,23 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
           working-directory: sdks/kotlin
-          # Stop sild-dev before the action tears the emulator down: the device
-          # holds live HTTP/WebSocket connections to it, and an emulator that
-          # cannot close them hangs in shutdown instead of exiting.
+          # Tear the device down ourselves the moment the tests finish. The
+          # emulator's own graceful shutdown wedges here — it logs "Wait for
+          # emulator … before kill" and then never exits — so waiting on it costs
+          # the whole job budget after the tests have already passed.
           script: |
+            set -e
             ./gradlew :sample:connectedDebugAndroidTest
-            pkill -f sild-dev || true
+            set +e
+            pkill -f sild-dev
+            adb -s emulator-5554 emu kill
+            for i in $(seq 1 10); do
+              adb devices | grep -q emulator-5554 || break
+              sleep 1
+            done
+            pkill -9 -f qemu-system
+            pkill -9 -f crashpad_handler
+            exit 0
 
       - name: Dump sild-dev log on failure
         if: failure()
