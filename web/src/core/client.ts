@@ -307,10 +307,10 @@ export class SildClient implements WidgetClient {
     try {
       await this.getToken();
       this.connectRealtime();
+      // The list surface needs it, and openConversation reads the target's row from it.
+      await this.loadConversations();
       if (conversationId) {
         await this.openConversation(conversationId);
-      } else {
-        await this.loadConversations();
       }
       this.patch({ ready: true });
     } catch (e) {
@@ -386,8 +386,13 @@ export class SildClient implements WidgetClient {
 
   async openConversation(id: string) {
     this.patch({ activeId: id, loadingThread: true, messages: [] });
-    // Resolve author names from the already-loaded conversation members so a peer
-    // thread can label the other party's messages.
+    // The row carries the peer flag, title/subtitle, closed state and member names, so
+    // fetch the list when it's missing — the normal case for a late open(id).
+    if (!this.state.conversations.some((c) => c.id === id)) {
+      await this.loadConversations().catch(() => {});
+    }
+    // Resolve author names from the loaded conversation members so a peer thread can
+    // label the other party's messages.
     this.activeNames = this.state.conversations.find((c) => c.id === id)?.names || {};
     try {
       const page = await this.api<{ messages: ApiMessage[] }>(

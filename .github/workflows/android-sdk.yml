@@ -1,0 +1,155 @@
+name: android-sdk
+
+on:
+  push:
+    branches: [master]
+    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+  pull_request:
+    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+
+jobs:
+  # Build the Android SDK (core JAR + ui AAR + sample APK) and run the pure-JVM
+  # core tests against a live sild-dev — the same zero-infra backend the web e2e
+  # boots. No emulator: the wire contract is covered by JVM tests, the UI by
+  # a successful assemble.
+  sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: sdks/kotlin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # Checks the committed gradle-wrapper.jar against known Gradle checksums.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
+
+      # Boot sild-dev (SQLite + in-memory broker) so the core integration tests
+      # have a backend at :8080; wait for /healthz before running them.
+      - name: Start sild-dev
+        working-directory: backend
+        run: |
+          DB_DRIVER=sqlite DB_DSN=/tmp/sild-android-ci.db SILD_BROKER=memory \
+            STORAGE_BACKEND=local SILD_ENV=development \
+            go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/healthz && { healthy=1; break; }
+            sleep 1
+          done
+          # Fail here, with the log, rather than as a confusing test error later.
+          [ -n "$healthy" ] || {
+            echo "::error::sild-dev did not become healthy within 60s"
+            cat /tmp/sild-dev.log
+            exit 1
+          }
+
+      - name: Core tests (against sild-dev)
+        env:
+          SILD_BASE_URL: http://localhost:8080
+        run: ./gradlew :core:test
+
+      # :sample:assembleRelease is minified (R8) — it validates consumer-rules.pro.
+      - name: Assemble SDK (ui AAR + sample APK, debug + minified release)
+        run: ./gradlew :ui:assembleRelease :sample:assembleDebug :sample:assembleRelease
+
+      - name: Publish artifacts to Maven local (smoke test packaging)
+        run: ./gradlew :core:publishToMavenLocal :ui:publishToMavenLocal
+
+  # End-to-end on a real emulator: launch the sample app and round-trip a support
+  # message through a live sild-dev (SildMessengerE2ETest). Hardware-accelerated
+  # x86_64 emulators run free on ubuntu-latest for public repos — KVM is available
+  # on GitHub-hosted Linux runners and the emulator-runner action enables it. The
+  # emulator reaches the runner's sild-dev at 10.0.2.2:8080 (DevBackend.BASE).
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
+
+      # KVM must be writable for a hardware-accelerated emulator.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start sild-dev
+        working-directory: backend
+        run: |
+          DB_DRIVER=sqlite DB_DSN=/tmp/sild-android-e2e.db SILD_BROKER=memory \
+            STORAGE_BACKEND=local SILD_ENV=development \
+            go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/healthz && { healthy=1; break; }
+            sleep 1
+          done
+          # Fail before spending ~10 minutes booting an emulator against a backend
+          # that isn't there.
+          [ -n "$healthy" ] || {
+            echo "::error::sild-dev did not become healthy within 60s"
+            cat /tmp/sild-dev.log
+            exit 1
+          }
+
+      # Cache the AVD system image + snapshot so reruns skip the cold boot.
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-29
+
+      - name: Create AVD snapshot
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-load
+          disable-animations: true
+          script: echo "Generated AVD snapshot."
+
+      - name: Run instrumented E2E
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          working-directory: sdks/kotlin
+          script: ./gradlew :sample:connectedDebugAndroidTest
+
+      - name: Dump sild-dev log on failure
+        if: failure()
+        run: cat /tmp/sild-dev.log

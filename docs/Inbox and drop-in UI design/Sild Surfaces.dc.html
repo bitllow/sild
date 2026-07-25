@@ -95,6 +95,14 @@
             </button>
             <sc-if value="{{ hasAttention }}"><span style="position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;background:var(--coral-500);color:#fff;font-family:var(--font-sans);font-size:11px;font-weight:700;line-height:1;border-radius:9px;border:2px solid var(--surface-card);pointer-events:none">{{ attentionCount }}</span></sc-if>
           </div>
+          <sc-if value="{{ peerNavVisible }}">
+          <div style="position:relative">
+            <button onClick="{{ onGoPeer }}" aria-label="Peer conversations" title="Peer conversations" style="{{ navPeerStyle }}">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            </button>
+            <sc-if value="{{ peerHasAttention }}"><span style="position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;background:var(--slate-500);color:#fff;font-family:var(--font-sans);font-size:11px;font-weight:700;line-height:1;border-radius:9px;border:2px solid var(--surface-card);pointer-events:none">{{ peerAttention }}</span></sc-if>
+          </div>
+          </sc-if>
           <button onClick="{{ onGoSettings }}" aria-label="Settings" style="{{ navSettingsStyle }}">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           </button>
@@ -281,6 +289,171 @@
                 </div>
               </div>
               </sc-if>
+            </div>
+          </div>
+          </sc-if>
+
+        </div>
+        </sc-if>
+
+        <!-- Peer conversations -->
+        <sc-if value="{{ inboxIsPeer }}">
+        <div style="flex:1;min-width:0;display:flex">
+
+          <!-- Peer list -->
+          <div style="width:360px;flex:none;border-right:1px solid var(--border-default);background:var(--surface-card);display:flex;flex-direction:column">
+            <div style="padding:16px 16px 12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <h2 style="font-size:18px">Peer conversations</h2>
+                <span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:var(--surface-sunken);font-size:11px;font-weight:700;color:var(--text-tertiary)">{{ peerCount }}</span>
+              </div>
+              <p style="font-size:12px;color:var(--text-tertiary);margin-top:6px;line-height:1.5">Direct chats between parties — no support agent required. No assignment; you're here to observe, or step in if needed.</p>
+              <div style="position:relative;margin-top:12px">
+                <div style="display:flex;align-items:center;gap:8px;height:34px;background:var(--white);border:1px solid var(--border-default);border-radius:8px;padding:0 10px">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+                  <input value="{{ peerQuery }}" onInput="{{ onPeerQuery }}" onFocus="{{ onPeerFocus }}" placeholder="Search participants, trip, or role…" style="flex:1;border:0;outline:none;background:transparent;font-family:var(--font-sans);font-size:13px;color:var(--text-primary);min-width:0" />
+                </div>
+                <sc-if value="{{ peerSearchOpen }}">
+                  <div onClick="{{ onClosePeerSearch }}" style="position:fixed;inset:0;z-index:40"></div>
+                  <div style="position:absolute;left:0;right:0;top:38px;z-index:41;background:var(--surface-card);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-lg);padding:6px;max-height:320px;overflow-y:auto;animation:sild-rise .14s var(--ease-out, ease-out)">
+                    <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);padding:6px 10px 4px">Filter by role</div>
+                    <sc-for list="{{ peerRoleSuggestions }}" as="sg" hint-placeholder-count="2">
+                      <button onClick="{{ sg.onPick }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;cursor:pointer;font-family:var(--font-sans);font-size:13px;color:var(--text-primary);text-align:left" style-hover="background:var(--surface-hover)">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="flex:none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path></svg>
+                        <span style="flex:1;font-weight:600">{{ sg.label }}</span>
+                        <span style="font-size:12px;color:var(--text-tertiary)">{{ sg.count }}</span>
+                      </button>
+                    </sc-for>
+                    <sc-if value="{{ peerHasConvSuggestions }}">
+                      <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);padding:8px 10px 4px;border-top:1px solid var(--border-subtle);margin-top:4px">Conversations</div>
+                      <sc-for list="{{ peerConvSuggestions }}" as="sg" hint-placeholder-count="2">
+                        <button onClick="{{ sg.onPick }}" style="display:flex;flex-direction:column;gap:2px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;cursor:pointer;text-align:left" style-hover="background:var(--surface-hover)">
+                          <span style="font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-primary)">{{ sg.title }}</span>
+                          <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary)">{{ sg.ref }}</span>
+                        </button>
+                      </sc-for>
+                    </sc-if>
+                  </div>
+                </sc-if>
+              </div>
+              <sc-if value="{{ peerFilterActive }}">
+                <div style="display:flex;align-items:center;gap:6px;margin-top:10px">
+                  <span style="display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 6px 0 10px;border-radius:999px;background:var(--brand-subtle);border:1px solid var(--border-focus);font-size:12px;font-weight:600;color:var(--brand)">
+                    role: {{ peerFilterLabel }}
+                    <button onClick="{{ onClearPeerRole }}" aria-label="Clear role filter" style="display:flex;align-items:center;justify-content:center;width:16px;height:16px;border:0;border-radius:50%;background:rgba(37,99,253,.16);color:var(--brand);cursor:pointer;padding:0"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+                  </span>
+                </div>
+              </sc-if>
+            </div>
+            <div style="flex:1;overflow-y:auto;border-top:1px solid var(--border-subtle)">
+              <sc-for list="{{ peerRows }}" as="row" hint-placeholder-count="3">
+                <button onClick="{{ row.onClick }}" style="{{ row.rowStyle }}">
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.AvatarStack" people="{{ row.people }}" size="{{ av36 }}" hint-size="auto,36px"></x-import>
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <span style="flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.title }}</span>
+                      <span style="font-size:11px;color:var(--text-tertiary);flex:none">{{ row.time }}</span>
+                    </div>
+                    <div style="font-size:13px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.preview }}</div>
+                    <div style="font-size:11px;color:var(--text-tertiary);font-family:var(--font-mono);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.reference }}</div>
+                    <div style="display:flex;align-items:center;gap:7px;margin-top:7px">
+                      <span style="{{ row.kindStyle }}">{{ row.kindLabel }}</span>
+                      <sc-if value="{{ row.joined }}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--coral-600)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>You joined</span></sc-if>
+                      <div style="flex:1"></div>
+                      <sc-if value="{{ row.hasUnread }}"><span style="min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;border-radius:9px;background:var(--coral-500);color:#fff;font-size:11px;font-weight:700">{{ row.unread }}</span></sc-if>
+                    </div>
+                  </div>
+                </button>
+              </sc-for>
+              <sc-if value="{{ peerNoRows }}">
+                <div style="padding:40px 24px;text-align:center;color:var(--text-tertiary);font-size:13px;line-height:1.6">No peer conversations in this view.</div>
+              </sc-if>
+            </div>
+          </div>
+
+          <!-- Peer conversation view -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--surface-page)">
+            <div style="height:64px;flex:none;padding:0 18px;display:flex;align-items:center;gap:12px;background:var(--surface-card);border-bottom:1px solid var(--border-default)">
+              <x-import component-from-global-scope="SildDesignSystem_a95234.AvatarStack" people="{{ peerActivePeople }}" size="{{ av36 }}" hint-size="auto,36px"></x-import>
+              <div style="min-width:0">
+                <div style="font-size:15px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ peerActiveTitle }}</div>
+                <div style="font-size:12px;color:var(--text-tertiary);font-family:var(--font-mono)">{{ peerActiveRef }}</div>
+              </div>
+              <div style="flex:1"></div>
+              <button onClick="{{ onTogglePeerPanel }}" aria-label="Toggle details" style="{{ peerPanelBtnStyle }}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M15 3v18"></path></svg>
+              </button>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:20px 22px;display:flex;flex-direction:column;gap:12px" data-autoscroll="{{ peerMsgKey }}">
+              <sc-for list="{{ peerMsgs }}" as="m" hint-placeholder-count="4">
+                <sc-if value="{{ m.joinNote }}">
+                  <div style="align-self:center;display:inline-flex;align-items:center;gap:7px;max-width:90%;padding:7px 13px;border-radius:999px;background:var(--coral-50);color:var(--coral-600);font-size:12px;font-weight:600;text-align:center">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style="flex:none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path></svg>
+                    <span>{{ m.author }} (support) joined — {{ m.body }}</span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.bubble }}">
+                  <div style="display:flex;flex-direction:column;gap:3px;max-width:100%">
+                    <sc-if value="{{ m.isOther }}">
+                      <div style="display:flex;align-items:center;gap:7px;padding-left:3px">
+                        <span style="font-size:13px;font-weight:700;color:{{ m.nameColor }}">{{ m.author }}</span>
+                        <span style="{{ m.roleTagStyle }}">{{ m.roleTag }}</span>
+                        <span style="font-size:11px;color:var(--text-tertiary)">{{ m.time }}</span>
+                      </div>
+                    </sc-if>
+                    <div style="{{ m.bubbleStyle }}">{{ m.body }}</div>
+                    <sc-if value="{{ m.isSupport }}"><span style="align-self:flex-end;font-size:11px;color:var(--text-tertiary);padding-right:3px">You (support) · {{ m.time }}</span></sc-if>
+                  </div>
+                </sc-if>
+              </sc-for>
+            </div>
+            <div style="flex:none;padding:12px 18px 16px;background:var(--surface-card);border-top:1px solid var(--border-default)">
+              <sc-if value="{{ peerNotJoined }}"><div style="font-size:12px;color:var(--text-tertiary);padding:0 2px 8px;line-height:1.5">You're observing. Sending a message adds you to the conversation — both parties will see you.</div></sc-if>
+              <x-import component-from-global-scope="SildDesignSystem_a95234.ComposerBar" value="{{ peerComposer }}" onChange="{{ onPeerComposer }}" onSend="{{ onSendPeer }}" placeholder="Message everyone in this conversation…" hint-size="100%,92px"></x-import>
+            </div>
+          </div>
+
+          <!-- Peer details panel -->
+          <sc-if value="{{ peerPanelOpen }}">
+          <div style="width:320px;flex:none;border-left:1px solid var(--border-default);background:var(--surface-card);display:flex;flex-direction:column">
+            <div style="height:64px;flex:none;padding:0 16px;border-bottom:1px solid var(--border-default);display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:13px;font-weight:700;letter-spacing:-.01em">Details</span>
+              <button onClick="{{ onTogglePeerPanel }}" aria-label="Close panel" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;border-radius:6px;cursor:pointer;color:var(--text-secondary)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+              </button>
+            </div>
+            <div style="padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:18px">
+              <div>
+                <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:8px">Conversation</div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.Tag" mono="{{ true }}" hint-size="auto,24px">{{ peerActiveRef }}</x-import>
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.Badge" variant="neutral" hint-size="auto,20px">{{ peerActiveKind }}</x-import>
+                </div>
+              </div>
+              <div>
+                <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:10px">Participants ({{ peerParticipantCount }})</div>
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  <sc-for list="{{ peerParticipants }}" as="p" hint-placeholder-count="2">
+                    <div style="display:flex;gap:10px">
+                      <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ p.name }}" presence="{{ p.presence }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:center;gap:6px">
+                          <span style="font-size:14px;font-weight:600">{{ p.name }}</span>
+                          <span style="{{ p.roleTagStyle }}">{{ p.role }}</span>
+                        </div>
+                        <div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">
+                          <sc-for list="{{ p.metaList }}" as="kv" hint-placeholder-count="2">
+                            <div style="display:flex;gap:6px;font-size:12px">
+                              <span style="font-family:var(--font-mono);color:var(--text-tertiary);white-space:nowrap">{{ kv.k }}</span>
+                              <span style="color:var(--text-secondary);word-break:break-all">{{ kv.v }}</span>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
             </div>
           </div>
           </sc-if>
@@ -720,14 +893,26 @@
               <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
                 <div style="padding:16px 18px;border-bottom:1px solid var(--border-subtle)">
                   <div style="font-size:15px;font-weight:700">Team</div>
-                  <div style="font-size:13px;color:var(--text-tertiary);margin-top:2px">Platform roles guard the API and the inbox. owner and admin can manage keys and webhooks.</div>
+                  <div style="font-size:13px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">Platform roles guard the API and the inbox. Peer conversations are direct chats between parties with no assigned agent — grant that access per person.</div>
+                </div>
+                <div style="padding:9px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border-subtle);background:var(--surface-sunken)">
+                  <div style="width:36px;flex:none"></div>
+                  <div style="flex:1"></div>
+                  <div style="width:120px;flex:none;text-align:right;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Peer access</div>
+                  <div style="width:130px;flex:none;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Role</div>
                 </div>
                 <sc-for list="{{ team }}" as="t" hint-placeholder-count="3">
                   <div style="padding:14px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border-subtle)">
                     <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ t.name }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
                     <div style="flex:1;min-width:0">
-                      <div style="font-size:14px;font-weight:600">{{ t.name }}</div>
+                      <div style="display:flex;align-items:center;gap:7px">
+                        <span style="font-size:14px;font-weight:600">{{ t.name }}</span>
+                        <sc-if value="{{ t.isMe }}"><span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:var(--brand-subtle);color:var(--brand);font-size:11px;font-weight:700">You</span></sc-if>
+                      </div>
                       <div style="font-size:12px;color:var(--text-tertiary)">{{ t.email }}</div>
+                    </div>
+                    <div style="width:120px;flex:none;display:flex;justify-content:flex-end">
+                      <x-import component-from-global-scope="SildDesignSystem_a95234.Switch" checked="{{ t.peerAccessOn }}" onChange="{{ t.onPeerAccess }}" hint-size="46px,26px"></x-import>
                     </div>
                     <div style="width:130px;flex:none">
                       <x-import component-from-global-scope="SildDesignSystem_a95234.Select" options="{{ roleOptions }}" value="{{ t.role }}" onChange="{{ t.onChangeRole }}" size="sm" hint-size="130px,34px"></x-import>
@@ -802,7 +987,18 @@
               <div><div style="font-weight:600;color:var(--slate-900)">Drag the pickup pin</div><div style="font-size:14px;color:var(--text-secondary);margin-top:3px">Or use search to set a precise address.</div></div>
             </div>
           </div>
-          <p style="font-size:14px;color:var(--text-tertiary);margin-top:32px">Still stuck? Chat with us using the button in the corner. →</p>
+          <div style="margin-top:32px;display:flex;align-items:center;gap:15px;padding:16px 18px;border:1px solid var(--border-default);border-radius:14px;background:var(--surface-card);box-shadow:var(--shadow-sm);max-width:520px">
+            <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="Toomas Vaher" presence="online" size="{{ av44 }}" hint-size="44px,44px"></x-import>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:15px;font-weight:700;color:var(--slate-900)">Your driver is on the way</div>
+              <div style="font-size:13px;color:var(--text-secondary);margin-top:2px">Toomas · silver estate · arriving in 2 min</div>
+            </div>
+            <button onClick="{{ onWOpenPeer }}" style="flex:none;display:flex;align-items:center;gap:7px;height:40px;padding:0 16px;border:0;border-radius:10px;background:var(--brand);color:#fff;font-family:var(--font-sans);font-size:14px;font-weight:600;cursor:pointer" style-hover="background:var(--brand-hover)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              Open chat
+            </button>
+          </div>
+          <p style="font-size:14px;color:var(--text-tertiary);margin-top:20px">Have a question for support instead? Chat with us using the button in the corner. →</p>
         </div>
       </div>
 
@@ -810,15 +1006,19 @@
       <sc-if value="{{ wOpen }}">
       <div class="sild-widget-panel" style="position:absolute;right:24px;bottom:100px;width:380px;height:600px;max-height:calc(100% - 124px);background:var(--surface-card);border-radius:16px;box-shadow:var(--shadow-widget);overflow:hidden;display:flex;flex-direction:column;transform-origin:bottom right;animation:sild-widget-in .22s var(--ease-out, ease-out)">
 
+        <!-- Panel controls (consistent across every widget screen) -->
+        <div style="position:absolute;top:15px;right:15px;z-index:6;display:flex;align-items:center;gap:2px">
+          <button onClick="{{ onWToggleSound }}" aria-label="{{ wSoundLabel }}" title="{{ wSoundLabel }}" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px;display:flex">
+            <sc-if value="{{ wSoundOn }}" hint-placeholder-val="{{ true }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"></path></svg></sc-if>
+            <sc-if value="{{ wSoundOff }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="m22 9-6 6M16 9l6 6"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ onLauncher }}" aria-label="Close chat" class="sild-mobile-close" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px;display:flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+        </div>
+
         <!-- Widget home -->
         <sc-if value="{{ wIsHome }}" hint-placeholder-val="{{ true }}">
         <div style="display:flex;flex-direction:column;height:100%">
           <div style="background:var(--brand);color:#fff;padding:22px 22px 26px;position:relative">
-            <button onClick="{{ onLauncher }}" aria-label="Close chat" class="sild-mobile-close" style="position:absolute;top:14px;right:14px;border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
-            <button onClick="{{ onWToggleSound }}" aria-label="{{ wSoundLabel }}" title="{{ wSoundLabel }}" style="position:absolute;top:14px;right:48px;border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px">
-              <sc-if value="{{ wSoundOn }}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"></path></svg></sc-if>
-              <sc-if value="{{ wSoundOff }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="m22 9-6 6M16 9l6 6"></path></svg></sc-if>
-            </button>
             <img src="assets/sild-mark-tile.svg" width="34" alt="Sild" style="border-radius:10px;box-shadow:0 0 0 2px rgba(255,255,255,.25)" />
             <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:14px">Hi there.</div>
             <div style="font-size:15px;color:rgba(255,255,255,.85);margin-top:4px">How can we help? We typically reply in a few minutes.</div>
@@ -832,6 +1032,7 @@
             <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);padding:4px 4px 0">Recent</div>
             <div style="background:var(--surface-card);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
               <x-import component-from-global-scope="SildDesignSystem_a95234.ConversationRow" name="Eva · Sild" preview="…drag the pickup pin or search a new address." time="2m" presence="online" onClick="{{ onWOpenThread }}" hint-size="100%,64px"></x-import>
+              <x-import component-from-global-scope="SildDesignSystem_a95234.ConversationRow" name="Toomas · your driver" preview="I'm at the main entrance now." time="now" presence="online" onClick="{{ onWOpenPeer }}" hint-size="100%,64px"></x-import>
             </div>
           </div>
         </div>
@@ -850,11 +1051,6 @@
               <div style="font-size:12px;color:rgba(255,255,255,.8)">Online · replies in a few min</div>
             </div>
             <div style="flex:1"></div>
-            <button onClick="{{ onWToggleSound }}" aria-label="{{ wSoundLabel }}" title="{{ wSoundLabel }}" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px;display:flex">
-              <sc-if value="{{ wSoundOn }}" hint-placeholder-val="{{ true }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"></path></svg></sc-if>
-              <sc-if value="{{ wSoundOff }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="m22 9-6 6M16 9l6 6"></path></svg></sc-if>
-            </button>
-            <button onClick="{{ onLauncher }}" aria-label="Close chat" class="sild-mobile-close" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
           </div>
           <div style="flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px;background:var(--surface-page)" data-autoscroll="{{ wMsgKey }}">
             <sc-for list="{{ wMsgs }}" as="m" hint-placeholder-count="2">
@@ -864,6 +1060,31 @@
           <div style="padding:10px 12px 12px;background:var(--surface-card);border-top:1px solid var(--border-default)">
             <x-import component-from-global-scope="SildDesignSystem_a95234.ComposerBar" value="{{ wText }}" onChange="{{ onWChange }}" onSend="{{ onWSend }}" placeholder="Write a message…" hint-size="100%,52px"></x-import>
             <div style="text-align:center;font-size:11px;color:var(--text-tertiary);margin-top:8px">Powered by Sild</div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- Widget peer thread (direct chat with driver) -->
+        <sc-if value="{{ wIsPeer }}">
+        <div style="display:flex;flex-direction:column;height:100%">
+          <div style="background:var(--brand);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:10px">
+            <button onClick="{{ onWBack }}" aria-label="Back" style="border:0;background:transparent;color:#fff;cursor:pointer;display:flex;padding:4px;border-radius:8px">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
+            </button>
+            <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="Toomas Vaher" presence="online" size="{{ av36 }}" hint-size="36px,36px"></x-import>
+            <div>
+              <div style="font-size:15px;font-weight:700;letter-spacing:-.01em">Toomas · your driver</div>
+              <div style="font-size:12px;color:rgba(255,255,255,.8)">Direct chat · trip 9021</div>
+            </div>
+            <div style="flex:1"></div>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px;background:var(--surface-page)" data-autoscroll="{{ wPeerMsgKey }}">
+            <sc-for list="{{ wPeerMsgs }}" as="m" hint-placeholder-count="3">
+              <x-import component-from-global-scope="SildDesignSystem_a95234.MessageBubble" dc-props="{{ m }}" hint-size="auto,42px"></x-import>
+            </sc-for>
+          </div>
+          <div style="padding:10px 12px 12px;background:var(--surface-card);border-top:1px solid var(--border-default)">
+            <x-import component-from-global-scope="SildDesignSystem_a95234.ComposerBar" value="{{ wPeerText }}" onChange="{{ onWPeerChange }}" onSend="{{ onWPeerSend }}" placeholder="Message your driver…" hint-size="100%,52px"></x-import>
           </div>
         </div>
         </sc-if>
@@ -939,6 +1160,11 @@
                     <div style="font-size:13px;color:var(--text-secondary)">Lennujaama tee 2 · Airport</div>
                   </div>
                 </div>
+                <button onClick="{{ onAOpenDriver }}" style="margin-top:15px;width:100%;height:42px;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--border-default);border-radius:10px;background:var(--white);cursor:pointer;font-family:var(--font-sans);font-size:14px;font-weight:600;color:var(--text-primary)" style-hover="background:var(--surface-hover)">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                  Message driver
+                </button>
+                <div style="font-size:11px;color:var(--text-tertiary);margin-top:10px;text-align:center;font-family:var(--font-mono)">client.openConversation(tripId)</div>
               </div>
               <div style="background:var(--surface-card);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);padding:16px">
                 <div style="display:flex;align-items:center;gap:10px">
@@ -987,7 +1213,7 @@
               <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ aActiveName }}" presence="{{ aActivePresence }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
               <div>
                 <div style="font-size:15px;font-weight:700;letter-spacing:-.01em">{{ aActiveName }}</div>
-                <div style="font-size:12px;color:rgba(255,255,255,.8)">{{ aActiveStatusText }}</div>
+                <div style="font-size:12px;color:rgba(255,255,255,.8)">{{ aActiveContext }}</div>
               </div>
             </div>
             <div style="flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px;background:var(--surface-page)">
@@ -1019,6 +1245,7 @@ class Component extends DCLogic {
   constructor(props){
     super(props);
     this._apSaved = this.seedProfiles();
+    this._meId = 't1';   // the signed-in agent (Liis Mägi)
     this.state = {
       surface: 'inbox',
       // inbox
@@ -1039,6 +1266,14 @@ class Component extends DCLogic {
       sortOpen: false,
       panelOpen: true,
       convs: this.seedConvs(),
+      // peer conversations (rider↔driver, rider↔rider) — no assignment, RBAC-gated
+      peerConvs: this.seedPeer(),
+      peerActiveId: 'pc_1',
+      peerFilter: 'all',
+      peerQuery: '',
+      peerPanelOpen: true,
+      peerComposer: '',
+      agentPeerAccess: true,   // RBAC: may the agent role view peer conversations
       composer: '',
       internal: false,
       keyDialog: false,
@@ -1051,6 +1286,7 @@ class Component extends DCLogic {
       apProfileId: 'p1', apMenuOpen: false, apDirty: false, apPreview: 'home',
       // widget
       wOpen: true, wView: 'home', wMsgs: this.seedWidget(), wText: '', wSoundOn: true,
+      wPeerMsgs: this.seedWidgetPeer(), wPeerText: '',
       // app
       aView: 'host', aActiveId: 'a1', aConvs: this.seedApp(), aText: '',
       ready: false,
@@ -1125,11 +1361,13 @@ class Component extends DCLogic {
   }
   seedTeam(){
     return [
-      { id:'t1', name:'Liis Mägi', email:'liis@sild.io', role:'agent' },
-      { id:'t2', name:'Karl Sepp', email:'karl@sild.io', role:'admin' },
-      { id:'t3', name:'Anu Pärn', email:'anu@sild.io', role:'owner' },
+      { id:'t1', name:'Liis Mägi', email:'liis@sild.io', role:'agent', peerAccess:true },
+      { id:'t2', name:'Karl Sepp', email:'karl@sild.io', role:'admin', peerAccess:true },
+      { id:'t3', name:'Anu Pärn', email:'anu@sild.io', role:'owner', peerAccess:true },
+      { id:'t4', name:'Mart Ojala', email:'mart@sild.io', role:'agent', peerAccess:false },
     ];
   }
+  myPeerAccess(){ const me = this.state.team.find(t => t.id===this._meId); return me ? !!me.peerAccess : true; }
   seedProfiles(){
     const base = { logo:null, brand:'#2563FD', theme:'light', font:'sild', radius:'default', launcherIcon:'chat', iconImg:null, launcherPos:'right', launcherSize:'md', heading:'Hi there.', sub:'How can we help? We typically reply in a few minutes.', topics:'Track my order\nChange pickup address\nBilling question', showTeam:true, poweredBy:true };
     return [
@@ -1146,12 +1384,49 @@ class Component extends DCLogic {
   }
   seedApp(){
     return [
-      { id:'a1', name:'Sild support', presence:'online', preview:'Open your trip and drag the pickup pin.', time:'2m', unread:0,
+      { id:'a1', name:'Sild support', presence:'online', kind:'support', context:'Support · replies in a few min', preview:'Open your trip and drag the pickup pin.', time:'2m', unread:0,
         messages:[
           {id:1,dir:'out',author:'You',time:'Just now',body:'Hi — how do I change my pickup address after booking?'},
           {id:2,dir:'in',author:'Sild support',time:'Just now',body:"Open your trip, tap the pickup pin, and drag it or search a new address. Changes sync to your driver instantly."} ] },
-      { id:'a2', name:'Toomas · driver', presence:'away', preview:"I'm two minutes away.", time:'1h', unread:1,
-        messages:[ {id:1,dir:'in',author:'Toomas',time:'1:02 PM',body:"On my way — I'm two minutes away. I'll meet you at the main entrance."} ] },
+      { id:'a2', name:'Toomas · driver', presence:'away', kind:'peer', context:'Direct chat · trip 9021', preview:"I'm at the main entrance — silver estate.", time:'1h', unread:1,
+        messages:[
+          {id:1,dir:'out',author:'You',time:'2:10 PM',body:"Hi Toomas — I'm at the north doors."},
+          {id:2,dir:'in',author:'Toomas',time:'2:11 PM',body:"Hi! There's construction at the north side — I'll pull up to the main entrance instead. One minute away."},
+          {id:3,dir:'out',author:'You',time:'2:11 PM',body:'Got it, walking over now.'},
+          {id:4,dir:'in',author:'Toomas',time:'2:12 PM',body:"I'm at the main entrance now. Silver estate, plate 421 KLM."} ] },
+    ];
+  }
+  seedPeer(){
+    return [
+      { id:'pc_1', kind:'rider-driver', reference:'trip_9021', time:'now', unread:0, joined:false,
+        participants:[ {name:'Mari Tamm',role:'rider',presence:'online',meta:{phone:'+372 5123 4567',app_version:'2.3.1'}}, {name:'Toomas Vaher',role:'driver',presence:'online',meta:{phone:'+372 5987 6543',vehicle:'Silver estate · 421 KLM',app_version:'2.3.0'}} ],
+        preview:"Toomas: I'm at the main entrance now.",
+        messages:[
+          {id:1,author:'Mari Tamm',role:'rider',time:'2:10 PM',body:"Hi, I'm the passenger for trip 9021 — waiting outside the north doors."},
+          {id:2,author:'Toomas Vaher',role:'driver',time:'2:11 PM',body:"Hi Mari, 1 minute away. There's construction at the north side — I'll pull up to the main entrance instead."},
+          {id:3,author:'Mari Tamm',role:'rider',time:'2:11 PM',body:'Got it, walking over now.'},
+          {id:4,author:'Toomas Vaher',role:'driver',time:'2:12 PM',body:"I'm at the main entrance now. Silver estate, plate 421 KLM."} ] },
+      { id:'pc_2', kind:'rider-rider', reference:'trip_8830 · shared ride', time:'8m', unread:2, joined:false,
+        participants:[ {name:'Mari Tamm',role:'rider',presence:'online',meta:{phone:'+372 5123 4567',app_version:'2.3.1'}}, {name:'Jaan Kask',role:'rider',presence:'away',meta:{phone:'+372 5444 1212',app_version:'2.2.9'}} ],
+        preview:"Jaan: Terminal 2 — meet at the taxi rank.",
+        messages:[
+          {id:1,author:'Mari Tamm',role:'rider',time:'1:40 PM',body:"Hey — we're matched for the shared ride to the airport. Terminal 1 or 2?"},
+          {id:2,author:'Jaan Kask',role:'rider',time:'1:44 PM',body:"Terminal 2. I can meet you at the taxi rank if that's easier."},
+          {id:3,author:'Mari Tamm',role:'rider',time:'1:45 PM',body:'Sounds good, see you at the pickup point.'} ] },
+      { id:'pc_3', kind:'rider-driver', reference:'trip_7788 · lost item', time:'1h', unread:0, joined:true,
+        participants:[ {name:'Pille Saar',role:'rider',presence:'offline',meta:{phone:'+372 5333 9090',app_version:'2.3.0'}}, {name:'Andres Laan',role:'driver',presence:'away',meta:{phone:'+372 5661 2020',vehicle:'Black hatchback · 118 TRE'}}, {name:'Liis Mägi',role:'support',presence:'online',meta:{team:'Support · Tallinn',joined:'12:40 PM'}} ],
+        preview:'You joined to coordinate the return.',
+        messages:[
+          {id:1,author:'Pille Saar',role:'rider',time:'12:30 PM',body:'I think I left my scarf in the back seat.'},
+          {id:2,author:'Andres Laan',role:'driver',time:'12:35 PM',body:'Found a scarf — I can drop it at your address after my next trip.'},
+          {id:3,author:'Liis Mägi',role:'support',time:'12:40 PM',joinNote:true,body:"I've joined to coordinate the return. Andres, please mark it as a lost-item return so the detour is covered."} ] },
+    ];
+  }
+  seedWidgetPeer(){
+    return [
+      {id:1,dir:'in',author:'Toomas',time:'2:11 PM',body:"Hi Mari — I'm 1 minute away. There's construction at the north side, I'll pull up to the main entrance instead."},
+      {id:2,dir:'out',author:'You',time:'2:11 PM',body:'Got it, walking over now.'},
+      {id:3,dir:'in',author:'Toomas',time:'2:12 PM',body:"I'm at the main entrance now. Silver estate, plate 421 KLM."},
     ];
   }
 
@@ -1168,7 +1443,44 @@ class Component extends DCLogic {
   signIn = () => this.setState({ signedIn: true });
   signOut = () => this.setState({ signedIn: false });
   goInbox = () => this.setState({ inboxView: 'inbox' });
+  goPeer = () => this.setState({ inboxView: 'peer' });
   goSettings = () => this.setState({ inboxView: 'settings' });
+  // peer conversations
+  setPeerActive = (id) => this.setState({ peerActiveId: id, peerComposer: '' });
+  setPeerFilter = (f) => this.setState({ peerFilter: f });
+  onPeerQuery = (e) => this.setState({ peerQuery: e && e.target ? e.target.value : e, peerSearchOpen: true });
+  onPeerFocus = () => this.setState({ peerSearchOpen: true });
+  closePeerSearch = () => this.setState({ peerSearchOpen: false });
+  pickPeerRole = (r) => this.setState({ peerFilter: r, peerQuery: '', peerSearchOpen: false });
+  clearPeerRole = () => this.setState({ peerFilter: 'all' });
+  pickPeerConv = (id) => this.setState({ peerActiveId: id, peerComposer: '', peerQuery: '', peerSearchOpen: false });
+  togglePeerPanel = () => this.setState(s => ({ peerPanelOpen: !s.peerPanelOpen }));
+  onPeerComposer = (v) => this.setState({ peerComposer: v });
+  sendPeer = () => {
+    const { peerComposer, peerActiveId } = this.state; const t = peerComposer.trim(); if (!t) return;
+    this.setState(s => ({ peerConvs: s.peerConvs.map(c => {
+      if (c.id!==peerActiveId) return c;
+      const msgs = [...c.messages];
+      if (!c.joined) msgs.push({ id:Date.now()-1, author:'Liis Mägi', role:'support', time:this.now(), joinNote:true, body:"I joined to help — I can see the full history above." });
+      msgs.push({ id:Date.now(), author:'Liis Mägi', role:'support', time:this.now(), body:t });
+      const participants = c.joined ? c.participants : [...c.participants, { name:'Liis Mägi', role:'support', presence:'online', meta:{ team:'Support · Tallinn', joined:this.now() } }];
+      return { ...c, joined:true, participants, messages:msgs, preview:'You: '+t };
+    }), peerComposer:'' }));
+  };
+  setPeerAccess = (id, v) => this.setState(s => {
+    const team = s.team.map(t => t.id===id ? { ...t, peerAccess:v } : t);
+    const me = team.find(t => t.id===this._meId);
+    const myAccess = me ? (me.role==='agent' ? !!me.peerAccess : true) : true;
+    return { team, inboxView: (!myAccess && s.inboxView==='peer') ? 'inbox' : s.inboxView };
+  });
+  // widget peer thread
+  wOpenPeer = () => this.setState({ wOpen:true, wView:'peer' });
+  wPeerOnChange = (v) => this.setState({ wPeerText:v });
+  wPeerSend = () => {
+    const t = this.state.wPeerText.trim(); if (!t) return;
+    this.setState(s => ({ wPeerMsgs:[...s.wPeerMsgs, { id:Date.now(), dir:'out', author:'You', time:'Just now', body:t, read:'Delivered' }], wPeerText:'' }));
+    setTimeout(() => this.setState(s => ({ wPeerMsgs:[...s.wPeerMsgs, { id:Date.now()+1, dir:'in', author:'Toomas', time:'Just now', body:'On my way — see you in a moment.' }] })), 1000);
+  };
   setSettingsTab = (t) => this.setState({ settingsTab: t });
   setChannel = (id) => this.setState({ channelSel: id });
   copyFwd = () => { try { navigator.clipboard.writeText(this.fwdAddress()); } catch(e){} this.setState({ fwdCopied:true }); clearTimeout(this._fwdT); this._fwdT = setTimeout(() => this.setState({ fwdCopied:false }), 1600); };
@@ -1364,6 +1676,95 @@ class Component extends DCLogic {
     };
   }
 
+  peerVals(){
+    const s = this.state;
+    const roleColor = { rider:'var(--blue-600)', driver:'var(--green-600)', support:'var(--coral-600)' };
+    const roleBg = { rider:'var(--blue-50)', driver:'var(--green-50)', support:'var(--coral-50)' };
+    const roleTag = (role) => ({ display:'inline-flex', alignItems:'center', height:'19px', padding:'0 8px', borderRadius:'999px', fontFamily:'var(--font-sans)', fontSize:'11px', fontWeight:700, letterSpacing:'.01em', color:roleColor[role]||'var(--text-secondary)', background:roleBg[role]||'var(--surface-sunken)' });
+
+    // roles are tenant-defined — derive everything from the participants present, never hardcode role names
+    const partyRoles = c => c.participants.filter(p => p.role!=='support').map(p => p.role);
+    const kindLabel = c => partyRoles(c).join(' · ');
+    const isMixed = c => new Set(partyRoles(c)).size > 1;   // parties of different roles vs same role
+
+    const inFilter = c => s.peerFilter==='all' ? true : partyRoles(c).includes(s.peerFilter);
+    const q = (s.peerQuery || '').trim().toLowerCase();
+    const inQuery = c => !q || (c.reference + ' ' + c.participants.map(p => p.name).join(' ') + ' ' + c.preview).toLowerCase().includes(q);
+    const list = s.peerConvs.filter(c => inFilter(c) && inQuery(c));
+    const active = s.peerConvs.find(c => c.id===s.peerActiveId) || s.peerConvs[0];
+
+    // filter chips: "All" + one per distinct non-support role found across peer conversations
+    const roleOrder = [...new Set(s.peerConvs.flatMap(partyRoles))];
+    const filterChips = [{ label:'All', v:'all' }, ...roleOrder.map(r => ({ label:r, v:r }))].map(o => ({
+      label:o.label, onClick:()=>this.setPeerFilter(o.v), style:this.filterStyle(s.peerFilter===o.v),
+    }));
+
+    const rows = list.map(c => ({
+      active: c.id===s.peerActiveId,
+      onClick: () => this.setPeerActive(c.id),
+      people: c.participants.map(p => ({ name:p.name })),
+      title: c.participants.filter(p => p.role!=='support').map(p => p.name.split(' ')[0]).join('  ·  '),
+      preview: c.preview, time: c.time, reference: c.reference,
+      hasUnread: c.unread>0, unread: c.unread,
+      kindLabel: kindLabel(c), joined: c.joined,
+      rowStyle: { display:'flex', gap:'11px', width:'100%', textAlign:'left', padding:'13px 14px', border:0, borderBottom:'1px solid var(--border-subtle)', background:c.id===s.peerActiveId?'var(--brand-subtle)':'transparent', cursor:'pointer', alignItems:'flex-start' },
+      kindStyle: { display:'inline-flex', alignItems:'center', height:'18px', padding:'0 7px', borderRadius:'999px', fontFamily:'var(--font-sans)', fontSize:'10px', fontWeight:700, letterSpacing:'.02em', textTransform:'uppercase', color:isMixed(c)?'var(--green-600)':'var(--blue-600)', background:isMixed(c)?'var(--green-50)':'var(--blue-50)' },
+    }));
+
+    const peerMsgs = active.messages.map(m => ({
+      author: m.author, time: m.time, body: m.body,
+      roleTag: m.role, nameColor: roleColor[m.role] || 'var(--text-secondary)',
+      roleTagStyle: roleTag(m.role),
+      isSupport: m.role==='support' && !m.joinNote,
+      isOther: m.role!=='support',
+      joinNote: !!m.joinNote,
+      bubble: !m.joinNote,
+      bubbleStyle: {
+        maxWidth:'82%', padding:'9px 13px', fontSize:'14px', lineHeight:1.45,
+        borderRadius:'16px',
+        alignSelf: m.role==='support' ? 'flex-end' : 'flex-start',
+        background: m.role==='support' ? 'var(--brand)' : 'var(--surface-card)',
+        color: m.role==='support' ? '#fff' : 'var(--text-primary)',
+        border: m.role==='support' ? '0' : '1px solid var(--border-default)',
+        borderBottomRightRadius: m.role==='support' ? '5px' : '16px',
+        borderBottomLeftRadius: m.role==='support' ? '16px' : '5px',
+      },
+    }));
+
+    const participants = active.participants.map(p => ({
+      name: p.name, role: p.role, presence: p.presence,
+      roleTagStyle: roleTag(p.role),
+      metaList: Object.entries(p.meta || {}).map(([k,v]) => ({ k, v })),
+    }));
+
+    return {
+      peerNavVisible: this.myPeerAccess(),
+      navPeerStyle: this.navStyle(s.inboxView==='peer'), onGoPeer: this.goPeer,
+      peerAttention: s.peerConvs.reduce((n,c) => n + (c.unread>0?1:0), 0),
+      peerHasAttention: s.peerConvs.some(c => c.unread>0),
+
+      peerRows: rows, peerCount: list.length, peerNoRows: list.length===0,
+      peerQuery: s.peerQuery, onPeerQuery: this.onPeerQuery, onPeerFocus: this.onPeerFocus, onClosePeerSearch: this.closePeerSearch,
+      peerSearchOpen: s.peerSearchOpen,
+      peerFilterActive: s.peerFilter!=='all', peerFilterLabel: s.peerFilter, onClearPeerRole: this.clearPeerRole,
+      peerRoleSuggestions: roleOrder
+        .filter(r => !q || r.toLowerCase().includes(q))
+        .map(r => ({ label: r, count: s.peerConvs.filter(c => partyRoles(c).includes(r)).length, active: s.peerFilter===r, onPick: () => this.pickPeerRole(r) })),
+      peerConvSuggestions: (q ? s.peerConvs.filter(c => (c.reference + ' ' + c.participants.map(p => p.name).join(' ')).toLowerCase().includes(q)) : []).slice(0, 5)
+        .map(c => ({ title: c.participants.filter(p => p.role!=='support').map(p => p.name).join('  ·  '), ref: c.reference, onPick: () => this.pickPeerConv(c.id) })),
+      peerHasConvSuggestions: !!q && s.peerConvs.some(c => (c.reference + ' ' + c.participants.map(p => p.name).join(' ')).toLowerCase().includes(q)),
+
+      peerActivePeople: active.participants.map(p => ({ name:p.name })),
+      peerActiveTitle: active.participants.filter(p => p.role!=='support').map(p => p.name).join('  &  '),
+      peerActiveRef: active.reference, peerActiveKind: kindLabel(active),
+      peerJoined: active.joined, peerNotJoined: !active.joined,
+      peerMsgs, peerMsgKey: active.messages.length,
+      peerParticipants: participants, peerParticipantCount: active.participants.length,
+      peerComposer: s.peerComposer, onPeerComposer: this.onPeerComposer, onSendPeer: this.sendPeer,
+      peerPanelOpen: s.peerPanelOpen, onTogglePeerPanel: this.togglePeerPanel, peerPanelBtnStyle: this.panelStyle(s.peerPanelOpen),
+    };
+  }
+
   renderVals(){
     const s = this.state;
     const NS = window.SildDesignSystem_a95234 || {};
@@ -1409,7 +1810,12 @@ class Component extends DCLogic {
     // settings (per-row handlers)
     const keys = s.keys.map(k => ({ ...k, onRevoke: () => this.revokeKey(k.id) }));
     const webhooks = s.webhooks.map(w => ({ ...w, onToggle: (v) => this.toggleWebhook(w.id, v), onDelete: () => this.deleteWebhook(w.id) }));
-    const team = s.team.map(t => ({ ...t, onChangeRole: (e) => this.setRole(t.id, e && e.target ? e.target.value : e) }));
+    const team = s.team.map(t => ({ ...t,
+      onChangeRole: (e) => this.setRole(t.id, e && e.target ? e.target.value : e),
+      isMe: t.id===this._meId,
+      peerAccessOn: !!t.peerAccess,
+      onPeerAccess: (v) => this.setPeerAccess(t.id, v),
+    }));
 
     // widget
     const wMsgs = s.wMsgs.map(m => ({ direction:m.dir, author:m.author, time:m.time, body:m.body, readReceipt:m.read }));
@@ -1435,6 +1841,8 @@ class Component extends DCLogic {
       // inbox
       showLogin: !s.signedIn, showInboxApp: s.signedIn,
       inboxIsList: s.inboxView==='inbox', inboxIsSettings: s.inboxView==='settings',
+      inboxIsPeer: s.inboxView==='peer' && this.myPeerAccess(),
+      ...this.peerVals(),
       navInboxStyle: this.navStyle(s.inboxView==='inbox'), navSettingsStyle: this.navStyle(s.inboxView==='settings'),
       onSignIn: this.signIn, onSignOut: this.signOut, onGoInbox: this.goInbox, onGoSettings: this.goSettings,
       convRows, noConvs: filtered.length===0,
@@ -1495,7 +1903,9 @@ class Component extends DCLogic {
       onNewKey: this.openKeyDialog, keyDialog: s.keyDialog, revealedKey: s.revealedKey, onCloseKey: this.closeKeyDialog, onCopyKey: this.copyKey,
 
       // widget
-      wOpen: s.wOpen, wClosed: !s.wOpen, launcherOpenClass: s.wOpen ? 'is-open' : '', wIsHome: s.wView==='home', wIsThread: s.wView==='thread', wMsgs, wMsgKey: s.wMsgs.length,
+      wOpen: s.wOpen, wClosed: !s.wOpen, launcherOpenClass: s.wOpen ? 'is-open' : '', wIsHome: s.wView==='home', wIsThread: s.wView==='thread', wIsPeer: s.wView==='peer', wMsgs, wMsgKey: s.wMsgs.length,
+      wPeerMsgs: s.wPeerMsgs.map(m => ({ direction:m.dir, author:m.author, time:m.time, body:m.body, readReceipt:m.read })), wPeerMsgKey: s.wPeerMsgs.length,
+      wPeerText: s.wPeerText, onWPeerChange: this.wPeerOnChange, onWPeerSend: this.wPeerSend, onWOpenPeer: this.wOpenPeer,
       launcherStyle: { position:'absolute', right:'24px', bottom:'24px', width:'60px', height:'60px', borderRadius:'50%', border:0, background:'var(--brand)', color:'#fff', cursor:'pointer', boxShadow:'var(--shadow-launcher)', display:'flex', alignItems:'center', justifyContent:'center', transition:'transform var(--duration-base) var(--ease-spring, ease)', transform: s.wOpen ? 'scale(0.92)' : 'scale(1)' },
       onLauncher: this.toggleLauncher, onWStart: this.wStart, onWOpenThread: this.wOpenThread, onWBack: this.wHome,
       wSoundOn: s.wSoundOn, wSoundOff: !s.wSoundOn, onWToggleSound: this.wToggleSound,
@@ -1505,8 +1915,9 @@ class Component extends DCLogic {
       // app
       aIsHost: s.aView==='host', aIsList: s.aView==='list', aIsThread: s.aView==='thread', aRows, aMessages,
       aActiveName: aActive.name, aActivePresence: aActive.presence,
+      aActiveContext: aActive.context, aActiveIsPeer: aActive.kind==='peer',
       aActiveStatusText: aActive.presence==='online' ? 'Active now' : aActive.presence==='away' ? 'Away' : 'Offline',
-      onAHost: this.aHost, onAMessages: this.aMessages, onAOpenSupport: this.aOpenSupport,
+      onAHost: this.aHost, onAMessages: this.aMessages, onAOpenSupport: this.aOpenSupport, onAOpenDriver: () => this.aOpenThread('a2'),
       onAList: this.aList, onAStart: this.aStart, aText: s.aText, onAChange: this.aOnChange, onASend: this.aSend,
     };
   }

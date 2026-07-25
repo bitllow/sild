@@ -20,14 +20,6 @@ import (
 // conversation is one that hasn't. Agents with peer_access observe them and may
 // step in, which implicitly adds them as an agent participant.
 
-// conversationIsPeer reports whether a conversation exists and is peer-kind. This
-// reads the stored classifier (set once at creation), so it is a single indexed
-// lookup and can't drift from the queue/search view of the same conversation.
-func (s *Service) conversationIsPeer(ctx context.Context, tenantID, convID string) bool {
-	c, err := s.store.Conversations().Get(ctx, tenantID, convID)
-	return err == nil && c.Kind == models.KindPeer
-}
-
 // AgentAccess is the single-pass classification of a platform agent's access to a
 // conversation, so AuthorizeConversation needn't issue overlapping lookups.
 type AgentAccess struct {
@@ -45,13 +37,18 @@ type AgentAccess struct {
 // archive predicates that made a naive sequence hit the tombstone twice on an
 // archived-support read). Peer takes precedence: a peer conversation is always
 // the peer path regardless of any (never-present) assignment.
-func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID string) AgentAccess {
+//
+// needSupport asks for the SupportOK verdict, which costs the assignment lookup.
+// Callers whose role already grants tenant-wide access to non-peer conversations
+// (owner/admin) pass false: they only need to know whether this is a peer
+// conversation, so the extra lookup would be dead work on a hot path.
+func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID string, needSupport bool) AgentAccess {
 	if conv, err := s.store.Conversations().Get(ctx, tenantID, convID); err == nil {
 		if conv.Kind == models.KindPeer {
 			return AgentAccess{Peer: true}
 		}
 		// Hot support conversation: agents reach it only if it carries an assignment.
-		return AgentAccess{SupportOK: s.HasAssignment(ctx, tenantID, convID)}
+		return AgentAccess{SupportOK: needSupport && s.HasAssignment(ctx, tenantID, convID)}
 	}
 	// Not hot — a tombstone (archived) still carries the durable kind.
 	if tomb, ok := s.tombstone(ctx, tenantID, convID); ok {
@@ -151,13 +148,13 @@ func (s *Service) PeerAgentSend(ctx context.Context, tenantID, convID, adminID, 
 	}
 
 	if !joined {
-		if err := s.agentJoinPeer(ctx, tenantID, convID, adminID); err != nil {
+		if err := s.agentJoinPeer(ctx, conv, adminID); err != nil {
 			return nil, err
 		}
 	}
 
 	return s.SendMessage(ctx, tenantID, convID, SendInput{
-		SenderKind: models.SenderAgent, Internal: &adminID, Kind: models.KindPeer,
+		SenderKind: models.SenderAgent, Internal: &adminID, Conv: conv,
 		Body: body, Attachments: atts, ClientMsgID: clientMsgIDPtr(clientMsgID),
 	})
 }
@@ -166,7 +163,8 @@ func (s *Service) PeerAgentSend(ctx context.Context, tenantID, convID, adminID, 
 // join-note, so both parties see who stepped in and the details panel lists the
 // agent. The join-note is a system message (excluded from queue ordering) authored
 // by the agent's actor, so the widget can render "<name> joined to help".
-func (s *Service) agentJoinPeer(ctx context.Context, tenantID, convID, adminID string) error {
+func (s *Service) agentJoinPeer(ctx context.Context, conv *models.Conversation, adminID string) error {
+	tenantID, convID := conv.TenantID, conv.ID
 	name := s.AgentDisplayName(ctx, tenantID, adminID)
 	meta, _ := json.Marshal(map[string]string{"name": name, "role": "support"})
 	member, err := s.buildMember(ctx, tenantID, convID, MemberInput{
@@ -199,7 +197,7 @@ func (s *Service) agentJoinPeer(ctx context.Context, tenantID, convID, adminID s
 	// System join-note. Authored by the agent's actor so end-user surfaces can
 	// name who joined; SenderSystem is excluded from last-activity/preview.
 	_, err = s.SendMessage(ctx, tenantID, convID, SendInput{
-		SenderKind: models.SenderSystem, Internal: &adminID, Kind: models.KindPeer,
+		SenderKind: models.SenderSystem, Internal: &adminID, Conv: conv,
 		Body: "joined to help. I can see the full history above.",
 	})
 	return err

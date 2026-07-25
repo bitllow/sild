@@ -27,5 +27,5 @@ coverage.*
 
 # Claude Code local config (skills, settings, session state)
 .claude/
-
+CLAUDE.md
 tasks

@@ -13,9 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// requirePeerAccess gates the peer-conversation surface on the operator's
-// per-user peer_access flag (Settings → Team). Owner/admin have tenant-wide
-// conversation access, but the peer surface is still their own opt-in.
+// requirePeerAccess gates the peer-conversation surface on the operator's per-user
+// peer_access flag (Settings → Team). No platform role is exempt: owner and admin
+// have tenant-wide access to SUPPORT conversations, but peer conversations take
+// their own grant, which only the owner can give (see models.AdminUser.PeerAccess).
 func requirePeerAccess(c *gin.Context) bool {
 	if p := middleware.Get(c); p != nil && p.PeerAccess {
 		return true

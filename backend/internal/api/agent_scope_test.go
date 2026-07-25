@@ -44,10 +44,16 @@ func TestAgentScopedToSupportConversations(t *testing.T) {
 		t.Fatalf("agent should access a support conversation, got %d %s", w.Code, w.Body)
 	}
 
-	// owner has tenant-wide access (including the plain conversation)
+	// owner has tenant-wide access to support conversations, with no assignment needed
 	h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
 	owner := loginAs(t, h, "owner@test")
-	if w = h.Request("GET", "/v1/conversations/"+plain.ID).Cookie("sild_admin", owner).Do(); w.Code != http.StatusOK {
-		t.Fatalf("owner should access any conversation, got %d %s", w.Code, w.Body)
+	if w = h.Request("GET", "/v1/conversations/"+support.ID).Cookie("sild_admin", owner).Do(); w.Code != http.StatusOK {
+		t.Fatalf("owner should access any support conversation, got %d %s", w.Code, w.Body)
+	}
+	// ...but the plain conversation is a PEER conversation (two end-user parties, no
+	// assignment), and reaching one is a per-operator opt-in the owner grants — so
+	// tenant-wide role scope does not cover it. See TestPeerAccessGatesEveryRole.
+	if w = h.Request("GET", "/v1/conversations/"+plain.ID).Cookie("sild_admin", owner).Do(); w.Code != http.StatusForbidden {
+		t.Fatalf("owner without peer access must not read a peer conversation, got %d %s", w.Code, w.Body)
 	}
 }

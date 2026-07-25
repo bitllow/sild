@@ -83,6 +83,32 @@ func (h *Handler) adminPasswordLogin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "authenticated", "expires_at": exp})
 }
 
+// guardOwnerMutation: only an owner may create an owner or touch an owner's record.
+// Every team route calls it — invite mints owners, PATCH promotes, password resets
+// take over. targetID is "" on create; newRole is nil when no role is being set.
+func (h *Handler) guardOwnerMutation(c *gin.Context, targetID string, newRole *models.PlatformRole) bool {
+	if p := middleware.Get(c); p != nil && p.Role == models.PlatformOwner {
+		return true
+	}
+	if newRole != nil && *newRole == models.PlatformOwner {
+		httpx.Forbidden(c, "only the owner may assign the owner role")
+		return false
+	}
+	if targetID == "" {
+		return true
+	}
+	target, err := h.svc.GetAdmin(c.Request.Context(), apiutil.Tenant(c), targetID)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return false
+	}
+	if target.PlatformRole == models.PlatformOwner {
+		httpx.Forbidden(c, "only the owner may change the owner's record")
+		return false
+	}
+	return true
+}
+
 // setAgentPassword: POST /v1/admin/team/:id/password (owner/admin set a password).
 func (h *Handler) setAgentPassword(c *gin.Context) {
 	var req struct {
@@ -90,6 +116,10 @@ func (h *Handler) setAgentPassword(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "invalid body")
+		return
+	}
+	// A password reset is account takeover by another name.
+	if !h.guardOwnerMutation(c, c.Param("id"), nil) {
 		return
 	}
 	if err := h.svc.SetAdminPassword(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), req.Password); err != nil {
@@ -430,6 +460,16 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		return
 	}
 	ctx, tenant, id := c.Request.Context(), apiutil.Tenant(c), c.Param("id")
+	if !h.guardOwnerMutation(c, id, req.PlatformRole) {
+		return
+	}
+	// Peer access is the owner's grant to give.
+	if req.PeerAccess != nil {
+		if p := middleware.Get(c); p == nil || p.Role != models.PlatformOwner {
+			httpx.Forbidden(c, "only the owner may change peer access")
+			return
+		}
+	}
 	if req.PlatformRole != nil {
 		if err := h.svc.SetAdminRole(ctx, tenant, id, *req.PlatformRole); err != nil {
 			apiutil.Fail(c, err)
@@ -470,6 +510,9 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.BadRequest(c, "invalid body")
+		return
+	}
+	if !h.guardOwnerMutation(c, "", &req.PlatformRole) {
 		return
 	}
 	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.FirstName, req.LastName, req.PlatformRole)

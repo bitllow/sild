@@ -30,11 +30,9 @@ type SendInput struct {
 	// AllowInternal is true when the caller is an agent (admin/ingress); only
 	// then may Visibility be internal (§4.2, §5.6).
 	AllowInternal bool
-	// Kind, when set, is the conversation's classifier as already known to the
-	// caller — it lets SendMessage decide the peer fan-out without re-reading the
-	// conversation. The peer send path (which has already loaded the conversation)
-	// sets it; leave empty to have SendMessage look it up.
-	Kind models.ConversationKind
+	// Conv, when set, is the caller's already-read conversation, so SendMessage can
+	// apply the peer rules without reading the row again. Nil = read it here.
+	Conv *models.Conversation
 }
 
 // SendMessage appends a message to a conversation with idempotency, visibility
@@ -52,6 +50,16 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	}
 	if in.Visibility == models.VisibilityInternal && !in.AllowInternal {
 		return nil, ErrForbidden // only agents may post internal notes
+	}
+
+	// Resolved once and reused below: a closed peer conversation is read-only, and a
+	// peer conversation also fans out to the tenant peer channel.
+	conv := in.Conv
+	if conv == nil {
+		conv, _ = s.store.Conversations().Get(ctx, tenantID, convID)
+	}
+	if conv != nil && conv.Kind == models.KindPeer && conv.Status == models.ConversationClosed {
+		return nil, ErrForbidden
 	}
 
 	// Idempotency (§4.2): a repeat client_msg_id returns the original.
@@ -95,13 +103,8 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		s.emit(ctx, realtime.Target{Conversation: convID, Internal: true}, realtime.EventMessageCreated, convID, data)
 	} else {
 		tgt := realtime.Target{Conversation: convID}
-		// A peer conversation also fans out to the tenant peer channel, which
-		// peer_access operators observe — they aren't conversation members, so the
-		// conv channel alone wouldn't reach them. Trust the caller's kind hint when
-		// present (the peer send path already loaded the conversation); only read it
-		// back when the hint is absent (e.g. an end-user send from the widget).
-		isPeer := in.Kind == models.KindPeer || (in.Kind == "" && s.conversationIsPeer(ctx, tenantID, convID))
-		if isPeer {
+		// peer_access operators observe this channel; they aren't conversation members.
+		if conv != nil && conv.Kind == models.KindPeer {
 			tgt.Peer = tenantID
 		}
 		s.emit(ctx, tgt, realtime.EventMessageCreated, convID, data)

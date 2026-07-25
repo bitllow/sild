@@ -1,0 +1,10 @@
+# Gradle / Android build outputs
+.gradle/
+build/
+*/build/
+# Machine-specific SDK location (each dev/CI provides its own)
+local.properties
+# IDE
+.idea/
+*.iml
+captures/

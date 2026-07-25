@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The SDK talks to the Sild backend over REST + WebSocket and loads brand/
+         attachment images, so it needs network access. Declared here so it merges
+         into every host app that depends on this AAR — a host that doesn't already
+         request INTERNET would otherwise have every request silently fail. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application>
+        <!-- The messenger host activity. Declared here so it merges into every
+             host app that depends on this AAR — SildMessenger.open* start it, so
+             a missing declaration would fail with ActivityNotFoundException.
+             exported=false: only the host app (via SildMessenger) launches it. -->
+        <activity
+            android:name="io.sild.ui.SildMessengerActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+</manifest>

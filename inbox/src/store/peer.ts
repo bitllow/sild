@@ -249,7 +249,7 @@ export class PeerStore {
         time: relativeTime(lastActivity),
         lastActivity,
         unread: this.unreadByConv.get(conv.id) || 0,
-        joined: participants.some((p) => p.isAgent),
+        joined: this.hasJoined(participants),
         messages,
       };
     } catch {
@@ -298,16 +298,23 @@ export class PeerStore {
         const row = this.conversations.find((c) => c.id === id);
         if (!row) return;
         row.participants = participants;
-        row.joined = participants.some((p) => p.isAgent);
+        row.joined = this.hasJoined(participants);
       });
     } catch {
       /* transient */
     }
   };
 
+  // Whether THIS operator stepped in — any-agent would show "You joined" to every
+  // colleague as soon as one of them joined.
+  private hasJoined(participants: PeerParticipant[]): boolean {
+    const me = this.root.meId;
+    return !!me && participants.some((p) => p.isAgent && p.id === me);
+  }
+
   private buildRow(c: ApiQueueConversation): PeerConversation {
     const participants = c.members.map(mapParticipant);
-    const joined = participants.some((p) => p.isAgent);
+    const joined = this.hasJoined(participants);
     const existing = this.conversations.find((x) => x.id === c.id);
     return {
       id: c.id,

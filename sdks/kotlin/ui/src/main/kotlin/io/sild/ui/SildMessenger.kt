@@ -1,0 +1,137 @@
+package io.sild.ui
+
+import android.content.Context
+import android.content.Intent
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import io.sild.core.SildClient
+import io.sild.core.SildConfig
+
+// SildRuntime holds the host-supplied config process-wide. The config carries a
+// TokenProvider (not parcelable), so the launcher stores it here and the messenger
+// Activity reads it — the same "init once, open many" model as the web Sild.init.
+object SildRuntime {
+    @Volatile
+    var config: SildConfig? = null
+}
+
+// Sild is the SDK entry point: Sild.init(config) once (e.g. in Application), then
+// use the returned SildMessenger to open support or a specific conversation —
+// mirroring the web widget's Sild.init handle and the App design's
+// client.openSupportRequest() / client.openConversation(tripId).
+object Sild {
+    fun init(config: SildConfig): SildMessenger {
+        SildRuntime.config = config
+        return SildMessenger
+    }
+}
+
+object SildMessenger {
+    internal const val EXTRA_TARGET = "sild.target"
+    internal const val TARGET_LIST = "list"
+    internal const val TARGET_SUPPORT = "support"
+    internal const val CONV_PREFIX = "conv:"
+
+    /** Open the messenger on the conversation list ("Messages"). */
+    fun openList(context: Context) = launch(context, TARGET_LIST)
+
+    /** Start (or resume) a support request and open it. */
+    fun openSupportRequest(context: Context) = launch(context, TARGET_SUPPORT)
+
+    /** Open a specific conversation directly — e.g. the trip's driver chat. */
+    fun openConversation(context: Context, conversationId: String) = launch(context, CONV_PREFIX + conversationId)
+
+    private fun launch(context: Context, target: String) {
+        val intent = Intent(context, SildMessengerActivity::class.java)
+            .putExtra(EXTRA_TARGET, target)
+        if (context !is ComponentActivity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
+}
+
+// SildSession owns the SildClient in a ViewModel, not the Activity, so a
+// configuration change doesn't drop the connection or bounce the user back to Home.
+internal class SildSession(cfg: SildConfig) : ViewModel() {
+    private val tone = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60) }.getOrNull()
+
+    val client = SildClient(cfg, viewModelScope, onChime = { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 150) })
+
+    private var started = false
+
+    /** First creation only: a rotation must not re-run start() and re-open the target. */
+    fun startOnce(conversationId: String?) {
+        if (started) return
+        started = true
+        client.start(conversationId)
+    }
+
+    override fun onCleared() {
+        client.destroy()
+        tone?.release()
+    }
+
+    class Factory(private val cfg: SildConfig) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = SildSession(cfg) as T
+    }
+}
+
+// SildMessengerActivity hosts the Compose messenger, themed from the live brand.
+class SildMessengerActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val config = SildRuntime.config
+        if (config == null) { finish(); return }
+
+        // TARGET_LIST/TARGET_SUPPORT both land on Home (welcome + New conversation +
+        // Recent), like the web launcher — the support request is created lazily on
+        // the first message. A conv: target opens that thread directly (single-thread
+        // mode: back finishes rather than returning to a Home that wasn't in the stack).
+        val target = intent.getStringExtra(SildMessenger.EXTRA_TARGET) ?: SildMessenger.TARGET_LIST
+        val rootIsHome = target == SildMessenger.TARGET_LIST || target == SildMessenger.TARGET_SUPPORT
+
+        val session = ViewModelProvider(this, SildSession.Factory(config))[SildSession::class.java]
+        session.startOnce(if (rootIsHome) null else target.removePrefix(SildMessenger.CONV_PREFIX))
+        val client = session.client
+
+        setContent {
+            val state by client.state.collectAsStateWithLifecycle()
+            var draft by rememberSaveable { mutableStateOf(false) }
+            SildTheme(state.brand) {
+                val close = { finish() }
+                when {
+                    !rootIsHome -> ThreadScreen(client, state, draft = false, onBack = close, onCreated = {}, onClose = close)
+                    // ONE ThreadScreen call site spans both draft and created states so its
+                    // composer keeps its remembered text/attachments across the transition.
+                    // openSupportRequest sets activeId before the first send finishes, and
+                    // onCreated only flips draft=false on success; a separate call site per
+                    // state would dispose the composer and lose whatever the user typed while
+                    // that first send was in flight (or the whole draft if the send failed).
+                    draft || state.activeId != null -> ThreadScreen(
+                        client, state,
+                        draft = draft,
+                        // Leave to the list in one press: backToList clears activeId AND
+                        // cancels any in-flight support-request creation, so a conversation
+                        // created (or still creating) for this draft can't keep us here or
+                        // reopen the thread after we've left.
+                        onBack = { draft = false; client.backToList() },
+                        onCreated = { draft = false },
+                        onClose = close,
+                    )
+                    else -> HomeScreen(state, onNew = { draft = true }, onOpen = { client.openConversation(it) }, onToggleSound = { client.toggleSound() }, onClose = close)
+                }
+            }
+        }
+    }
+}
