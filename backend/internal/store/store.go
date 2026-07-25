@@ -19,6 +19,7 @@ type Store interface {
 	Admins() AdminRepo
 	SigningKeys() SigningKeyRepo
 	Conversations() ConversationRepo
+	Contacts() ContactRepo
 	Members() MemberRepo
 	Assignments() AssignmentRepo
 	Messages() MessageRepo

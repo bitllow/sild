@@ -11,11 +11,11 @@ import (
 // never retrievable. Prefix is a public, indexed lookup component so verification
 // is O(1) (no scan): key string is sild_live_<prefix>_<secret>.
 type APIKey struct {
-	ID        string     `gorm:"primaryKey;size:40"`
-	TenantID  string     `gorm:"size:40;not null;index:idx_apikey_tenant"`
-	Prefix    string     `gorm:"size:24;not null;uniqueIndex"` // lookup key
-	Hash      string     `gorm:"size:128;not null"`            // sha256 hex of the secret part
-	Label     string     `gorm:"size:255"`
+	ID        string `gorm:"primaryKey;size:40"`
+	TenantID  string `gorm:"size:40;not null;index:idx_apikey_tenant"`
+	Prefix    string `gorm:"size:24;not null;uniqueIndex"` // lookup key
+	Hash      string `gorm:"size:128;not null"`            // sha256 hex of the secret part
+	Label     string `gorm:"size:255"`
 	RevokedAt *time.Time
 	CreatedAt time.Time
 }
@@ -33,9 +33,9 @@ func (k *APIKey) Active() bool { return k.RevokedAt == nil }
 // AdminUser is an inbox operator (§2.4, §7). Separate identity space from chat
 // end-users; authenticated via Google OIDC.
 type AdminUser struct {
-	ID           string       `gorm:"primaryKey;size:40"`
-	TenantID     string       `gorm:"size:40;not null;uniqueIndex:idx_admin_tenant_email"`
-	Email        string       `gorm:"size:320;not null;uniqueIndex:idx_admin_tenant_email"`
+	ID       string `gorm:"primaryKey;size:40"`
+	TenantID string `gorm:"size:40;not null;uniqueIndex:idx_admin_tenant_email"`
+	Email    string `gorm:"size:320;not null;uniqueIndex:idx_admin_tenant_email"`
 	// FirstName/LastName are the operator's display name (Settings → Team). The
 	// first name is surfaced to end-users on the messenger surfaces (web widget +
 	// SDK) as the agent's reply name, in place of the generic "Support".

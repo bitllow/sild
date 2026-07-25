@@ -44,75 +44,81 @@ func (h *Handler) Mount(e *gin.Engine) {
 		c.Data(http.StatusOK, "application/javascript; charset=utf-8", webasset.Widget)
 	})
 
-	v1 := e.Group("/v1")
+	// Every JSON route is capped; the raw-body routes below carry their own,
+	// larger limits. A cap inside the JSON decoder would miss them entirely.
+	v1 := e.Group("/v1", middleware.BodyLimit(middleware.BodyLimitJSON))
 
 	// Email inbound (§6.2): provider posts here, signature is the gate.
-	v1.POST("/email/inbound", h.emailInbound)
-
-	// Public brand for the web drop-in's load path (§9): unauthenticated, keyed by
-	// the host-embedded app id. Branding is public; this mints no token/user.
-	v1.GET("/public/brand", h.getPublicBrand)
+	v1.POST("/email/inbound", middleware.BodyLimit(middleware.BodyLimitEmail), h.mw.RateLimitIngress(), h.emailInbound)
 
 	// Local storage backend serves attachment bytes here (§11). GCS/S3 use
 	// direct-to-bucket signed URLs and don't mount these.
 	if h.cfg.Storage.Backend == "local" || h.cfg.Storage.Backend == "" {
-		v1.PUT("/uploads/local/*objectKey", h.localUploadPut)
+		v1.PUT("/uploads/local/*objectKey", middleware.BodyLimit(middleware.BodyLimitUpload), h.mw.RateLimitIngress(), h.localUploadPut)
 		v1.GET("/uploads/local/*objectKey", h.localUploadGet)
 	}
 
-	// Shared paths (API key | user JWT | admin), §4.1/§4.2 same URLs.
+	// ── Resource routes ────────────────────────────────────────────────────
+	//
+	// Paths name the DATA MODEL, not the consumer. The credential decides which
+	// subset of a resource a caller sees, never which URL they call — the inbox,
+	// the web drop-in, the native SDK and a host backend all GET /v1/conversations.
+	// The one deliberate exception is /v1/admin/auth/*: obtaining a credential is
+	// genuinely consumer-specific.
+	//
+	// The prefix no longer carries authentication, so the GROUP does: each route
+	// is registered into the group holding its credential requirement.
+
+	// Any credential (API key | user JWT | admin session).
 	any := v1.Group("", h.mw.Any())
+	any.GET("/conversations", h.listConversations)
+	any.POST("/conversations", h.createConversation)
 	any.GET("/conversations/:id", h.getConversation)
 	any.POST("/conversations/:id/messages", h.postMessage)
 	any.GET("/conversations/:id/messages", h.listMessages)
 	any.POST("/conversations/:id/read", h.markRead)
 	any.POST("/conversations/:id/typing", h.typing)
 	any.POST("/conversations/:id/close", h.closeConversation)
+	any.POST("/conversations/:id/assignments", h.addAssignment)
 	any.POST("/uploads", h.issueUpload)
+	any.GET("/principal", h.getPrincipal)
+
+	// Optional credential: the active brand is public when keyed by app_id, and
+	// tenant-scoped when a credential is present. Any() would 401 the public form.
+	v1.GET("/brands/active", h.mw.OptionalAuth(), h.getActiveBrand)
 
 	// Integration (API key only), §4.1.
 	key := v1.Group("", h.mw.APIKey())
 	key.POST("/tokens", h.mintToken)
-	key.POST("/conversations", h.createConversation)
 	key.POST("/conversations/:id/members", h.addMember)
 	key.DELETE("/conversations/:id/members/:user_id", h.removeMember)
-	key.POST("/conversations/:id/assignments", h.addAssignment)
 	key.POST("/conversations/:id/members/remap", h.remap)
 
 	// User (JWT only), §4.2.
-	me := v1.Group("/me", h.mw.UserJWT())
-	me.GET("/conversations", h.listMyConversations)
-	me.POST("/support-requests", h.openSupportRequest)
-	me.POST("/push-tokens", h.registerPush)
-	me.DELETE("/push-tokens", h.deregisterPush)
-	// Active brand config for the messenger surfaces (web widget + SDK), §8/§9.
-	me.GET("/brand", h.getMyBrand)
+	user := v1.Group("", h.mw.UserJWT())
+	user.POST("/push-tokens", h.registerPush)
+	user.DELETE("/push-tokens", h.deregisterPush)
 
-	// Admin auth (no session yet), §4.3.
+	// Admin auth (no session yet), §4.3 — the consumer-shaped exception.
 	adminAuth := v1.Group("/admin/auth")
 	adminAuth.GET("/google", h.adminGoogleLogin)
 	adminAuth.GET("/google/callback", h.adminGoogleCallback)
-	adminAuth.POST("/password", h.adminPasswordLogin) // email/password login
+	adminAuth.POST("/password", h.mw.RateLimitAuth(), h.adminPasswordLogin)
 	if h.authn.IsStub() && h.cfg.Env != "production" {
 		adminAuth.GET("/google/dev", h.adminDevLogin)
 	}
 	adminAuth.POST("/logout", h.adminLogout)
 
 	// Admin session (inbox), §4.3.
-	admin := v1.Group("/admin", h.mw.Admin())
-	admin.GET("/me", h.adminMe)
+	admin := v1.Group("", h.mw.Admin())
 	admin.GET("/realtime/token", h.realtimeToken)
-	admin.GET("/assignments", h.listAssignments)
-	admin.POST("/support-requests", h.adminOpenSupportRequest)
-	admin.POST("/assignments/:id/claim", h.claimAssignment)
-	admin.POST("/assignments/:id/close", h.closeAssignmentAdmin)
-	admin.GET("/contacts/conversations", h.listContactConversations)
-	admin.GET("/peer-conversations", h.listPeerConversations)
-	admin.POST("/peer-conversations/:id/messages", h.postPeerMessage)
-	admin.GET("/search", h.adminSearch)
+	admin.PATCH("/assignments/:id", h.patchAssignment)
+	admin.GET("/contacts", h.listContacts)
+	admin.GET("/contacts/:external_user_id", h.getContact)
 
-	// Admin owner/admin only, §7.
-	priv := v1.Group("/admin", h.mw.Admin(), middleware.RequireRole(models.PlatformOwner, models.PlatformAdmin))
+	// Owner/admin only, §7. RBAC moved from the path prefix to the middleware
+	// chain — which is where it was already enforced.
+	priv := v1.Group("", h.mw.Admin(), middleware.RequireRole(models.PlatformOwner, models.PlatformAdmin))
 	priv.POST("/api-keys", h.createAPIKey)
 	priv.GET("/api-keys", h.listAPIKeys)
 	priv.DELETE("/api-keys/:id", h.revokeAPIKey)

@@ -38,7 +38,7 @@ func TestAdminPasswordLogin(t *testing.T) {
 	}
 
 	// the session works on an admin route
-	w = h.Request("GET", "/v1/admin/assignments").Cookie("sild_admin", cookie).Do()
+	w = h.Request("GET", "/v1/conversations?kind=support").Cookie("sild_admin", cookie).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("session should authorize admin routes, got %d %s", w.Code, w.Body)
 	}

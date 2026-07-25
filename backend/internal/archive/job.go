@@ -92,12 +92,15 @@ func (j *Job) archiveOne(ctx context.Context, conv *models.Conversation) error {
 	})
 }
 
+// archiveBatchSize is the page size used to drain a conversation for the sink.
+const archiveBatchSize = 500
+
 // allMessages pages through every message (incl. internal) for serialization.
 func (j *Job) allMessages(ctx context.Context, tenantID, convID string) ([]models.Message, error) {
 	var all []models.Message
 	after := ""
 	for {
-		batch, err := j.store.Messages().ListAfter(ctx, tenantID, convID, after, true)
+		batch, err := j.store.Messages().ListAfter(ctx, tenantID, convID, after, archiveBatchSize, true)
 		if err != nil {
 			return nil, err
 		}

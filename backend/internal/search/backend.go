@@ -13,7 +13,19 @@ type ConversationHit struct {
 	ConversationID string  `json:"conversation_id"`
 	Snippet        string  `json:"snippet,omitempty"`
 	Score          float64 `json:"score,omitempty"`
+	// MatchedFields says WHICH field matched. A keyword can hit a message body,
+	// a member's searchable metadata or their external id, and a snippet can only
+	// show the first — without this a metadata hit renders as an unrelated
+	// preview with no explanation.
+	MatchedFields []string `json:"matched_fields,omitempty"`
 }
+
+// Match field names, mirroring the sources buildFilters searches.
+const (
+	MatchMessageBody      = "message.body"
+	MatchMemberMetadata   = "member.metadata"
+	MatchMemberExternalID = "member.external_user_id"
+)
 
 // Results is the search response (§4.3).
 type Results struct {

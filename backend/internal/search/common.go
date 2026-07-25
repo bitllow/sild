@@ -22,21 +22,14 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	op := likeOpFor(dialect)
 	b := db.Table("conversations c").Where("c.tenant_id = ?", tenantID)
 
-	if q.PeerOnly {
-		// The peer surface's search spans every peer-kind conversation, open OR
-		// closed — reading a closed peer conversation's history is authorized (only
-		// WRITING is gated on open status, in PeerAgentSend), so it must stay
-		// findable rather than vanishing the moment it closes. A status: filter in
-		// the query still narrows it. Mirrors support search, which likewise spans
-		// closed conversations.
-		b = b.Where("c.kind = ?", "peer")
-	} else {
-		// Default (support) search must EXCLUDE peer conversations — otherwise a
-		// non-peer-access agent could recover peer message/metadata content via the
-		// shared search even though the peer list + message endpoints are gated.
-		// Reads the stored kind, so a CLOSED peer conversation (still kind='peer')
-		// does not leak here regardless of status.
-		b = b.Where("c.kind = ?", "support")
+	// The kind restriction comes from the policy scope, not from a flag decided
+	// here. It is a security boundary: without it a non-peer-access agent could
+	// recover peer message and metadata content through the shared search even
+	// though the peer list and message endpoints are gated. Reading the stored
+	// kind means a CLOSED peer conversation does not leak regardless of status.
+	// Search spans open AND closed conversations; a status: token still narrows.
+	if len(q.Kinds) > 0 {
+		b = b.Where("c.kind IN ?", q.Kinds)
 	}
 	if q.Status != nil {
 		b = b.Where("c.status = ?", *q.Status)
@@ -63,7 +56,7 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 		memberInner := wrap("m.member_search_text", op) + " " + op + " ? OR " +
 			wrap("m.external_user_id", op) + " " + op + " ?"
 		args := []any{like(kw), like(kw), like(kw)} // body, member_search_text, external_user_id
-		if q.PeerOnly {
+		if q.MatchRawMetadata {
 			// Peer participants are end users the operator is stepping in to help,
 			// so peer search additionally matches the raw metadata as text — any
 			// value (name, phone, plate) is findable even without configured keys.

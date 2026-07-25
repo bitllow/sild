@@ -1,5 +1,6 @@
 import { Centrifuge } from "centrifuge";
 import type {
+  ApiPage,
   BrandResponse,
   ConnectionState,
   PendingAttachment,
@@ -289,14 +290,14 @@ export class SildClient implements WidgetClient {
   // surface (native SDK). The web widget uses fetchPublicBrand at load instead, to
   // avoid minting a token / creating a user just to style the launcher.
   async fetchBrand(): Promise<BrandResponse> {
-    return this.api<BrandResponse>("GET", "/me/brand");
+    return this.api<BrandResponse>("GET", "/brands/active");
   }
 
   // fetchPublicBrand loads branding unauthenticated, keyed by the host-embedded
   // app id (= tenant id). No Authorization header → no token, no user record.
   async fetchPublicBrand(appId?: string): Promise<BrandResponse> {
     const q = appId ? `?app_id=${encodeURIComponent(appId)}` : "";
-    const res = await fetch(this.base + "/v1/public/brand" + q);
+    const res = await fetch(this.base + "/v1/brands/active" + q);
     if (!res.ok) throw new Error("brand fetch failed");
     return (await res.json()) as BrandResponse;
   }
@@ -350,7 +351,8 @@ export class SildClient implements WidgetClient {
 
   // ── data ───────────────────────────────────────────────────────────────
   async loadConversations() {
-    const list = await this.api<Array<Record<string, unknown>>>("GET", "/me/conversations");
+    const page = await this.api<ApiPage<Record<string, unknown>>>("GET", "/conversations");
+    const list = page.items;
     const convs: WidgetConversation[] = (list || []).map((c) => {
       const last = (c.last_message || {}) as { body?: string; created_at?: string };
       const assignment = c.assignment as { status?: string } | undefined;
@@ -395,11 +397,11 @@ export class SildClient implements WidgetClient {
     // label the other party's messages.
     this.activeNames = this.state.conversations.find((c) => c.id === id)?.names || {};
     try {
-      const page = await this.api<{ messages: ApiMessage[] }>(
+      const page = await this.api<ApiPage<ApiMessage>>(
         "GET",
         `/conversations/${id}/messages?limit=100`
       );
-      const messages = (page.messages || [])
+      const messages = (page.items || [])
         .slice()
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .map((m) => mapMessage(m, this.selfId, this.activeNames));
@@ -410,7 +412,7 @@ export class SildClient implements WidgetClient {
   }
 
   async openSupportRequest() {
-    const conv = await this.api<{ id: string }>("POST", "/me/support-requests", { metadata: this.metadata });
+    const conv = await this.api<{ id: string }>("POST", "/conversations", { metadata: this.metadata });
     await this.loadConversations();
     await this.openConversation(conv.id);
     // The socket connected before this conversation existed, so its server-side

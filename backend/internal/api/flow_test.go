@@ -34,7 +34,7 @@ func TestEndToEndSupportFlow(t *testing.T) {
 		Status     string         `json:"status"`
 		Assignment map[string]any `json:"assignment"`
 	}
-	w = h.Request("POST", "/v1/me/support-requests").Bearer(tokRes.Token).JSON(map[string]any{}).Do()
+	w = h.Request("POST", "/v1/conversations").Bearer(tokRes.Token).JSON(map[string]any{}).Do()
 	if w.Code != http.StatusCreated {
 		t.Fatalf("open support: %d %s", w.Code, w.Body)
 	}
@@ -77,9 +77,9 @@ func TestEndToEndSupportFlow(t *testing.T) {
 
 	// 5) Client catch-up via after= sees the agent reply (§5.4).
 	var after struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []map[string]any `json:"items"`
 	}
-	w = h.Request("GET", "/v1/conversations/"+convRes.ID+"/messages?after="+m1.ID).Bearer(tokRes.Token).Do()
+	w = h.Request("GET", "/v1/conversations/"+convRes.ID+"/messages?since="+m1.ID).Bearer(tokRes.Token).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("catch-up: %d %s", w.Code, w.Body)
 	}

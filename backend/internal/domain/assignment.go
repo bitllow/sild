@@ -97,6 +97,16 @@ func (s *Service) CountQueue(ctx context.Context, tenantID, actorID string) (sto
 	return s.store.Assignments().CountQueue(ctx, tenantID, actorID)
 }
 
+// AssignmentConversation returns the conversation an assignment belongs to, so a
+// caller can authorize against the conversation rather than the assignment id.
+func (s *Service) AssignmentConversation(ctx context.Context, tenantID, assignmentID string) (string, error) {
+	a, err := s.store.Assignments().Get(ctx, tenantID, assignmentID)
+	if err != nil {
+		return "", mapStoreErr(err)
+	}
+	return a.ConversationID, nil
+}
+
 // ClaimAssignment assigns a queued assignment to the calling agent (§4.3).
 // State: queued → assigned.
 func (s *Service) ClaimAssignment(ctx context.Context, tenantID, assignmentID, agentActorID string) (*models.Assignment, error) {

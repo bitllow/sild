@@ -46,23 +46,26 @@ func TestListAssignmentsScopeCounts(t *testing.T) {
 	}
 
 	var resp struct {
-		Items           []map[string]any `json:"items"`
-		YouCount        int              `json:"you_count"`
-		UnassignedCount int              `json:"unassigned_count"`
-		ClosedCount     int              `json:"closed_count"`
+		Items  []map[string]any `json:"items"`
+		Counts struct {
+			Open       int `json:"open"`
+			You        int `json:"you"`
+			Unassigned int `json:"unassigned"`
+			Closed     int `json:"closed"`
+		} `json:"counts"`
 	}
-	w := h.Request("GET", "/v1/admin/assignments?limit=50").Cookie("sild_admin", owner).Do()
+	w := h.Request("GET", "/v1/conversations?kind=support&limit=50").Cookie("sild_admin", owner).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", w.Code, w.Body)
 	}
 	testutil.DecodeJSON(t, w, &resp)
-	if resp.YouCount != 1 || resp.UnassignedCount != 1 || resp.ClosedCount != 1 {
-		t.Fatalf("counts you=%d unassigned=%d closed=%d, want 1/1/1", resp.YouCount, resp.UnassignedCount, resp.ClosedCount)
+	if resp.Counts.You != 1 || resp.Counts.Unassigned != 1 || resp.Counts.Closed != 1 {
+		t.Fatalf("counts you=%d unassigned=%d closed=%d, want 1/1/1", resp.Counts.You, resp.Counts.Unassigned, resp.Counts.Closed)
 	}
 
 	// exclude_closed drops the closed assignment from the page (all three still
 	// carry an assignment, so without it the page has 3).
-	w = h.Request("GET", "/v1/admin/assignments?limit=50&exclude_closed=true").Cookie("sild_admin", owner).Do()
+	w = h.Request("GET", "/v1/conversations?kind=support&limit=50&status=open").Cookie("sild_admin", owner).Do()
 	testutil.DecodeJSON(t, w, &resp)
 	if len(resp.Items) != 2 {
 		t.Fatalf("exclude_closed page = %d items, want 2", len(resp.Items))
@@ -88,21 +91,23 @@ func TestListContactConversations(t *testing.T) {
 	}
 
 	var resp struct {
-		Conversations []map[string]any `json:"conversations"`
+		Items []map[string]any `json:"items"`
 	}
-	w := h.Request("GET", "/v1/admin/contacts/conversations?external_user_id=u_mari").Cookie("sild_admin", owner).Do()
+	w := h.Request("GET", "/v1/conversations?participant=u_mari").Cookie("sild_admin", owner).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("contact history: %d %s", w.Code, w.Body)
 	}
 	testutil.DecodeJSON(t, w, &resp)
-	if len(resp.Conversations) != 2 {
-		t.Fatalf("contact history = %d threads, want 2", len(resp.Conversations))
+	if len(resp.Items) != 2 {
+		t.Fatalf("contact history = %d threads, want 2", len(resp.Items))
 	}
 
 	// Missing external_user_id is a 400.
-	w = h.Request("GET", "/v1/admin/contacts/conversations").Cookie("sild_admin", owner).Do()
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("missing external_user_id = %d, want 400", w.Code)
+	// Omitting the participant filter is no longer an error — it just widens the
+	// list to the whole scope.
+	w = h.Request("GET", "/v1/conversations").Cookie("sild_admin", owner).Do()
+	if w.Code != http.StatusOK {
+		t.Fatalf("unfiltered list = %d, want 200", w.Code)
 	}
 }
 

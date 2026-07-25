@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"github.com/bitllow/sild/backend/internal/httpx"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/gin-gonic/gin"
 )
@@ -16,7 +17,7 @@ func RequireRole(roles ...models.PlatformRole) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		p := Get(c)
-		if p == nil || p.Kind != KindAdmin || !allowed[p.Role] {
+		if p == nil || p.Kind != principal.KindAdmin || !allowed[p.Role] {
 			httpx.Forbidden(c, "insufficient platform role")
 			return
 		}

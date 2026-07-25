@@ -28,7 +28,8 @@ func New(cfg *config.Config, st store.Store, h *api.Handler) *Server {
 	}
 	e := gin.New()
 	e.Use(gin.Recovery())
-	e.Use(middleware.CORS()) // before routes so all registrations inherit it
+	e.Use(middleware.RequestID()) // first, so every response and error body carries one
+	e.Use(middleware.CORS())      // before routes so all registrations inherit it
 
 	s := &Server{cfg: cfg, store: st, engine: e}
 	s.registerHealth()

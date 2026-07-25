@@ -43,21 +43,20 @@ type AgentAccess struct {
 // (owner/admin) pass false: they only need to know whether this is a peer
 // conversation, so the extra lookup would be dead work on a hot path.
 func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID string, needSupport bool) AgentAccess {
-	if conv, err := s.store.Conversations().Get(ctx, tenantID, convID); err == nil {
-		if conv.Kind == models.KindPeer {
-			return AgentAccess{Peer: true}
-		}
-		// Hot support conversation: agents reach it only if it carries an assignment.
-		return AgentAccess{SupportOK: needSupport && s.HasAssignment(ctx, tenantID, convID)}
+	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
+	if err != nil {
+		return AgentAccess{}
 	}
-	// Not hot — a tombstone (archived) still carries the durable kind.
-	if tomb, ok := s.tombstone(ctx, tenantID, convID); ok {
-		if tomb.Kind == models.KindPeer {
-			return AgentAccess{Peer: true}
-		}
-		return AgentAccess{SupportOK: true} // archived formerly-support
+	if conv.Kind == models.KindPeer {
+		return AgentAccess{Peer: true}
 	}
-	return AgentAccess{}
+	// Archived formerly-support is open to any agent; a hot one needs an
+	// assignment to exist (anyone's). Archival retains the row, so this is one
+	// lookup rather than a hot read plus a tombstone read.
+	if conv.ArchivedAt != nil {
+		return AgentAccess{SupportOK: true}
+	}
+	return AgentAccess{SupportOK: needSupport && s.HasAssignment(ctx, tenantID, convID)}
 }
 
 // PeerPage is one keyset-paginated page of peer conversations for the inbox: the

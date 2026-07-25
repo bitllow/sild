@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
@@ -61,6 +62,9 @@ type SigningKeyRepo interface {
 
 type ConversationRepo interface {
 	Create(ctx context.Context, c *models.Conversation) error
+	// List is the single conversation list, replacing ListQueue/ListPeers/
+	// ListForUser. scope is the policy ceiling; q can only narrow it.
+	List(ctx context.Context, scope policy.ResourceScope, q ConversationQuery) (Page[ConversationItem], error)
 	Get(ctx context.Context, tenantID, id string) (*models.Conversation, error)
 	UpdateStatus(ctx context.Context, tenantID, id string, status models.ConversationStatus) error
 	ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error)
@@ -207,7 +211,7 @@ type MessageRepo interface {
 	Get(ctx context.Context, tenantID, id string) (*models.Message, error)
 	FindByClientMsgID(ctx context.Context, tenantID, convID, clientMsgID string) (*models.Message, error)
 	ListBefore(ctx context.Context, tenantID, convID, before string, limit int, includeInternal bool) (*MessagePage, error)
-	ListAfter(ctx context.Context, tenantID, convID, after string, includeInternal bool) ([]models.Message, error)
+	ListAfter(ctx context.Context, tenantID, convID, after string, limit int, includeInternal bool) ([]models.Message, error)
 	Last(ctx context.Context, tenantID, convID string, includeInternal bool) (*models.Message, error)
 	UnreadCount(ctx context.Context, tenantID, convID, lastReadMessageID string, includeInternal bool) (int, error)
 }

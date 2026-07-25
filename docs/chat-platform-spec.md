@@ -147,186 +147,210 @@ inbox renders member metadata in the agent's member panel; the platform never in
 
 ## 4. REST API
 
-Base: `/v1`. All responses JSON. Errors: `{ "error": { "code", "message" } }` with standard status.
+Base: `/v1`. All responses JSON. Errors:
+`{ "error": { "code", "message", "request_id", "fields"? } }` with standard
+status. `code` is API surface and SDKs branch on it; `message` is for humans and
+may be reworded freely.
 
-### 4.0 Who can create what
+**Paths name the data model, not the consumer.** The credential decides which
+subset of a resource you see, never which URL you call. The one exception is
+`/v1/admin/auth/*` — obtaining a credential genuinely differs per consumer.
 
-Conversations are untyped. The distinction is *who* may create one and whether an **assignment**
-(support) is opened with it.
+### 4.0 The list contract
 
-| action                                              | API key | user JWT      | admin session |
-|-----------------------------------------------------|:-------:|:-------------:|:-------------:|
-| create conversation (arbitrary members)             | ✓       | ✗             | ✗             |
-| open support request (conversation + assignment)    | ✓       | ✓ (self only) | ✓             |
-| add an assignment to an existing conversation       | ✓       | ✗             | ✓             |
-
-Arbitrary multi-party conversations (driver↔client, dispatcher↔client) are host-backend-only. A
-support request is just a conversation that gets an assignment, opened three ways: host backend
-(§4.1), authed client from the SDK/web (§4.2), or agent from the inbox (§4.3). A **guest** request is
-the same host-backend path (§4.1) with a generated user id — no separate mechanism. A user may have
-many concurrent support requests — no dedupe.
-
-### 4.1 Integration (API-key auth)
-
-**Mint user token**
-```
-POST /v1/tokens
-Authorization: Bearer sild_live_...
-{ "user_id": "u_123", "ttl_seconds": 1800 }
-→ 200 { "token": "<jwt>", "expires_at": "..." }
-```
-
-**Create conversation** — untyped; members + optional `reference`/`metadata`.
-```
-POST /v1/conversations
-Authorization: Bearer sild_live_...
-{
-  "reference": "trip_8842",
-  "metadata": { "kind": "ride" },          // host-defined, opaque to platform
-  "members": [
-    { "user_id": "u_client_1", "conv_role": "client",
-      "metadata": { "phone": "+3725...", "app_version": "2.3.1", "role": "client" } },
-    { "user_id": "u_driver_9", "conv_role": "driver",
-      "metadata": { "phone": "+3725...", "app_version": "2.3.0", "role": "driver" } }
-  ],
-  "open_assignment": false                  // true → also queue for an agent (support)
-}
-→ 201 { "id": "c_abc", "status": "open", "members": [...] }
-```
-The host distinguishes its own chats via `metadata`/`reference`; the platform never reads them.
-Set `open_assignment: true` to create a host-originated support request — conversation, members, and
-assignment commit in **one transaction** (§1), so a failed assignment can't orphan the conversation.
-
-**Manage members**
-```
-POST   /v1/conversations/:id/members   { "user_id", "conv_role" }      → 201
-DELETE /v1/conversations/:id/members/:user_id                          → 204
-       -- rejected (409) if it would leave an OPEN conversation with 0 members; close it instead
-```
-
-**Open / manage assignment** (support queue)
-```
-POST /v1/conversations/:id/assignments    → 201 { assignment }   -- queue this conversation
-```
-
-**Issue an upload URL** (direct-to-bucket; see §12)
-```
-POST /v1/uploads
-Authorization: Bearer sild_live_...   (or user JWT — see §4.2)
-{ "mime_type": "image/jpeg", "size_bytes": 220184, "filename": "photo.jpg" }
-→ 201 { "object_key": "...", "upload_url": "<signed PUT>", "expires_at": "..." }
-```
-
-**Server-side message ingress** (bot / CRM / external agent writes into a conversation)
-```
-POST /v1/conversations/:id/messages
-Authorization: Bearer sild_live_...
-{ "body": "...", "sender_kind": "agent", "internal_actor_id": "agent_42",
-  "attachments": [ { "object_key": "...", "disposition": "attachment" } ] }
-→ 201 { message }
-```
-
-**Fetch conversation**
-```
-GET /v1/conversations/:id → 200 { id, status, reference, metadata, members[], assignment? }
-```
-
-### 4.2 User (JWT auth — native SDK + web)
+Every collection endpoint takes `?limit=` and `?cursor=` and returns:
 
 ```
-GET  /v1/me/conversations
-     → 200 [ { id, last_message, unread_count, members[], assignment? } ]
-
-POST /v1/me/support-requests       -- client opens a support request (SDK / web)
-     { "metadata": { } }           -- creates a conversation (sub as client) + queued assignment
-     → 201 { conversation }        -- NOT deduped; a user may have many open at once
-
-GET  /v1/conversations/:id/messages?before=<msg_id>&limit=50
-     → 200 { messages[], has_more }
-GET  /v1/conversations/:id/messages?after=<msg_id>          -- reconnect catch-up
-     → 200 { messages[] }
-
-POST /v1/conversations/:id/messages
-     { "body": "...", "client_msg_id": "uuid",                 -- idempotency
-       "attachments": [ { "object_key": "...", "disposition": "inline" } ] }
-     → 201 { message }
-     -- visibility defaults to "participants". Only agents (admin session / ingress) may set
-     --   "visibility": "internal"; a user/guest token requesting internal → 403.
-     -- archived messages: GET filters out visibility=internal for non-agent callers.
-
-POST /v1/uploads                   -- see §4.1; also accepts a user JWT (scoped to the caller)
-
-POST /v1/conversations/:id/read   { "last_read_message_id": "m_999" }     → 204
-POST /v1/conversations/:id/typing                                         → 204  -- fans out a typing event
-
-POST   /v1/me/push-tokens  { "platform": "ios", "token": "<device_token>" }   → 201
-DELETE /v1/me/push-tokens   { "token": "<device_token>" }                    → 204
-       -- token in body; deletion filtered by sub (never a guessable path param)
-
-GET  /v1/conversations/:id        → 200 { conversation + members }
-```
-All user endpoints authorize against `conversation_members` for `sub`. Non-member → 403.
-
-### 4.3 Admin (Google session)
-
-```
-GET  /v1/admin/auth/google            → redirect
-GET  /v1/admin/auth/google/callback   → set session
-
-GET  /v1/admin/assignments?status=queued&assignee=<id>     -- the inbox queue
-POST /v1/admin/support-requests           { "external_user_id": "u_123", "metadata": { } }
-     -- agent opens a support request with a user (own conversation + assignment)
-POST /v1/admin/assignments/:id/claim      -- assign to calling agent
-POST /v1/admin/assignments/:id/close
-     -- agent sends via 4.2 POST messages (sender_kind=agent, internal_actor_id=<agent>)
-     -- internal note: same call with "visibility": "internal" (never delivered to client; see §5.5)
-
-GET  /v1/admin/search?q=<raw bar string>&before=&limit=
-     -- ONE search bar, mixed tokens (like GitHub/Linear/Gmail). The backend tokenizes q:
-     --   field:value tokens → structured filters (exact):
-     --       status:open|closed   assignee:me|<id>   role:driver|client|…   channel:app|email
-     --       phone:5512   app_version:2.3   meta.<key>:<value>  (any host metadata key)
-     --   bare keywords (everything else) → PARTIAL trigram match, OR'd across BOTH
-     --       messages.body AND member-metadata text (so typing just "5512" or "refund" works)
-     --   all tokens AND together. unknown field: prefix → treated as a literal keyword, never errors.
-     -- returns conversations + matching message snippets, ranked by trigram similarity.
-     -- HOT data only; archived included only via the explicit deep-search mode (§12).
-     -- (programmatic callers may also pass pre-split filters instead of packing them into q.)
+{ "items": [ … ], "next_cursor": "<opaque>|null", "has_more": bool }
 ```
 
-**Search model.** Fixed fields (`status`, `assignee`, `role`, `channel`) map to columns. Member-metadata
-search runs against the materialized `member_search_text` (GIN-trigram), built from each tenant's
-**`searchable_metadata_keys`**; those keys get the index + UI autocomplete. Generic `meta.<key>:<value>`
-always works as a slower live-jsonb fallback. A conversation matches if **any** member's metadata
-matches (you're finding "the conversation with this phone number"). `me` in `assignee:me` resolves to
-the calling agent.
+`next_cursor` is null exactly when `has_more` is false. The cursor is **opaque**:
+round-trip it verbatim. It is bound to the resource, sort key, direction and
+filter set, so replaying one against a different query is a 400, not a wrong
+page. Limits clamp to [1,100] rather than erroring.
+
+Ordering by `last_activity` is **live-view**, not snapshot: the key is mutable,
+so rows can move between pages while you scroll. Deduplicate by id and refresh
+page one on a realtime reorder.
+
+### 4.1 Who can create what
+
+Conversations are untyped. `kind` is derived from `open_assignment` at creation:
+support when an assignment opens, peer otherwise. It is set once and never
+re-derived.
+
+| action | API key | user JWT | admin session |
+|---|:---:|:---:|:---:|
+| open a support conversation | ✓ | ✓ (self only) | ✓ (names one user) |
+| create a **peer** conversation | ✓ | ✗ | ✗ |
+| arbitrary members | ✓ | ✗ | ✗ |
+
+Peer creation is server-to-server only: a peer conversation is visible to every
+`peer_access` operator, so letting a user mint one would be a way to inject rows
+into the operator peer inbox. A non-key principal sending
+`open_assignment: false` gets **403**, never a silent upgrade.
+
+### 4.2 `conversations`
 
 ```
-POST   /v1/admin/api-keys   { "label" } → 201 { key }   -- shown once, secret
-GET    /v1/admin/api-keys               → list (no secrets)
-DELETE /v1/admin/api-keys/:id           → revoke
-
-POST   /v1/admin/webhooks   { "url", "events": [...] } → 201 { id, secret }
-GET    /v1/admin/webhooks
-DELETE /v1/admin/webhooks/:id
+GET /v1/conversations
+    ?kind=support|peer                ?participant=me|<external_user_id>
+    ?assignee=me|<actor_id>|none      ?status=open|closed
+    ?assignment_status=queued|assigned|closed
+    ?q=<mixed-token search bar string>    ?role=<conv_role>
+    ?sort=last_activity|created|waiting_since   ?order=asc|desc
+    ?limit=  ?cursor=
+ → { items[], next_cursor, has_more, counts?: { open, you, unassigned, closed } }
 ```
 
-### 4.4 Public
+This one endpoint backs the support queue, the peer inbox, a user's own
+conversations, a contact's history and search. `counts` is emitted only for the
+operator support queue.
+
+**Two state machines, two filters.** `status` is the CONVERSATION lifecycle
+(`open|closed`, terminal); `assignment_status` is the assignment's
+(`queued → assigned → closed`, with `assigned → queued` legal). "Closed" in the
+inbox has always meant the *conversation* is closed. `assignment_status` is only
+meaningful alongside `kind=support`.
+
+`sort=waiting_since` requires `kind=support` (400 otherwise): the key comes from
+the assignment, and a keyset over a NULL-bearing key is undefined.
+
+Rows returned for a `?q=` query carry **representation annotations** — `snippet`
+(the matching fragment) and `matched_fields` (`message.body`,
+`member.metadata`, `member.external_user_id`). Without them a hit in an older
+message renders with an unrelated preview.
+
+```
+POST   /v1/conversations              -- create; see §4.1
+GET    /v1/conversations/:id
+GET    /v1/conversations/:id/messages ?cursor= (page) | ?since= (catch-up)
+POST   /v1/conversations/:id/messages
+POST   /v1/conversations/:id/read     { "last_read_message_id" }   → 204
+POST   /v1/conversations/:id/typing                                → 204
+POST   /v1/conversations/:id/close
+POST   /v1/conversations/:id/assignments
+POST   /v1/conversations/:id/members                  (API key)
+DELETE /v1/conversations/:id/members/:user_id         (API key)
+POST   /v1/conversations/:id/members/remap            (API key, guest claim)
+```
+
+An operator sending into a **peer** conversation implicitly joins it (adds the
+agent participant + a system join-note). That fires on the shared send route
+because it is a property of the data — operator + peer conversation — not of the
+URL the client chose.
+
+### 4.3 `assignments`
+
+```
+PATCH /v1/assignments/:id   { "assignee_actor_id": "me" } | { "status": "closed" }
+```
+
+Deliberately narrow. `assignee_actor_id` accepts only `"me"`: claiming for
+another operator has no route, and accepting an arbitrary id would quietly
+introduce reassignment. `status` accepts only `"closed"`. Both fields at once is
+a 400.
+
+### 4.4 `contacts`
+
+```
+GET /v1/contacts?q=&limit=&cursor=
+GET /v1/contacts/:external_user_id
+```
+
+Contacts and conversations are both searchable, as separate resources — a contact
+search returns people, a conversation search returns threads. A contact's history
+is `GET /v1/conversations?participant=<id>`, so there is no
+`/contacts/:id/conversations`.
+
+A contact is a **read model** over `conversation_members`, keyed
+`(tenant_id, external_user_id)`. Projection rules:
+
+- **Metadata**: the most recently joined *authorized* membership wins whole; keys
+  are never unioned across memberships. Merging would fabricate a person who
+  never existed and make the result order-dependent.
+- **Existence**: any authorized membership, in any state (left, closed,
+  archived).
+- **`conversation_count`**: current memberships only.
+- **`last_activity`**: all authorized memberships. So an archived-only contact
+  stays findable with a count of zero.
+- The scope is applied **before** aggregation. Two operators may legitimately see
+  different counts for the same contact; that is the scope working.
+
+### 4.5 `brands`
+
+```
+GET /v1/brands/active?app_id=   -- any principal, or none
+GET /v1/brands                  -- owner/admin
+PUT /v1/brands                  -- owner/admin
+```
+
+`/v1/brands` is a singleton configuration **aggregate**, not a collection: `PUT`
+replaces the whole set atomically and `active_brand_id` is a property of the set,
+so it is exempt from the list contract.
+
+`GET /v1/brands/active` is public when keyed by `app_id` and tenant-scoped when a
+credential is present. Credential first; an authenticated caller's `app_id` is
+ignored. A credential that is present but **invalid** is a 401 — never a silent
+downgrade to the public form, which would turn an expired session into a quiet
+tenant switch. Public responses are `Cache-Control: public, max-age=60`;
+authenticated ones are `private, no-store`, both with
+`Vary: Authorization, Cookie`.
+
+### 4.6 Identity, settings, integration
+
+```
+GET    /v1/principal        -- who am I, for any credential (see below)
+GET    /v1/realtime/token   -- admin session
+POST   /v1/tokens           -- API key: mint a user JWT
+POST   /v1/uploads          -- any principal: signed direct-to-bucket grant
+POST   /v1/push-tokens      { "platform", "token" }   → 201   (user JWT)
+DELETE /v1/push-tokens      { "token" }               → 204   (user JWT)
+
+GET/POST/DELETE /v1/api-keys[/:id]          owner/admin
+GET/POST/PATCH/DELETE /v1/webhooks[/:id]    owner/admin
+GET    /v1/webhooks/:id/deliveries          owner/admin
+GET/PATCH /v1/channels/email                owner/admin
+GET/POST /v1/team, PATCH /v1/team/:id, POST /v1/team/:id/password
+```
+
+`GET /v1/principal` returns a discriminated identity plus **effective grants**:
+
+```json
+{ "kind": "admin", "tenant_id": "t_…",
+  "subject": { "id": "adm_…", "role": "agent" },
+  "grants": [ { "action": "conversations.list",
+                "scope": { "kinds": ["support"], "requires_assignment": true } } ] }
+```
+
+Grants carry the **scope** each action is held over, not just its name: an agent
+with `peer_access` and one without both hold `conversations.list`, and only the
+scope tells them apart. Frontends render affordances from this rather than
+re-deriving policy from role flags.
+
+### 4.7 Public
+
 ```
 GET /.well-known/jwks.json
+GET /widget.js
+POST /v1/email/inbound          -- signature is the gate
+PUT/GET /v1/uploads/local/*     -- signed capability (HMAC + expiry + object key)
+GET /v1/admin/auth/{google,google/callback,password,logout}
 ```
 
-### 4.5 Guest support (no special keys)
+Local upload URLs are **signed capabilities**, not addresses: the signature binds
+the verb, the object key and an expiry, and the tenant is the key's first
+segment. Without it the URL would be a permanent bearer token for any guessable
+key.
 
-A guest is just a user token whose `sub` is a host-generated id, minted by the host backend with the
-secret key — there is no anonymous platform endpoint. The host backend generates an id, creates the
-conversation + assignment, and mints a token (the §4.1 calls), then hands the token to the widget via
-the normal `tokenProvider`. Refresh and reload-persistence are the host's job (it remembers the id in
-its own session and re-mints); gating/abuse control lives at the host's token endpoint.
+### 4.8 Guest support (no special keys)
 
-**Claim on login** — remap the generated id to the real user, preserving history:
+A guest is just a user token whose `sub` is a host-generated id, minted by the
+host backend with the secret key — there is no anonymous platform endpoint.
+Claim on login remaps the generated id to the real user, preserving history:
+
 ```
-POST /v1/conversations/:id/members/remap        (secret key)
+POST /v1/conversations/:id/members/remap        (API key)
 { "from_user_id": "guest_7f3a", "to_user_id": "u_123" }   → 200
 ```
 
@@ -366,11 +390,20 @@ Envelope: `{ "type": "...", "conversation_id": "c_abc", "data": { }, "ts": 17300
 
 ### 5.4 Reconnect & catch-up (the only correctness mechanism)
 The socket guarantees nothing — a missed event is invisible until reconnect. The SDK MUST, on every
-(re)connect: re-auth (fresh JWT via `tokenProvider`) → `GET /conversations/:id/messages?after=<last_seen>`
-per conversation. Multi-node fan-out is handled by Centrifuge's Redis broker.
+(re)connect: re-auth (fresh JWT via `tokenProvider`) → re-fetch `GET /v1/conversations` (to pick up
+conversations added while offline) → `GET /v1/conversations/:id/messages?since=<last_seen>` per
+conversation. Multi-node fan-out is handled by Centrifuge's Redis broker.
+
+**`?since=` is a sync read, not a page.** It returns everything after a message id,
+oldest-first, bounded by `limit`, in the standard envelope with `next_cursor: null`.
+While `has_more` is true the client MUST re-issue with **the id of the last item it
+received** — the message id is the position, and re-sending the original `since`
+loops on the same page forever. This is normative: the read is bounded, so a client
+that ignores `has_more` silently loses history, which is exactly what the old
+unbounded-looking `after=` did at its hidden 500-row cap.
 
 ### 5.5 Push (offline delivery)
-- SDK registers the device token on connect + OS rotation (`POST /me/push-tokens`), deregisters on
+- SDK registers the device token on connect + OS rotation (`POST /v1/push-tokens`), deregisters on
   logout (so a signed-out device can't receive the next user's messages).
 - Fan-out only to members with **no live connection** (Centrifuge presence) — connected clients already
   got the event; no double-notify.
@@ -607,7 +640,7 @@ Rare, since the inbox only touches open conversations.
 
 **Search-all-history:** with the **bigquery** sink the archive is queryable — an optional "include
 archived" mode can union hot trigram results with a BigQuery query. Kept **off** the default
-`/admin/search` (BigQuery latency/cost isn't inbox-interactive); it's a separate deep-search call. JSON
+`GET /v1/conversations?q=` (BigQuery latency/cost isn't inbox-interactive); it's a separate deep-search call. JSON
 sinks leave archived data unsearchable — the accepted tradeoff for the cheaper destination.
 
 ---

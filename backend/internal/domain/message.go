@@ -167,11 +167,6 @@ func (s *Service) ListMessagesBefore(ctx context.Context, tenantID, convID, befo
 	return s.store.Messages().ListBefore(ctx, tenantID, convID, before, limit, includeInternal)
 }
 
-// ListMessagesAfter returns reconnect catch-up messages (§4.2, §5.4).
-func (s *Service) ListMessagesAfter(ctx context.Context, tenantID, convID, after string, includeInternal bool) ([]models.Message, error) {
-	return s.store.Messages().ListAfter(ctx, tenantID, convID, after, includeInternal)
-}
-
 // attachmentURLFunc returns a resolver that mints short-lived download URLs.
 func (s *Service) attachmentURLFunc() views.URLFunc {
 	return func(objectKey string) string {
@@ -184,4 +179,24 @@ func (s *Service) attachmentURLFunc() views.URLFunc {
 		}
 		return u
 	}
+}
+
+// CatchUpMessages returns messages after an id, oldest-first, bounded by limit.
+//
+// Replaces the old unbounded-looking ListMessagesAfter, which hard-capped at 500
+// and reported nothing: a client that missed more than that got a short answer
+// looking complete and permanently lost the remainder. hasMore tells the caller
+// to re-issue with the last id received.
+func (s *Service) CatchUpMessages(ctx context.Context, tenantID, convID, since string, limit int, includeInternal bool) ([]models.Message, bool, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	msgs, err := s.store.Messages().ListAfter(ctx, tenantID, convID, since, limit+1, includeInternal)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(msgs) > limit {
+		return msgs[:limit], true, nil
+	}
+	return msgs, false, nil
 }

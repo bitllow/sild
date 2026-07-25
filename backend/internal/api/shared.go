@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 	"time"
 
@@ -9,6 +8,9 @@ import (
 	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/policy"
+	"github.com/bitllow/sild/backend/internal/principal"
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
 	"github.com/gin-gonic/gin"
@@ -17,26 +19,22 @@ import (
 // getConversation: GET /v1/conversations/:id (§4.1/§4.2 shared).
 func (h *Handler) getConversation(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.ConversationsRead, convID) {
 		return
 	}
 	conv, members, assignment, err := h.svc.GetConversation(c.Request.Context(), apiutil.Tenant(c), convID)
-	if errors.Is(err, domain.ErrNotFound) {
-		// §12 read fallback: hot rows gone → read from the archive sink.
-		if view, archived, aerr := h.svc.ArchivedConversation(c.Request.Context(), apiutil.Tenant(c), convID); archived {
-			if aerr != nil {
-				apiutil.Fail(c, aerr)
-				return
-			}
-			c.JSON(http.StatusOK, view)
-			return
-		}
-	}
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
 	view := views.Conversation(conv, members, assignment)
+	view["kind"] = conv.Kind
+	// Archival keeps the conversation and its members, so the view is served from
+	// live rows; only the message history moved to the sink. The flag tells a
+	// client its history comes from cold storage.
+	if conv.ArchivedAt != nil {
+		view["archived"] = true
+	}
 	// Email conversations carry a subject (the inbox renders it instead of the
 	// opaque conversation id); app conversations have none.
 	if subject := h.svc.EmailSubject(c.Request.Context(), apiutil.Tenant(c), convID); subject != "" {
@@ -48,15 +46,19 @@ func (h *Handler) getConversation(c *gin.Context) {
 // postMessage: POST /v1/conversations/:id/messages (ingress §4.1, send §4.2).
 func (h *Handler) postMessage(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesSend, convID) {
 		return
 	}
-	// Read once: it decides the guard below and is reused as in.Conv by SendMessage.
+	// Read once: it selects the send path below and is reused as in.Conv by
+	// SendMessage.
 	conv, _ := h.svc.Conversation(c.Request.Context(), apiutil.Tenant(c), convID)
-	// Operators must use the peer route — only PeerAgentSend does the implicit join.
-	if p := middleware.Get(c); p != nil && p.Kind == middleware.KindAdmin &&
+	// An operator sending into a peer conversation implicitly joins it (adds the
+	// agent participant + a system join-note). That is a property of the DATA —
+	// operator + peer conversation — not of the URL the client chose, so it fires
+	// here rather than behind a separate route.
+	if p := middleware.Get(c); p != nil && p.Kind == principal.KindAdmin &&
 		conv != nil && conv.Kind == models.KindPeer {
-		httpx.Forbidden(c, "use POST /v1/admin/peer-conversations/:id/messages for peer conversations")
+		h.postPeerMessage(c)
 		return
 	}
 	var req struct {
@@ -86,11 +88,11 @@ func (h *Handler) postMessage(c *gin.Context) {
 	}
 	p := middleware.Get(c)
 	switch p.Kind {
-	case middleware.KindUser:
+	case principal.KindUser:
 		in.SenderKind = models.SenderUser
 		uid := p.Subject
 		in.External = &uid
-	case middleware.KindAdmin:
+	case principal.KindAdmin:
 		in.SenderKind = models.SenderAgent
 		aid := p.AdminID
 		in.Internal = &aid
@@ -130,47 +132,119 @@ func (h *Handler) postMessage(c *gin.Context) {
 }
 
 // listMessages: GET /v1/conversations/:id/messages?before=&after=&limit= (§4.2).
+// listMessages: GET /v1/conversations/:id/messages
+//
+// Two different reads, deliberately spelled differently:
+//
+//	?cursor=  pagination — newest-first, bounded by limit, standard envelope
+//	?since=   catch-up   — oldest-first, everything after a message id
+//
+// ?since= is the realtime reconnect primitive (§5.4), NOT a page: it answers
+// "give me everything I missed". Sharing one handler with ?before=/?after= is
+// what produced the old asymmetry where one returned has_more and the other
+// silently truncated at 500 with no way to tell.
+//
+// Continuation for ?since= is the message id itself — re-issue with the last id
+// received while has_more is true. There is no cursor, because the id IS the
+// position.
 func (h *Handler) listMessages(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesRead, convID) {
 		return
 	}
 	includeInternal := apiutil.IsAgent(c)
 	urlFn := h.attachmentURL(c)
+	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
 
-	// §12 read fallback: if the conversation has been archived, read from the
-	// sink (hot rows are gone). Rare — the inbox only touches open conversations.
-	if msgs, archived, err := h.svc.ArchivedMessages(c.Request.Context(), apiutil.Tenant(c), convID, includeInternal); archived {
+	page, ok := apiutil.PageParams(c, apiutil.PageDefaults{
+		Resource: resourceMessages,
+		Limit:    50,
+		Sort:     store.SortID,
+		Order:    store.OrderDesc,
+	})
+	if !ok {
+		return
+	}
+
+	// §12 read fallback: an archived conversation's history lives in the sink.
+	// It pages through the same contract via store.SlicePage, so "every
+	// collection" has no exception here.
+	if msgs, archived, err := h.svc.ArchivedMessages(ctx, tenant, convID, includeInternal); archived {
 		if err != nil {
 			apiutil.Fail(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"messages": msgs, "has_more": false})
+		if since := c.Query("since"); since != "" {
+			apiutil.RespondCatchUp(c, archivedSince(msgs, since, page.Limit))
+			return
+		}
+		apiutil.RespondPage(c, resourceMessages, store.SlicePage(msgs, page, archivedMessageID))
 		return
 	}
 
-	if after := c.Query("after"); after != "" {
-		msgs, err := h.svc.ListMessagesAfter(c.Request.Context(), apiutil.Tenant(c), convID, after, includeInternal)
+	if since := c.Query("since"); since != "" {
+		msgs, hasMore, err := h.svc.CatchUpMessages(ctx, tenant, convID, since, page.Limit, includeInternal)
 		if err != nil {
 			apiutil.Fail(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"messages": h.renderMessagesAuthored(c, msgs, urlFn)})
+		apiutil.RespondCatchUp(c, store.Page[map[string]any]{
+			Items:   h.renderMessagesAuthored(c, msgs, urlFn),
+			HasMore: hasMore,
+		})
 		return
 	}
-	limit := atoiDefault(c.Query("limit"), 50)
-	page, err := h.svc.ListMessagesBefore(c.Request.Context(), apiutil.Tenant(c), convID, c.Query("before"), limit, includeInternal)
+
+	res, err := h.svc.ListMessagesBefore(ctx, tenant, convID, cursorID(page), page.Limit, includeInternal)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messages": h.renderMessagesAuthored(c, page.Messages, urlFn), "has_more": page.HasMore})
+	rendered := h.renderMessagesAuthored(c, res.Messages, urlFn)
+	out := store.Page[map[string]any]{Items: rendered, HasMore: res.HasMore}
+	if res.HasMore && len(res.Messages) > 0 {
+		out.NextCursor = &store.Cursor{
+			Key: store.SortID, Order: page.Order, ID: res.Messages[0].ID,
+		}
+	}
+	apiutil.RespondPage(c, resourceMessages, out)
+}
+
+// cursorID is the keyset position for message history ("" on the first page).
+func cursorID(p store.PageParams) string {
+	if p.Cursor == nil {
+		return ""
+	}
+	return p.Cursor.ID
+}
+
+func archivedMessageID(m *map[string]any) string {
+	id, _ := (*m)["id"].(string)
+	return id
+}
+
+// archivedSince is the catch-up read over a rehydrated archive: everything after
+// an id, oldest-first, bounded.
+func archivedSince(msgs []map[string]any, since string, limit int) store.Page[map[string]any] {
+	out := make([]map[string]any, 0, limit)
+	for i := range msgs {
+		if archivedMessageID(&msgs[i]) > since {
+			out = append(out, msgs[i])
+		}
+	}
+	page := store.Page[map[string]any]{}
+	if len(out) > limit {
+		page.HasMore = true
+		out = out[:limit]
+	}
+	page.Items = out
+	return page
 }
 
 // markRead: POST /v1/conversations/:id/read (§4.2).
 func (h *Handler) markRead(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.ReceiptsWrite, convID) {
 		return
 	}
 	var req struct {
@@ -190,7 +264,7 @@ func (h *Handler) markRead(c *gin.Context) {
 // typing: POST /v1/conversations/:id/typing (§4.2).
 func (h *Handler) typing(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.TypingWrite, convID) {
 		return
 	}
 	p := middleware.Get(c)
@@ -209,7 +283,7 @@ func (h *Handler) closeConversation(c *gin.Context) {
 		return
 	}
 	// Being an agent isn't enough — closing needs the same scope check as reading.
-	if !apiutil.AuthorizeConversation(c, h.svc, c.Param("id")) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.ConversationsClose, c.Param("id")) {
 		return
 	}
 	if err := h.svc.CloseConversation(c.Request.Context(), apiutil.Tenant(c), c.Param("id")); err != nil {

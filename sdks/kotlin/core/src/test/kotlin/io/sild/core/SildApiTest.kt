@@ -37,8 +37,8 @@ class SildApiTest {
     }
 
     @Test fun cachesTheTokenAcrossCalls() = runBlocking {
-        server.enqueue(MockResponse().setBody("[]"))
-        server.enqueue(MockResponse().setBody("[]"))
+        server.enqueue(MockResponse().setBody(EMPTY_PAGE))
+        server.enqueue(MockResponse().setBody(EMPTY_PAGE))
         val api = api()
         api.listConversations()
         api.listConversations()
@@ -49,7 +49,7 @@ class SildApiTest {
 
     @Test fun refreshesOnceAndRetriesOn401() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":{"message":"token expired"}}"""))
-        server.enqueue(MockResponse().setBody("""[{"id":"c1"}]"""))
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"c1"}],"next_cursor":null,"has_more":false}"""))
         val convs = api().listConversations()
         assertEquals(listOf("c1"), convs.map { it.id }, "the retry's result is returned")
         assertEquals(2, minted.size, "the 401 forces exactly one refresh")
@@ -158,3 +158,6 @@ class RebaseLocalUrlTest {
         assertEquals(null, rebaseLocalUrl("http://10.0.2.2:8080", null))
     }
 }
+
+/** The list envelope every collection endpoint returns. */
+private const val EMPTY_PAGE = """{"items":[],"next_cursor":null,"has_more":false}"""

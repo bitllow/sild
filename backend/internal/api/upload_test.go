@@ -15,8 +15,10 @@ func TestLocalUploadRoundTrip(t *testing.T) {
 	tenant := h.SeedTenant()
 	tok := h.MintToken(tenant.ID, "u_client")
 
-	var conv struct{ ID string `json:"id"` }
-	w := h.Request("POST", "/v1/me/support-requests").Bearer(tok).JSON(map[string]any{}).Do()
+	var conv struct {
+		ID string `json:"id"`
+	}
+	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{}).Do()
 	testutil.DecodeJSON(t, w, &conv)
 
 	// 1) request a signed upload URL
@@ -47,7 +49,7 @@ func TestLocalUploadRoundTrip(t *testing.T) {
 		} `json:"attachments"`
 	}
 	w = h.Request("POST", "/v1/conversations/"+conv.ID+"/messages").Bearer(tok).JSON(map[string]any{
-		"body": "see attached",
+		"body":        "see attached",
 		"attachments": []map[string]any{{"object_key": up.ObjectKey, "disposition": "inline"}},
 	}).Do()
 	if w.Code != http.StatusCreated {

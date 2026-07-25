@@ -194,7 +194,7 @@
           if (existing) return Promise.resolve(existing);
           return tokenProvider()
             .then(function (token) {
-              return fetch(BASE + "/v1/me/support-requests", {
+              return fetch(BASE + "/v1/conversations", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
                 body: JSON.stringify({ metadata: metadata }),

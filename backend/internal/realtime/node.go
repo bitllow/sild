@@ -2,14 +2,22 @@ package realtime
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
+	"github.com/bitllow/sild/backend/internal/policy"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/store"
+	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/centrifugal/centrifuge"
 )
+
+// errNoScope means policy admits nothing for this operator, so there is no
+// channel set to build and the connection is refused.
+var errNoScope = errors.New("no conversation scope")
 
 // Node is the egress-only Centrifuge node served by sild-ws (§5). It validates
 // the user JWT on connect and attaches server-side subscriptions derived from
@@ -118,10 +126,24 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 // connection (§5.2): the agent's user channel, the tenant agents channel (new
 // queue items), and conv:<id> + conv:<id>:internal for every conversation that
 // currently carries an assignment. The agent must be a real admin in the tenant.
+//
+// Visibility is decided by policy.Scope, not re-derived here. REST and the socket
+// therefore cannot disagree about what an operator may see — two implementations
+// of one policy is how a socket leaks what an endpoint refuses.
 func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID string) (map[string]centrifuge.SubscribeOptions, error) {
 	admin, err := st.Admins().Get(ctx, tenantID, adminID)
 	if err != nil {
 		return nil, err
+	}
+	scope := policy.Scope(&principal.Principal{
+		TenantID:   tenantID,
+		Kind:       principal.KindAdmin,
+		AdminID:    admin.ID,
+		Role:       admin.PlatformRole,
+		PeerAccess: admin.PeerAccess,
+	}, policy.ConversationsList)
+	if scope.DenyAll() {
+		return nil, errNoScope
 	}
 	subs := map[string]centrifuge.SubscribeOptions{
 		UserChannel(adminID):    {},
@@ -135,13 +157,12 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 		subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
 		subs[ConvInternalChannel(cid)] = centrifuge.SubscribeOptions{}
 	}
-	// Operators with peer access observe the peer surface via the single tenant
-	// peer channel (every peer conversation's events fan out there). Gated on the
-	// per-user flag, so a non-peer operator's socket never carries peer messages;
-	// and because it's one tenant channel — not a subscription per peer
+	// Operators whose scope admits peer conversations observe the peer surface via
+	// the single tenant peer channel (every peer conversation's events fan out
+	// there). Because it's one tenant channel — not a subscription per peer
 	// conversation — a peer conversation created after this connect is still
 	// observed without any per-connection re-subscription.
-	if admin.PeerAccess {
+	if scope.AllowsKind(models.KindPeer) {
 		subs[PeerChannel(tenantID)] = centrifuge.SubscribeOptions{}
 	}
 	return subs, nil

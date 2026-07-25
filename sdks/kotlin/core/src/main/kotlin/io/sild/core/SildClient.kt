@@ -102,7 +102,7 @@ class SildClient(
                 // resolve its authors against the wrong members. Drop the stale result.
                 if (!isActive(id)) return
                 val names = namesOf(id)
-                val msgs = page.messages.sortedBy { it.createdAt }.map { mapMessage(it, names) }
+                val msgs = page.items.sortedBy { it.createdAt }.map { mapMessage(it, names) }
                 _state.update { it.copy(messages = msgs, loadingThread = false, agentName = agentNameOf(msgs) ?: it.agentName) }
             }
             .onFailure { e ->

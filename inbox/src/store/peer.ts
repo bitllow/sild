@@ -164,11 +164,12 @@ export class PeerStore {
   // active role filter. Server-side keyset pagination — not a fetch-all.
   loadConversations = async () => {
     try {
-      const { conversations, next_cursor, has_more } = await adminApi.listPeerConversations({
+      const { items, next_cursor, has_more } = await adminApi.listConversations({
+        kind: "peer",
         role: this.roleFilter || undefined,
       });
       runInAction(() => {
-        this.conversations = conversations.map((c) => this.buildRow(c));
+        this.conversations = items.map((c) => this.buildRow(c));
         this.cursor = has_more ? next_cursor : null;
         this.hasMore = has_more;
         this.loaded = true;
@@ -186,13 +187,16 @@ export class PeerStore {
     if (this.isSearching || !this.hasMore || this.loadingMore || !this.cursor) return;
     this.loadingMore = true;
     try {
-      const { conversations, next_cursor, has_more } = await adminApi.listPeerConversations({
+      const { items, next_cursor, has_more } = await adminApi.listConversations({
+        kind: "peer",
         role: this.roleFilter || undefined,
         cursor: this.cursor,
       });
       runInAction(() => {
         const seen = new Set(this.conversations.map((c) => c.id));
-        for (const c of conversations) if (!seen.has(c.id)) this.conversations.push(this.buildRow(c));
+        for (const it of items) {
+          if (!seen.has(it.id)) this.conversations.push(this.buildRow(it));
+        }
         this.cursor = has_more ? next_cursor : null;
         this.hasMore = has_more;
         this.loadingMore = false;
@@ -204,20 +208,18 @@ export class PeerStore {
     }
   };
 
-  // runSearch replaces the list with server search hits (GET /admin/search?peer=true
-  // — the shared search backend, so id/metadata/keyword matching matches support
-  // search). Hits are hydrated into peer rows via the shared conversation endpoints.
+  // runSearch replaces the list with server search hits. Search is a filter on
+  // the same list endpoint, so it returns full rows — no per-hit hydration.
   private runSearch = async (q: string) => {
     const seq = ++this.searchSeq;
     runInAction(() => {
       this.searching = true;
     });
     try {
-      const { conversations } = await adminApi.searchPeer(q);
-      const rows = await Promise.all(conversations.map((hit) => this.fetchRow(hit.conversation_id, hit.snippet)));
+      const { items } = await adminApi.listConversations({ kind: "peer", q });
       if (seq !== this.searchSeq) return; // stale response
       runInAction(() => {
-        this.conversations = rows.filter((r): r is PeerConversation => r !== null);
+        this.conversations = items.map((it) => this.buildRow(it, it.snippet));
         this.cursor = null;
         this.hasMore = false;
         this.searching = false;
@@ -236,10 +238,10 @@ export class PeerStore {
     try {
       const [conv, page] = await Promise.all([adminApi.getConversation(id), adminApi.listMessages(id)]);
       const participants = conv.members.map(mapParticipant);
-      const messages = [...page.messages]
+      const messages = [...page.items]
         .sort((a, b) => a.id.localeCompare(b.id))
         .map((m) => mapPeerMessage(m, participants, this.root.meId));
-      const last = page.messages[page.messages.length - 1];
+      const last = page.items[page.items.length - 1];
       const lastActivity = last?.created_at || conv.created_at;
       return {
         id: conv.id,
@@ -312,7 +314,7 @@ export class PeerStore {
     return !!me && participants.some((p) => p.isAgent && p.id === me);
   }
 
-  private buildRow(c: ApiQueueConversation): PeerConversation {
+  private buildRow(c: ApiQueueConversation, snippet?: string): PeerConversation {
     const participants = c.members.map(mapParticipant);
     const joined = this.hasJoined(participants);
     const existing = this.conversations.find((x) => x.id === c.id);
@@ -320,7 +322,9 @@ export class PeerStore {
       id: c.id,
       reference: c.reference || c.id,
       participants,
-      preview: c.last_message?.body || "",
+      // A search hit previews the MATCHING fragment, not the newest message —
+      // otherwise a match in an old message looks unrelated.
+      preview: snippet || c.last_message?.body || "",
       time: relativeTime(c.last_activity),
       lastActivity: c.last_activity,
       unread: this.unreadByConv.get(c.id) || 0,
@@ -354,7 +358,7 @@ export class PeerStore {
       runInAction(() => {
         const conv = this.conversations.find((c) => c.id === id);
         if (conv) {
-          conv.messages = [...page.messages]
+          conv.messages = [...page.items]
             .sort((a, b) => a.id.localeCompare(b.id))
             .map((m) => mapPeerMessage(m, conv.participants, this.root.meId));
         }
@@ -386,7 +390,9 @@ export class PeerStore {
     // silently lost. Attachments are likewise cleared only on success (refs()).
     const refs = this.atts.refs();
     try {
-      const msg = await adminApi.postPeerMessage(id, body, refs);
+      // Peer sends are ordinary participant messages; the implicit join happens
+      // server-side because the caller is an operator and the conversation is peer.
+      const msg = await adminApi.postMessage(id, body, "participants", refs);
       runInAction(() => {
         this.composer = "";
         this.atts.clear();

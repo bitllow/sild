@@ -7,6 +7,7 @@ import (
 
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/httpx"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/gin-gonic/gin"
 )
@@ -28,7 +29,7 @@ func NewAuth(st store.Store, km *auth.KeyManager) *Auth {
 
 // ── Resolvers (return a principal or an error; no HTTP side effects) ─────────
 
-func (a *Auth) resolveAPIKey(ctx context.Context, raw string) (*Principal, bool) {
+func (a *Auth) resolveAPIKey(ctx context.Context, raw string) (*principal.Principal, bool) {
 	prefix, secret, err := auth.ParseAPIKey(raw)
 	if err != nil {
 		return nil, false
@@ -37,18 +38,18 @@ func (a *Auth) resolveAPIKey(ctx context.Context, raw string) (*Principal, bool)
 	if err != nil || !key.Active() || !auth.VerifySecret(secret, key.Hash) {
 		return nil, false
 	}
-	return &Principal{TenantID: key.TenantID, Kind: KindAPIKey}, true
+	return &principal.Principal{TenantID: key.TenantID, Kind: principal.KindAPIKey}, true
 }
 
-func (a *Auth) resolveJWT(ctx context.Context, tok string) (*Principal, bool) {
+func (a *Auth) resolveJWT(ctx context.Context, tok string) (*principal.Principal, bool) {
 	claims, err := a.keys.Verify(ctx, tok)
 	if err != nil {
 		return nil, false
 	}
-	return &Principal{TenantID: claims.Tid, Kind: KindUser, Subject: claims.Subject}, true
+	return &principal.Principal{TenantID: claims.Tid, Kind: principal.KindUser, Subject: claims.Subject}, true
 }
 
-func (a *Auth) resolveAdmin(ctx context.Context, rawCookie string) (*Principal, bool) {
+func (a *Auth) resolveAdmin(ctx context.Context, rawCookie string) (*principal.Principal, bool) {
 	sess, err := a.store.Admins().GetSession(ctx, auth.HashSessionToken(rawCookie))
 	if err != nil || sess.ExpiresAt.Before(time.Now()) {
 		return nil, false
@@ -57,7 +58,7 @@ func (a *Auth) resolveAdmin(ctx context.Context, rawCookie string) (*Principal, 
 	if err != nil {
 		return nil, false
 	}
-	return &Principal{TenantID: admin.TenantID, Kind: KindAdmin, AdminID: admin.ID, Role: admin.PlatformRole, PeerAccess: admin.PeerAccess}, true
+	return &principal.Principal{TenantID: admin.TenantID, Kind: principal.KindAdmin, AdminID: admin.ID, Role: admin.PlatformRole, PeerAccess: admin.PeerAccess}, true
 }
 
 // ── Middleware (enforce a specific credential type) ─────────────────────────
@@ -157,4 +158,48 @@ func bearer(c *gin.Context) string {
 		return strings.TrimSpace(v)
 	}
 	return ""
+}
+
+// OptionalAuth resolves a credential when one is present and leaves the request
+// unauthenticated when none is. It backs GET /v1/brands/active, which is public
+// when keyed by app_id and tenant-scoped when authenticated.
+//
+// A credential that IS present but invalid or expired is a 401 — never a silent
+// downgrade to the public form, which would turn an expired session into a
+// quiet tenant switch.
+func (a *Auth) OptionalAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		if raw := bearer(c); raw != "" {
+			if strings.HasPrefix(raw, "sild_live_") {
+				p, ok := a.resolveAPIKey(ctx, raw)
+				if !ok {
+					httpx.Unauthorized(c, "invalid API key")
+					return
+				}
+				setPrincipal(c, p)
+				c.Next()
+				return
+			}
+			p, ok := a.resolveJWT(ctx, raw)
+			if !ok {
+				httpx.Unauthorized(c, "invalid token")
+				return
+			}
+			setPrincipal(c, p)
+			c.Next()
+			return
+		}
+		if raw, err := c.Cookie(AdminCookieName); err == nil && raw != "" {
+			p, ok := a.resolveAdmin(ctx, raw)
+			if !ok {
+				httpx.Unauthorized(c, "session expired")
+				return
+			}
+			setPrincipal(c, p)
+			c.Next()
+			return
+		}
+		c.Next() // genuinely anonymous
+	}
 }

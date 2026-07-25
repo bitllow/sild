@@ -26,7 +26,14 @@ type Service struct {
 	sink     archive.Sink // cold-storage read fallback (§12)
 	cfg      *config.Config
 	now      func() time.Time
+	// search backs the ?q= form of ListConversations. Set after construction:
+	// SearchService is built from the same store, so wiring it through New would
+	// make the two dig providers mutually dependent.
+	search *SearchService
 }
+
+// UseSearch attaches the search service. dig calls it once at startup.
+func (s *Service) UseSearch(ss *SearchService) { s.search = ss }
 
 // New constructs the domain service.
 func New(st store.Store, pub realtime.Publisher, km *auth.KeyManager, bucket storage.Bucket, mailer mail.Mailer, sink archive.Sink, cfg *config.Config) *Service {

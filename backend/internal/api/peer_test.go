@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/policy"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
@@ -58,28 +60,33 @@ func TestPeerConversationsExcludedFromQueue(t *testing.T) {
 
 	// Queue: only the support conversation, open_count = 1 (peer excluded).
 	var q struct {
-		Items     []map[string]any `json:"items"`
-		OpenCount int              `json:"open_count"`
+		Items  []map[string]any `json:"items"`
+		Counts struct {
+			Open       int `json:"open"`
+			You        int `json:"you"`
+			Unassigned int `json:"unassigned"`
+			Closed     int `json:"closed"`
+		} `json:"counts"`
 	}
-	w := h.Request("GET", "/v1/admin/assignments?limit=50").Cookie("sild_admin", owner).Do()
+	w := h.Request("GET", "/v1/conversations?kind=support&limit=50").Cookie("sild_admin", owner).Do()
 	testutil.DecodeJSON(t, w, &q)
-	if len(q.Items) != 1 || q.OpenCount != 1 {
-		t.Fatalf("queue items=%d open_count=%d, want 1/1 (peer excluded)", len(q.Items), q.OpenCount)
+	if len(q.Items) != 1 || q.Counts.Open != 1 {
+		t.Fatalf("queue items=%d open_count=%d, want 1/1 (peer excluded)", len(q.Items), q.Counts.Open)
 	}
 
 	// Peer list: only the peer conversation.
 	var p struct {
-		Conversations []map[string]any `json:"conversations"`
+		Items []map[string]any `json:"items"`
 	}
-	w = h.Request("GET", "/v1/admin/peer-conversations").Cookie("sild_admin", owner).Do()
+	w = h.Request("GET", "/v1/conversations?kind=peer").Cookie("sild_admin", owner).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("peer list: %d %s", w.Code, w.Body)
 	}
 	testutil.DecodeJSON(t, w, &p)
-	if len(p.Conversations) != 1 || p.Conversations[0]["id"] != peer.ID {
-		t.Fatalf("peer list = %+v, want just %s", p.Conversations, peer.ID)
+	if len(p.Items) != 1 || p.Items[0]["id"] != peer.ID {
+		t.Fatalf("peer list = %+v, want just %s", p.Items, peer.ID)
 	}
-	if len(p.Conversations[0]["members"].([]any)) != 2 {
+	if len(p.Items[0]["members"].([]any)) != 2 {
 		t.Fatalf("peer row should carry its 2 participants")
 	}
 }
@@ -97,9 +104,19 @@ func TestPeerAccessGating(t *testing.T) {
 
 	agentCookie := loginAs(t, h, "agent@test")
 
-	// No peer access → 403 on list and on the peer conversation itself.
-	if w := h.Request("GET", "/v1/admin/peer-conversations").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusForbidden {
-		t.Fatalf("agent without peer access: list = %d, want 403", w.Code)
+	// No peer access → the LIST returns an empty page (the scope is a ceiling, so
+	// a filter it excludes yields nothing), while the named conversation 403s:
+	// there the caller identified something specific and silence is worse.
+	if w := h.Request("GET", "/v1/conversations?kind=peer").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusOK {
+		t.Fatalf("agent without peer access: list = %d, want 200", w.Code)
+	} else {
+		var page struct {
+			Items []map[string]any `json:"items"`
+		}
+		testutil.DecodeJSON(t, w, &page)
+		if len(page.Items) != 0 {
+			t.Fatalf("peer rows leaked to an agent without peer access: %v", page.Items)
+		}
 	}
 	if w := h.Request("GET", "/v1/conversations/"+peer.ID+"/messages").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusForbidden {
 		t.Fatalf("agent without peer access: peer messages = %d, want 403", w.Code)
@@ -111,7 +128,7 @@ func TestPeerAccessGating(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 	agentCookie = loginAs(t, h, "agent@test")
-	if w := h.Request("GET", "/v1/admin/peer-conversations").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusOK {
+	if w := h.Request("GET", "/v1/conversations?kind=peer").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusOK {
 		t.Fatalf("agent with peer access: list = %d, want 200", w.Code)
 	}
 	if w := h.Request("GET", "/v1/conversations/"+peer.ID+"/messages").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusOK {
@@ -134,7 +151,7 @@ func TestPeerImplicitJoin(t *testing.T) {
 	peer := mkPeer(t, h, tenant.ID, "trip_1")
 
 	post := func(body string) {
-		w := h.Request("POST", "/v1/admin/peer-conversations/"+peer.ID+"/messages").
+		w := h.Request("POST", "/v1/conversations/"+peer.ID+"/messages").
 			Cookie("sild_admin", owner).JSON(map[string]any{"body": body}).Do()
 		if w.Code != http.StatusCreated {
 			t.Fatalf("peer send: %d %s", w.Code, w.Body)
@@ -161,7 +178,7 @@ func TestPeerImplicitJoin(t *testing.T) {
 	// Messages: one system join-note + the agent message.
 	countKinds := func() (system, agent int) {
 		var msgs struct {
-			Messages []map[string]any `json:"messages"`
+			Messages []map[string]any `json:"items"`
 		}
 		w := h.Request("GET", "/v1/conversations/"+peer.ID+"/messages?limit=50").Cookie("sild_admin", owner).Do()
 		testutil.DecodeJSON(t, w, &msgs)
@@ -214,7 +231,9 @@ func TestPeerSearchByIdAndMetadata(t *testing.T) {
 	mkSupport(t, h, tenant.ID, "support")
 
 	search := func(q string, peerOnly bool) []string {
-		res, err := h.Search.Search(ctx, tenant.ID, q, "", "", 25, peerOnly)
+		scope, in := searchAs(peerOnly)
+		in.Query = q
+		res, err := h.Search.Search(ctx, tenant.ID, scope, in)
 		if err != nil {
 			t.Fatalf("search %q: %v", q, err)
 		}
@@ -286,17 +305,19 @@ func TestPeerAccessTogglePersists(t *testing.T) {
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
 	owner := loginAs(t, h, "owner@test")
 
-	w := h.Request("PATCH", "/v1/admin/team/"+agent.ID).
+	w := h.Request("PATCH", "/v1/team/"+agent.ID).
 		Cookie("sild_admin", owner).JSON(map[string]any{"peer_access": true}).Do()
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("toggle: %d %s", w.Code, w.Body)
 	}
 
-	var team []map[string]any
-	w = h.Request("GET", "/v1/admin/team").Cookie("sild_admin", owner).Do()
-	testutil.DecodeJSON(t, w, &team)
+	var teamPage struct {
+		Items []map[string]any `json:"items"`
+	}
+	w = h.Request("GET", "/v1/team").Cookie("sild_admin", owner).Do()
+	testutil.DecodeJSON(t, w, &teamPage)
 	found := false
-	for _, m := range team {
+	for _, m := range teamPage.Items {
 		if m["id"] == agent.ID {
 			found = true
 			if m["peer_access"] != true {
@@ -308,13 +329,28 @@ func TestPeerAccessTogglePersists(t *testing.T) {
 		t.Fatalf("agent missing from team list")
 	}
 
-	// /admin/me reflects the signed-in operator's own flag.
+	// GET /v1/principal reports peer visibility as the SCOPE the operator holds
+	// conversations.list over, not a raw flag — so the inbox renders the peer
+	// surface from the same decision the backend enforces.
 	agentCookie := loginAs(t, h, "agent@test")
-	var me map[string]any
-	w = h.Request("GET", "/v1/admin/me").Cookie("sild_admin", agentCookie).Do()
+	var me struct {
+		Grants []struct {
+			Action string `json:"action"`
+			Scope  *struct {
+				Kinds []string `json:"kinds"`
+			} `json:"scope"`
+		} `json:"grants"`
+	}
+	w = h.Request("GET", "/v1/principal").Cookie("sild_admin", agentCookie).Do()
 	testutil.DecodeJSON(t, w, &me)
-	if me["peer_access"] != true {
-		t.Fatalf("/admin/me peer_access = %v, want true", me["peer_access"])
+	unrestricted := false
+	for _, g := range me.Grants {
+		if g.Action == "conversations.list" && g.Scope != nil && len(g.Scope.Kinds) == 0 {
+			unrestricted = true
+		}
+	}
+	if !unrestricted {
+		t.Fatalf("peer_access operator should hold conversations.list unrestricted by kind, got %+v", me.Grants)
 	}
 }
 
@@ -462,7 +498,9 @@ func TestClosedPeerConversationStaysOutOfSupportSearch(t *testing.T) {
 	}
 
 	// Default (support) search must not return the now-closed peer conversation.
-	res, err := h.Search.Search(ctx, tenant.ID, "p_needle", "", "", 25, false)
+	scope, in := searchAs(false)
+	in.Query = "p_needle"
+	res, err := h.Search.Search(ctx, tenant.ID, scope, in)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -473,7 +511,9 @@ func TestClosedPeerConversationStaysOutOfSupportSearch(t *testing.T) {
 	// But the PEER surface's search must still surface it (open OR closed): reading
 	// a closed peer conversation's history is authorized — only writing is gated on
 	// open status — so it must not vanish from search the moment it closes.
-	pres, err := h.Search.Search(ctx, tenant.ID, "p_needle", "", "", 25, true)
+	pscope, pin := searchAs(true)
+	pin.Query = "p_needle"
+	pres, err := h.Search.Search(ctx, tenant.ID, pscope, pin)
 	if err != nil {
 		t.Fatalf("peer search: %v", err)
 	}
@@ -533,4 +573,19 @@ func TestAddAssignmentRejectedOnPeerConversation(t *testing.T) {
 	if got.Kind != models.KindPeer {
 		t.Fatalf("conversation kind = %q, want peer (unchanged)", got.Kind)
 	}
+}
+
+// searchAs builds the scope+kind pair matching the old peerOnly boolean:
+// peerOnly=false is an operator WITHOUT peer_access (support scope), peerOnly=true
+// is one WITH it, asking for peer. The support/peer boundary now comes from the
+// scope rather than a flag inside the query builder — same rule, one owner.
+func searchAs(peerOnly bool) (policy.ResourceScope, domain.SearchInput) {
+	p := &principal.Principal{TenantID: "t", Kind: principal.KindAdmin, AdminID: "a",
+		Role: models.PlatformOwner, PeerAccess: peerOnly}
+	in := domain.SearchInput{Limit: 25}
+	if peerOnly {
+		k := models.KindPeer
+		in.Kind = &k
+	}
+	return policy.Scope(p, policy.ConversationsList), in
 }

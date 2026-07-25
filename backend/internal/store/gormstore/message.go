@@ -68,15 +68,18 @@ func (r *messageRepo) ListBefore(ctx context.Context, tenantID, convID, before s
 	return page, nil
 }
 
-func (r *messageRepo) ListAfter(ctx context.Context, tenantID, convID, after string, includeInternal bool) ([]models.Message, error) {
+func (r *messageRepo) ListAfter(ctx context.Context, tenantID, convID, after string, limit int, includeInternal bool) ([]models.Message, error) {
 	q := r.db.WithContext(ctx).Preload("Attachments").
 		Where("tenant_id = ? AND conversation_id = ?", tenantID, convID)
 	q = visibilityScope(q, includeInternal)
 	if after != "" {
 		q = q.Where("id > ?", after)
 	}
+	if limit <= 0 {
+		limit = 50
+	}
 	var ms []models.Message
-	err := q.Order("id asc").Limit(500).Find(&ms).Error
+	err := q.Order("id asc").Limit(limit).Find(&ms).Error
 	return ms, err
 }
 

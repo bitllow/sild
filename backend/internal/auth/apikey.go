@@ -14,8 +14,9 @@ import (
 )
 
 // API key layout: sild_live_<prefix>_<secret>
-//   prefix — public, indexed → O(1) lookup (no scan)
-//   secret — high-entropy; only its SHA-256 is stored (§2.1)
+//
+//	prefix — public, indexed → O(1) lookup (no scan)
+//	secret — high-entropy; only its SHA-256 is stored (§2.1)
 //
 // SHA-256 (not argon2id) is correct here: the secret is high-entropy, so a fast
 // hash is safe and lets us authenticate every server→server request cheaply.

@@ -75,27 +75,30 @@ internal class SildApi(private val cfg: SildConfig) {
 
     // ── endpoints ────────────────────────────────────────────────────────────
 
-    /** GET /v1/me/brand → { name, config }. The SDK is authed, so it uses /me/brand.
+    /** GET /v1/brands/active → { name, config }. Same URL the web drop-in uses;
+     *  a credential scopes it to our tenant.
      *  The logo URL is re-based onto our base so it loads from any host (see rebaseLocalUrl). */
     suspend fun fetchBrand(): BrandResponse {
-        val res: BrandResponse = json.decodeFromString(api("GET", "/me/brand"))
+        val res: BrandResponse = json.decodeFromString(api("GET", "/brands/active"))
         return res.copy(config = res.config.copy(logoUrl = rebaseLocalUrl(cfg.base, res.config.logoUrl)))
     }
 
-    /** GET /v1/me/conversations → array of conversations (members + assignment + last_message). */
+    /** GET /v1/conversations → the standard list envelope. The credential scopes
+     *  it to the caller's own conversations, so there is no /me variant. */
     suspend fun listConversations(): List<ApiConversation> =
-        json.decodeFromString(api("GET", "/me/conversations"))
+        json.decodeFromString<ApiConversationsPage>(api("GET", "/conversations")).items
 
-    /** GET /v1/conversations/{id}/messages?limit=100 → { messages }. */
+    /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope. */
     suspend fun listMessages(id: String): ApiMessagesPage =
         json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100"))
 
-    /** POST /v1/me/support-requests { metadata } → { id }. */
+    /** POST /v1/conversations { metadata } → { id }. open_assignment is forced
+     *  true for a user credential, so this always opens a support request. */
     suspend fun openSupportRequest(): String {
         val body = buildJsonObject {
             put("metadata", JsonObject(cfg.metadata.mapValues { JsonPrimitive(it.value) }))
         }
-        val obj = json.parseToJsonElement(api("POST", "/me/support-requests", body.toString())).jsonObject
+        val obj = json.parseToJsonElement(api("POST", "/conversations", body.toString())).jsonObject
         return obj.getValue("id").jsonPrimitive.content
     }
 

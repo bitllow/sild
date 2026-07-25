@@ -18,7 +18,9 @@ func TestAgentScopedToSupportConversations(t *testing.T) {
 	agent := loginAs(t, h, "agent@test")
 
 	// a plain (non-support) conversation — no assignment
-	var plain struct{ ID string `json:"id"` }
+	var plain struct {
+		ID string `json:"id"`
+	}
 	w := h.Request("POST", "/v1/conversations").Bearer(key).JSON(map[string]any{
 		"members": []map[string]any{
 			{"user_id": "u_client", "conv_role": "client"},
@@ -28,7 +30,9 @@ func TestAgentScopedToSupportConversations(t *testing.T) {
 	testutil.DecodeJSON(t, w, &plain)
 
 	// a support conversation — carries an assignment
-	var support struct{ ID string `json:"id"` }
+	var support struct {
+		ID string `json:"id"`
+	}
 	w = h.Request("POST", "/v1/conversations").Bearer(key).JSON(map[string]any{
 		"members":         []map[string]any{{"user_id": "u_client", "conv_role": "client"}},
 		"open_assignment": true,

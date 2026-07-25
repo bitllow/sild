@@ -57,7 +57,18 @@ data class ApiConversation(
 )
 
 @Serializable
-data class ApiMessagesPage(val messages: List<ApiMessage> = emptyList())
+data class ApiMessagesPage(val items: List<ApiMessage> = emptyList())
+
+/**
+ * The list envelope every collection endpoint returns. next_cursor is null
+ * exactly when has_more is false, and it is OPAQUE — round-trip it verbatim.
+ */
+@Serializable
+data class ApiConversationsPage(
+    val items: List<ApiConversation> = emptyList(),
+    @SerialName("next_cursor") val nextCursor: String? = null,
+    @SerialName("has_more") val hasMore: Boolean = false,
+)
 
 @Serializable
 data class ApiUploadGrant(

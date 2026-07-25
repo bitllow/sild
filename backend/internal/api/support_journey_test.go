@@ -21,7 +21,9 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 	h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
 
 	// ── client side: mint a token, open a support request, ask a question ──
-	var tok struct{ Token string `json:"token"` }
+	var tok struct {
+		Token string `json:"token"`
+	}
 	w := h.Request("POST", "/v1/tokens").Bearer(apiKey).JSON(map[string]any{"user_id": "u_client"}).Do()
 	testutil.DecodeJSON(t, w, &tok)
 
@@ -29,7 +31,7 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 		ID         string         `json:"id"`
 		Assignment map[string]any `json:"assignment"`
 	}
-	w = h.Request("POST", "/v1/me/support-requests").Bearer(tok.Token).JSON(map[string]any{}).Do()
+	w = h.Request("POST", "/v1/conversations").Bearer(tok.Token).JSON(map[string]any{}).Do()
 	if w.Code != http.StatusCreated {
 		t.Fatalf("open support: %d %s", w.Code, w.Body)
 	}
@@ -39,7 +41,9 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 		t.Fatal("support request should carry an assignment")
 	}
 
-	var firstMsg struct{ ID string `json:"id"` }
+	var firstMsg struct {
+		ID string `json:"id"`
+	}
 	w = h.Request("POST", "/v1/conversations/"+conv.ID+"/messages").
 		Bearer(tok.Token).JSON(map[string]any{"body": "my card was charged twice"}).Do()
 	testutil.DecodeJSON(t, w, &firstMsg)
@@ -50,7 +54,7 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 	var queue struct {
 		Items []map[string]any `json:"items"`
 	}
-	w = h.Request("GET", "/v1/admin/assignments?status=queued").Cookie("sild_admin", cookie).Do()
+	w = h.Request("GET", "/v1/conversations?kind=support&assignment_status=queued").Cookie("sild_admin", cookie).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("inbox: %d %s", w.Code, w.Body)
 	}
@@ -70,7 +74,7 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 	testutil.DecodeJSON(t, w, &convView)
 
 	// ── agent claims the assignment (queued → assigned) ──
-	w = h.Request("POST", "/v1/admin/assignments/"+assignmentID+"/claim").Cookie("sild_admin", cookie).Do()
+	w = h.Request("PATCH", "/v1/assignments/"+assignmentID).Cookie("sild_admin", cookie).JSON(map[string]any{"assignee_actor_id": "me"}).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("claim: %d %s", w.Code, w.Body)
 	}
@@ -84,7 +88,7 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 	}
 
 	// it should no longer appear in the queued list
-	w = h.Request("GET", "/v1/admin/assignments?status=queued").Cookie("sild_admin", cookie).Do()
+	w = h.Request("GET", "/v1/conversations?kind=support&assignment_status=queued").Cookie("sild_admin", cookie).Do()
 	queue.Items = nil
 	testutil.DecodeJSON(t, w, &queue)
 	if containsAssignment(queue.Items, assignmentID) {
@@ -92,7 +96,9 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 	}
 
 	// ── agent answers ──
-	var reply struct{ ID string `json:"id"` }
+	var reply struct {
+		ID string `json:"id"`
+	}
 	w = h.Request("POST", "/v1/conversations/"+conv.ID+"/messages").
 		Cookie("sild_admin", cookie).JSON(map[string]any{"body": "I've refunded the duplicate charge"}).Do()
 	if w.Code != http.StatusCreated {
@@ -102,9 +108,9 @@ func TestSupportAgentInboxJourney(t *testing.T) {
 
 	// ── client SEES the answer via catch-up ──
 	var after struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []map[string]any `json:"items"`
 	}
-	w = h.Request("GET", "/v1/conversations/"+conv.ID+"/messages?after="+firstMsg.ID).Bearer(tok.Token).Do()
+	w = h.Request("GET", "/v1/conversations/"+conv.ID+"/messages?since="+firstMsg.ID).Bearer(tok.Token).Do()
 	testutil.DecodeJSON(t, w, &after)
 	if len(after.Messages) != 1 || after.Messages[0]["body"] != "I've refunded the duplicate charge" {
 		t.Fatalf("client should see the agent's answer, got %+v", after.Messages)

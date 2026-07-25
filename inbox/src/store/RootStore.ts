@@ -5,7 +5,8 @@ import {
   type ApiAssignmentStatus,
   type ApiMessage,
   type QueueOrder,
-  type QueueParams,
+  type ConversationParams,
+  type ApiQueuePage,
   type QueueSort,
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
@@ -225,8 +226,13 @@ export class RootStore {
     try {
       const me = await adminApi.me();
       runInAction(() => {
-        this.meId = me.id;
-        this.peerAccess = !!me.peer_access;
+        this.meId = me.subject?.id ?? "";
+        // Peer visibility comes from the SCOPE the operator holds
+        // conversations.list over — the same decision the backend enforces —
+        // rather than a peer_access flag re-interpreted here.
+        const list = me.grants.find((g) => g.action === "conversations.list");
+        const kinds = list?.scope?.kinds;
+        this.peerAccess = !!list && (!kinds || kinds.includes("peer"));
       });
       // Load peer conversations up front (not lazily on first visit) so the nav
       // attention badge is live from session start and realtime peer messages
@@ -306,24 +312,35 @@ export class RootStore {
   // Map the active filter to server-side query params. Filtering + sorting +
   // pagination all happen on the backend (§4.3); the list endpoint returns the
   // last message per row, not history.
-  private get queueParams(): QueueParams {
-    const base: QueueParams = { sort: this.sortBy, order: this.sortDir, limit: PAGE_SIZE };
+  // Two state machines, two parameters. `status` is the CONVERSATION lifecycle
+  // and `assignment_status` is the assignment's — "closed" in the inbox has
+  // always meant the conversation is closed, which is what the old
+  // exclude_closed flag filtered on. Every scope also pins kind=support: an
+  // unfiltered list would admit peer rows for a peer_access operator and change
+  // the All tab's row set.
+  private get queueParams(): ConversationParams {
+    const base: ConversationParams = {
+      kind: "support",
+      sort: this.sortBy,
+      order: this.sortDir,
+      limit: PAGE_SIZE,
+    };
     // Hide closed conversations server-side too whenever the client hides them —
-    // otherwise a closed row (Close conversation works on queued/assigned rows and
-    // doesn't touch the assignment) would consume a page slot and then vanish
+    // otherwise a closed row would consume a page slot and then vanish
     // client-side, shrinking the visible page.
     switch (this.filter) {
       case "unassigned":
         // A closed queued conversation isn't "unassigned" in the UI (its derived
         // status is closed), so it's always excluded here.
-        return { ...base, status: "queued", excludeClosed: true };
+        return { ...base, assignmentStatus: "queued", status: "open" };
       case "you":
         // "You" = assigned to me (closing keeps assignee_actor_id set). Show
         // closed reveals my closed threads; otherwise they're excluded.
-        return { ...base, assignee: "me", status: "assigned", excludeClosed: !this.showClosed };
+        return this.showClosed
+          ? { ...base, assignee: "me", assignmentStatus: "assigned" }
+          : { ...base, assignee: "me", assignmentStatus: "assigned", status: "open" };
       default:
-        // "All" — everything, minus closed unless "Show closed" is on.
-        return this.showClosed ? base : { ...base, excludeClosed: true };
+        return this.showClosed ? base : { ...base, status: "open" };
     }
   }
 
@@ -336,7 +353,7 @@ export class RootStore {
       this.convError = null;
     });
     try {
-      const page = await adminApi.listAssignments(this.queueParams);
+      const page = await adminApi.listConversations(this.queueParams);
       if (seq !== this.queueSeq) return; // a newer load superseded this one
       const built = page.items.map(buildQueueRow);
       runInAction(() => {
@@ -373,12 +390,12 @@ export class RootStore {
       this.loadingMore = true;
     });
     try {
-      const page = await adminApi.listAssignments({ ...this.queueParams, cursor: this.nextCursor });
+      const page = await adminApi.listConversations({ ...this.queueParams, cursor: this.nextCursor });
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop this page
       runInAction(() => {
         const have = new Set(this.convs.map((c) => c.id));
         for (const it of page.items) {
-          if (!have.has(it.conversation.id)) this.convs.push(buildQueueRow(it));
+          if (!have.has(it.id)) this.convs.push(buildQueueRow(it));
         }
         this.nextCursor = page.next_cursor;
         this.hasMore = page.has_more;
@@ -486,14 +503,14 @@ export class RootStore {
   private syncQueue = async () => {
     const seq = this.queueSeq; // merge belongs to the current filter generation
     try {
-      const page = await adminApi.listAssignments(this.queueParams);
+      const page = await adminApi.listConversations(this.queueParams);
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop the merge
       runInAction(() => {
         this.applyCounts(page);
         const byId = new Map(this.convs.map((c) => [c.id, c]));
         let added = false;
         for (const it of page.items) {
-          const existing = byId.get(it.conversation.id);
+          const existing = byId.get(it.id);
           const fresh = buildQueueRow(it);
           if (existing) {
             // refresh lightweight row fields; keep any loaded history + members
@@ -696,11 +713,12 @@ export class RootStore {
   };
 
   // Apply the tenant-wide badge counts from a queue page response.
-  private applyCounts = (page: { open_count: number; you_count: number; unassigned_count: number; closed_count: number }) => {
-    this.openCount = page.open_count;
-    this.youCount = page.you_count;
-    this.unassignedCount = page.unassigned_count;
-    this.closedCount = page.closed_count;
+  private applyCounts = (page: ApiQueuePage) => {
+    if (!page.counts) return; // emitted only for the support queue
+    this.openCount = page.counts.open;
+    this.youCount = page.counts.you;
+    this.unassignedCount = page.counts.unassigned;
+    this.closedCount = page.counts.closed;
   };
 
   // Conversations with unread inbound messages — drives the coral attention badge
@@ -756,8 +774,8 @@ export class RootStore {
       return;
     }
     try {
-      const { conversations } = await adminApi.contactConversations(contact.extId);
-      const built = conversations.map(buildQueueRow);
+      const { items } = await adminApi.listConversations({ participant: contact.extId });
+      const built = items.map(buildQueueRow);
       runInAction(() => {
         // Drop a response that a newer active-contact switch has superseded.
         if (seq === this.contactSeq) this.contactHistory = built;
@@ -844,14 +862,12 @@ export class RootStore {
       this.searching = true;
     });
     try {
-      const { conversations } = await adminApi.search(q);
+      const { items } = await adminApi.listConversations({ kind: "support", q });
       const built = await Promise.all(
-        conversations.map(async (hit) => {
-          const [conv, page] = await Promise.all([
-            adminApi.getConversation(hit.conversation_id),
-            adminApi.listMessages(hit.conversation_id),
-          ]);
-          const c = buildConversation(conv, page);
+        items.map(async (hit) => {
+          // Rows arrive whole from the list, so only the thread is fetched.
+          const page = await adminApi.listMessages(hit.id);
+          const c = buildConversation(hit, page);
           if (hit.snippet) c.preview = hit.snippet;
           return c;
         })
@@ -974,9 +990,9 @@ export class RootStore {
         adminApi.getBrands(),
       ]);
       runInAction(() => {
-        this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
-        this.webhooks = webhooks.map(mapWebhook);
-        this.team = team.map(mapTeamMember);
+        this.keys = keys.items.filter((k) => !k.revoked_at).map(mapApiKey);
+        this.webhooks = webhooks.items.map(mapWebhook);
+        this.team = team.items.map(mapTeamMember);
         this.emailChannel = mapEmailChannel(email);
         this.applyBrands(brands.brands, brands.active_brand_id);
         this.settingsLoaded = true;
@@ -1178,7 +1194,7 @@ export class RootStore {
   private reloadKeys = async () => {
     const keys = await adminApi.listApiKeys();
     runInAction(() => {
-      this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
+      this.keys = keys.items.filter((k) => !k.revoked_at).map(mapApiKey);
     });
   };
   revokeKey = async (id: string) => {
