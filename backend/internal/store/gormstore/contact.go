@@ -25,11 +25,12 @@ type contactRepo struct{ db *gorm.DB }
 
 // contactRow is the aggregate projected per contact.
 //
-// LastActivity is scanned as text and parsed in Go: a computed column loses its
-// type on SQLite, the same reason ListQueue never SELECTs its sort expression.
+// LastActivity is scanned as `any` because drivers disagree about a computed
+// timestamp: SQLite hands back text (the same reason ListQueue never SELECTs its
+// sort expression), Postgres a real time.Time.
 type contactRow struct {
 	ExternalUserID    string
-	LastActivity      string
+	LastActivity      any
 	ConversationCount int64
 }
 
@@ -44,7 +45,19 @@ var sqlTimeLayouts = []string{
 	"2006-01-02 15:04:05",
 }
 
-func parseSQLTime(v string) time.Time {
+func parseSQLTime(v any) time.Time {
+	switch t := v.(type) {
+	case time.Time:
+		return t.UTC()
+	case []byte:
+		return parseTimeText(string(t))
+	case string:
+		return parseTimeText(t)
+	}
+	return time.Time{}
+}
+
+func parseTimeText(v string) time.Time {
 	for _, layout := range sqlTimeLayouts {
 		if t, err := time.Parse(layout, v); err == nil {
 			return t.UTC()
@@ -113,11 +126,31 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 			cur.Value, cur.Value, cur.ID)
 	}
 
-	var rows []contactRow
-	if err := agg.
+	// Scanned row-by-row rather than through gorm's struct mapping: drivers
+	// disagree about the type of a computed timestamp (SQLite text, Postgres
+	// time.Time) and a struct field typed `any` is left unpopulated. Taking the
+	// driver's own value keeps this portable.
+	sqlRows, err := agg.
 		Order("last_activity DESC").
 		Order("m.external_user_id DESC").
-		Limit(limit + 1).Scan(&rows).Error; err != nil {
+		Limit(limit + 1).Rows()
+	if err != nil {
+		return empty, err
+	}
+	var rows []contactRow
+	for sqlRows.Next() {
+		var r contactRow
+		if err := sqlRows.Scan(&r.ExternalUserID, &r.LastActivity, &r.ConversationCount); err != nil {
+			sqlRows.Close()
+			return empty, err
+		}
+		rows = append(rows, r)
+	}
+	if err := sqlRows.Err(); err != nil {
+		sqlRows.Close()
+		return empty, err
+	}
+	if err := sqlRows.Close(); err != nil {
 		return empty, err
 	}
 
