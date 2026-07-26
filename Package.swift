@@ -31,7 +31,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "SildCore",
-            path: "sdks/kotlin/core/build/XCFrameworks/release/SildCore.xcframework"
+            url: "https://github.com/bitllow/sild/releases/download/v0.1.1/SildCore.xcframework.zip",
+            checksum: "c1b62c46bee3e4a5565724f1a0e84bffcc8ec89218eaccb7fc219d6fd2049824"
         ),
         .target(
             name: "Sild",
