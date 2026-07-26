@@ -31,6 +31,12 @@ CLAUDE.md
 tasks
 issues
 
+# Compiled web drop-in — build it: `cd web && npm run build` (or `make build`).
+# The directory itself must stay tracked: //go:embed all:dist needs a file inside
+# it to resolve, or `go build` breaks on a fresh clone.
+backend/internal/webasset/dist/*
+!backend/internal/webasset/dist/.gitkeep
+
 # npm/yarn failure logs
 npm-debug.log*
 yarn-error.log*

@@ -204,6 +204,9 @@ function mapMessage(m: ApiMessage, selfId?: string, names?: Record<string, strin
 
 /** Framework-agnostic Sild client (§4.2 REST + §5 realtime over SSE). The widget
  *  and a future @sild/react both render this; it owns no DOM. */
+// How many conversations the launcher's "Recent" list asks for.
+const RECENT_CONVERSATIONS = 20;
+
 export class SildClient implements WidgetClient {
   private base: string;
   private tokenProvider: () => Promise<string> | string;
@@ -403,17 +406,15 @@ export class SildClient implements WidgetClient {
 
   // ── data ───────────────────────────────────────────────────────────────
   async loadConversations() {
-    // Drain the cursor: the widget renders its whole recent list, so stopping at
-    // page one would hide a user's older conversations.
-    const list: Array<Record<string, unknown>> = [];
-    for (let cursor: string | null = null, i = 0; i < 50; i++) {
-      const path = "/conversations" + (cursor ? `?cursor=${encodeURIComponent(cursor)}` : "");
-      const page: ApiPage<Record<string, unknown>> = await this.api("GET", path);
-      list.push(...page.items);
-      if (!page.has_more || !page.next_cursor) break;
-      cursor = page.next_cursor;
-    }
-    const convs: WidgetConversation[] = (list || []).map((c) => {
+    // One bounded page: the launcher shows a short "Recent" list with no paging, and
+    // this also runs on every reconnect — draining the cursor made that up to 50
+    // sequential requests before catch-up could start.
+    const page: ApiPage<Record<string, unknown>> = await this.api(
+      "GET",
+      `/conversations?limit=${RECENT_CONVERSATIONS}`
+    );
+    const list = page.items || [];
+    const convs: WidgetConversation[] = list.map((c) => {
       const last = (c.last_message || {}) as { body?: string; created_at?: string };
       const assignment = c.assignment as { status?: string } | undefined;
       const members = (c.members as ApiConvMember[]) || [];

@@ -147,6 +147,12 @@ jobs:
       # Each `script` line runs as its own `sh -c`, so every line stands alone —
       # `set -e` and multi-line loops do not carry across, and a bare
       # `pkill -f sild-dev` matches its own shell and kills it.
+      #
+      # The emulator needs `-f`: `pkill -x` compares the process NAME, which the
+      # kernel truncates to 15 characters, and "qemu-system-x86_64" is 18 — an `-x`
+      # match is silently impossible, which is why the emulator survived and the
+      # action's own teardown then burned the step's whole budget. The pattern is
+      # bracketed so it does not match the `sh -c` running it.
       - name: Run instrumented E2E
         id: android_e2e
         continue-on-error: true
@@ -164,7 +170,37 @@ jobs:
           script: |
             ./gradlew :sample:connectedDebugAndroidTest && touch /tmp/android-e2e-passed
             pkill -x sild-dev || true
-            pkill -9 -x qemu-system-x86_64 || true
+            pkill -9 -f '[q]emu-system-x86_64' || true
+
+      # connectedAndroidTest prints only "Starting N tests"/"Finished N tests", so a
+      # run that takes minutes looks like a hang. The runner writes a JUnit XML per
+      # device; print it so the log names every test, its outcome and its duration.
+      - name: Instrumented test results
+        if: always()
+        run: |
+          shopt -s globstar nullglob
+          xml=(sdks/kotlin/sample/build/outputs/androidTest-results/**/*.xml)
+          if [ ${#xml[@]} -eq 0 ]; then
+            echo "no instrumented test results were written — the run did not reach the tests"
+            exit 0
+          fi
+          python3 - "${xml[@]}" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          total = failed = 0
+          for path in sys.argv[1:]:
+              suite = ET.parse(path).getroot()
+              print(f"{suite.get('name')} on {suite.get('hostname') or 'device'}")
+              for case in suite.iter("testcase"):
+                  bad = [k for k in ("failure", "error") for _ in case.iter(k)]
+                  total += 1
+                  failed += bool(bad)
+                  mark = "FAIL" if bad else "ok"
+                  print(f"  {mark:4} {case.get('classname')}.{case.get('name')} ({case.get('time')}s)")
+                  for kind in ("failure", "error"):
+                      for node in case.iter(kind):
+                          print("       " + (node.get("message") or kind))
+          print(f"{total} tests, {failed} failed")
+          PY
 
       # The real gate: teardown flakiness cannot make a red suite look green,
       # and cannot make a green suite look red.
@@ -176,6 +212,19 @@ jobs:
             exit 1
           fi
           echo "instrumented tests passed"
+
+      # The HTML report and logcat are what you actually need when a device test
+      # fails, and they are gone once the runner is reclaimed.
+      - name: Upload instrumented test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-e2e-report
+          path: |
+            sdks/kotlin/sample/build/outputs/androidTest-results/**
+            sdks/kotlin/sample/build/reports/androidTests/**
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Dump sild-dev log on failure
         if: failure()

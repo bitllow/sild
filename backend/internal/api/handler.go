@@ -12,6 +12,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/storage"
@@ -148,6 +149,14 @@ func (h *Handler) localStorageServed() bool {
 // is self-contained. CORS is engine-wide, so customer sites can load it
 // cross-origin; front it with a CDN in production.
 func (h *Handler) widgetBundle(c *gin.Context) {
+	js, ok := webasset.Widget()
+	if !ok {
+		// Serving empty JavaScript would look like a working install with a silently
+		// missing launcher.
+		httpx.Error(c, http.StatusServiceUnavailable, "widget_not_built",
+			"the web drop-in was not built into this binary: run `make build`")
+		return
+	}
 	c.Header("Cache-Control", "public, max-age=300")
-	c.Data(http.StatusOK, "application/javascript; charset=utf-8", webasset.Widget)
+	c.Data(http.StatusOK, "application/javascript; charset=utf-8", js)
 }

@@ -16,6 +16,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
+/** How many conversations the messenger's recent list asks for. */
+internal const val RECENT_CONVERSATIONS = 20
+
 /** Thrown for a non-2xx REST response; message is the server's `error.message`. */
 class SildApiException(val status: Int, message: String) : RuntimeException(message)
 
@@ -83,20 +86,12 @@ internal class SildApi(private val cfg: SildConfig) {
         return res.copy(config = res.config.copy(logoUrl = rebaseLocalUrl(cfg.base, res.config.logoUrl)))
     }
 
-    /** GET /v1/conversations → every page, scoped by credential. The messenger
-     *  renders its whole recent list, so stopping at page one would hide older
-     *  conversations. */
-    suspend fun listConversations(): List<ApiConversation> {
-        val out = mutableListOf<ApiConversation>()
-        var cursor: String? = null
-        repeat(50) {
-            val path = if (cursor == null) "/conversations" else "/conversations?cursor=${URLEncoder.encode(cursor, "UTF-8")}"
-            val page: ApiConversationsPage = json.decodeFromString(api("GET", path))
-            out += page.items
-            if (!page.hasMore || page.nextCursor == null) return out
-            cursor = page.nextCursor
-        }
-        return out
+    /** GET /v1/conversations?limit= → the most recent rows, scoped by credential.
+     *  One bounded page: the messenger shows a short recent list with no paging, and
+     *  this also runs on every reconnect. */
+    suspend fun listConversations(limit: Int = RECENT_CONVERSATIONS): List<ApiConversation> {
+        val page: ApiConversationsPage = json.decodeFromString(api("GET", "/conversations?limit=$limit"))
+        return page.items
     }
 
     /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope. */

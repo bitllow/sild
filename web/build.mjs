@@ -6,9 +6,10 @@ const watch = process.argv.includes("--watch");
 // Where the Go backend embeds the bundle from (go:embed needs it inside the
 // module tree). `npm run build` copies here so the next `go build` embeds it.
 const EMBED_DIR = "../backend/internal/webasset";
+const EMBED_DIST = `${EMBED_DIR}/dist`;
 
 async function syncEmbed() {
-  await copyFile("dist/widget.js", `${EMBED_DIR}/widget.js`);
+  await copyFile("dist/widget.js", `${EMBED_DIST}/widget.js`);
   await copyFile("public/demo.html", `${EMBED_DIR}/demo.html`);
 }
 
@@ -39,7 +40,7 @@ async function run() {
     await copyFile("public/demo.html", "dist/demo.html");
     await syncEmbed();
     const { size } = await stat("dist/widget.js");
-    console.log(`built dist/widget.js (${(size / 1024).toFixed(1)} KB) → embedded into backend/internal/webasset`);
+    console.log(`built dist/widget.js (${(size / 1024).toFixed(1)} KB) → embedded into ${EMBED_DIST}`);
   }
 }
 
