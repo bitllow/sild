@@ -8,3 +8,8 @@ fun defaultBrandConfig(): BrandConfig = BrandConfig()
 
 /** The state a client holds before it has started. */
 fun initialState(): SildState = SildState()
+
+/** A config carrying [SildConfig]'s own defaults for every optional field, so Swift
+ *  never restates them — a host supplies only what it must. */
+fun sildConfig(baseUrl: String, tokenProvider: TokenProvider): SildConfig =
+    SildConfig(baseUrl = baseUrl, tokenProvider = tokenProvider)

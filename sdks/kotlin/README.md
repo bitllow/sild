@@ -21,7 +21,7 @@ Android) and `io.sild:sild-ui` (AAR):
 
 ```kotlin
 dependencies {
-    implementation("io.sild:sild-ui:0.1.1") // pulls in :core
+    implementation("io.sild:sild-ui:0.1.2") // pulls in :core
 }
 ```
 

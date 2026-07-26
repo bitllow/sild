@@ -10,14 +10,48 @@ a manifest there; the sources stay here under `sdks/swift/` via `path:` targets.
 ## Install
 
 ```swift
-.package(url: "https://github.com/bitllow/sild.git", from: "0.1.1")
+.package(url: "https://github.com/bitllow/sild.git", from: "0.1.2")
 ```
 
+One import is enough — `Sild` re-exports the core module, so `SildConfig`, `SildState`
+and the rest are in scope without a second import.
+
+The block below is what the release workflow compiles against the published tag, as a
+throwaway consumer package. Keep the two in sync: everything between the markers is
+extracted verbatim.
+
+<!-- consumer-smoke:start -->
 ```swift
+import SwiftUI
 import Sild
 
-SildMessenger(config: config, target: .support) { dismiss() }
+struct SupportButton: View {
+    @State private var showing = false
+
+    var body: some View {
+        Button("Support") { showing = true }
+            .sheet(isPresented: $showing) {
+                SildMessenger(
+                    baseURL: "https://api.example.com",
+                    token: { try await mintToken() },
+                    target: .support
+                ) { showing = false }
+            }
+    }
+}
+
+// Your backend mints the user JWT; the SDK never sees your API key.
+func mintToken() async throws -> String { "jwt-from-your-backend" }
+
+// Core types reach a host through `Sild` alone.
+func isLive(_ state: SildState, _ config: SildConfig) -> Bool {
+    state.connection == ConnectionState.connected && !config.base.isEmpty
+}
 ```
+<!-- consumer-smoke:end -->
+
+`SildConfig.make(baseUrl:token:)` builds a config directly when a host needs one; every
+optional field keeps the SDK default, which is declared once on the Kotlin side.
 
 ## Requirements
 

@@ -105,6 +105,61 @@ jobs:
             || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" SildCore.xcframework.zip --clobber
 
+      # The release is only good if a real consumer can use it: resolve the published tag
+      # BY URL, from outside the repo, with a source file that does nothing but
+      # `import Sild`. That is what catches a missing re-export or a hostile initializer
+      # — defects no in-repo build sees, because path-based consumers reach the same
+      # modules by a different route.
+      - name: Verify a consumer can build against the tag
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          mkdir -p "$work/Sources/App"
+
+          # The snippet the README hands consumers, compiled verbatim so the two cannot drift.
+          python3 - "$GITHUB_WORKSPACE/sdks/swift/README.md" "$work/Sources/App/App.swift" <<'PY'
+          import re, sys
+          readme, out = sys.argv[1], sys.argv[2]
+          body = open(readme).read()
+          block = re.search(
+              r'<!-- consumer-smoke:start -->\s*```swift\n(.*?)```\s*<!-- consumer-smoke:end -->',
+              body, re.S,
+          )
+          if not block:
+              sys.exit("README.md: consumer-smoke markers not found")
+          open(out, "w").write(block.group(1))
+          PY
+
+          # SPM derives a URL dependency's identity from the repo name, lowercased.
+          identity=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          cat > "$work/Package.swift" <<EOF
+          // swift-tools-version: 5.9
+          import PackageDescription
+          let package = Package(
+              name: "App", platforms: [.iOS(.v17)],
+              products: [.library(name: "App", targets: ["App"])],
+              dependencies: [.package(url: "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git", exact: "${GITHUB_REF_NAME#v}")],
+              targets: [.target(name: "App", dependencies: [.product(name: "Sild", package: "$identity")])]
+          )
+          EOF
+
+          cd "$work"
+          # GitHub needs a moment to serve a just-pushed tag and its release asset, so
+          # resolution is retried; the build itself is not — a compile error is real.
+          resolved=
+          for attempt in 1 2 3 4 5 6; do
+            if swift package resolve; then resolved=1; break; fi
+            echo "resolve attempt $attempt failed; retrying in 20s"
+            rm -rf .build Package.resolved
+            sleep 20
+          done
+          [ -n "$resolved" ] || { echo "::error::consumer could not resolve $GITHUB_REF_NAME"; exit 1; }
+
+          udid=$(xcrun simctl list devices available -j \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for v in d.values() for x in v if x['name'].startswith('iPhone')))")
+          xcodebuild build -scheme App -destination "platform=iOS Simulator,id=$udid" \
+            || { echo "::error::the README's consumer snippet does not compile against $GITHUB_REF_NAME"; exit 1; }
+
       - name: Summary
         env:
           URL: ${{ steps.pack.outputs.url }}

@@ -202,6 +202,39 @@ jobs:
             exit 1
           }
 
+      # The same snippet the release compiles against the published tag, here against
+      # this checkout — so a README that stops compiling fails the PR instead of
+      # shipping a release nobody can install.
+      - name: README's consumer snippet compiles
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          mkdir -p "$work/Sources/App"
+          python3 - sdks/swift/README.md "$work/Sources/App/App.swift" <<'PY'
+          import re, sys
+          block = re.search(
+              r'<!-- consumer-smoke:start -->\s*```swift\n(.*?)```\s*<!-- consumer-smoke:end -->',
+              open(sys.argv[1]).read(), re.S,
+          )
+          if not block:
+              sys.exit("README.md: consumer-smoke markers not found")
+          open(sys.argv[2], "w").write(block.group(1))
+          PY
+          cat > "$work/Package.swift" <<EOF
+          // swift-tools-version: 5.9
+          import PackageDescription
+          let package = Package(
+              name: "App", platforms: [.iOS(.v17)],
+              products: [.library(name: "App", targets: ["App"])],
+              dependencies: [.package(path: "$GITHUB_WORKSPACE")],
+              targets: [.target(name: "App", dependencies: [.product(name: "Sild", package: "Sild")])]
+          )
+          EOF
+          cd "$work"
+          xcodebuild build -scheme App \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            || { echo "::error::the README's consumer snippet does not compile"; exit 1; }
+
       # The UI test's report and the simulator log are what you need when a device test
       # fails, and they are gone once the runner is reclaimed.
       - name: Upload iOS test report
