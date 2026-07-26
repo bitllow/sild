@@ -148,11 +148,19 @@ jobs:
       - name: Publish artifacts to Maven local (smoke test packaging)
         run: ./gradlew :core:publishToMavenLocal
 
-      # Everything below proves the shipping scheme: the Swift package consumes the
-      # XCFramework exactly as a host app would, and its tests call through it into the
-      # shared Kotlin code against the same live sild-dev.
+      # Everything below proves the shipping scheme AND the messenger: the Swift package
+      # consumes the XCFramework exactly as a host app would, and the sample app's
+      # XCUITest drives the real SwiftUI UI against the same live sild-dev.
       - name: Assemble the XCFramework
         run: ./gradlew :core:assembleSildCoreReleaseXCFramework
+
+      # The sample app and its UI test need targets SwiftPM cannot express; the spec is
+      # committed as project.yml and the .xcodeproj generated here.
+      - name: Generate the sample Xcode project
+        working-directory: sdks/swift
+        run: |
+          brew install xcodegen
+          xcodegen generate
 
       # xcodebuild does not forward the job's environment into the simulator, and the
       # TEST_RUNNER_ prefix does not reach a SwiftPM-generated scheme — so publish the
@@ -166,30 +174,42 @@ jobs:
           xcrun simctl bootstatus "$udid" -b
           xcrun simctl spawn "$udid" launchctl setenv SILD_BASE_URL http://localhost:8080
 
-      - name: Swift package tests on the iOS simulator (against sild-dev)
+      # Unit tests (transport seams, state bridge, REST smoke) AND the XCUITest that
+      # drives the real messenger UI, including the driver→rider realtime round-trip.
+      - name: Swift tests on the iOS simulator (against sild-dev)
         working-directory: sdks/swift
-        # Keep in step with the tests in SildCoreSmokeTests.
+        # Keep in step with SildUnitTests + SildSampleUITests.
         env:
-          EXPECTED_TESTS: "3"
+          EXPECTED_TESTS: "10"
         run: |
           set -o pipefail
-          xcodebuild test -scheme Sild \
+          xcodebuild test -project SildSample.xcodeproj -scheme SildSample \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             | tee /tmp/xcodebuild.log
-          # One test skipping (SILD_BASE_URL never reached the simulator) must not hide
-          # behind another passing, so pin the count and forbid skips outright.
-          line=$(grep -E "Executed [0-9]+ test" /tmp/xcodebuild.log | tail -1)
-          [ -n "$line" ] || { echo "::error::xcodebuild printed no test summary"; exit 1; }
-          ran=$(sed -n 's/.*Executed \([0-9]*\) test.*/\1/p' <<<"$line")
-          skipped=$(sed -n 's/.*with \([0-9]*\) test[s]* skipped.*/\1/p' <<<"$line")
-          echo "ran=$ran skipped=${skipped:-0} ($line)"
-          [ "$ran" = "$EXPECTED_TESTS" ] || {
-            echo "::error::expected $EXPECTED_TESTS Swift tests, $ran ran"; exit 1
+          # Counting cases, not the per-bundle summaries: one test skipping (because
+          # SILD_BASE_URL never reached the simulator) must not hide behind another
+          # passing, so pin the count and forbid skips outright.
+          passed=$(grep -c "Test Case .* passed" /tmp/xcodebuild.log || true)
+          skipped=$(grep -c "Test Case .* skipped" /tmp/xcodebuild.log || true)
+          echo "passed=$passed skipped=$skipped"
+          [ "$passed" = "$EXPECTED_TESTS" ] || {
+            echo "::error::expected $EXPECTED_TESTS Swift tests to pass, $passed did"; exit 1
           }
-          [ "${skipped:-0}" = "0" ] || {
-            echo "::error::${skipped} Swift test(s) skipped — SILD_BASE_URL did not reach the simulator"
+          [ "$skipped" = "0" ] || {
+            echo "::error::$skipped Swift test(s) skipped — SILD_BASE_URL did not reach the simulator"
             exit 1
           }
+
+      # The UI test's report and the simulator log are what you need when a device test
+      # fails, and they are gone once the runner is reclaimed.
+      - name: Upload iOS test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-report
+          path: /tmp/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Dump sild-dev log on failure
         if: failure()
