@@ -15,16 +15,27 @@ import PackageDescription
 // rewrite refuses to run otherwise.
 let package = Package(
     name: "Sild",
-    platforms: [.iOS(.v14)],
+    platforms: [.iOS(.v17)],
     products: [
         .library(name: "Sild", targets: ["Sild"]),
+    ],
+    dependencies: [
+        // The official Centrifugo client — the same broker + protocol the inbox, the web
+        // widget and the Android SDK use, so subscriptions and reconnect behave alike.
+        .package(url: "https://github.com/centrifugal/centrifuge-swift.git", from: "0.6.0"),
     ],
     targets: [
         .binaryTarget(
             name: "SildCore",
             path: "../kotlin/core/build/XCFrameworks/release/SildCore.xcframework"
         ),
-        .target(name: "Sild", dependencies: ["SildCore"]),
+        .target(
+            name: "Sild",
+            dependencies: [
+                "SildCore",
+                .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
+            ]
+        ),
         .testTarget(name: "SildTests", dependencies: ["Sild"]),
     ]
 )

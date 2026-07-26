@@ -1,0 +1,71 @@
+# The sample app + its XCUITest, which SwiftPM alone cannot express (no app targets).
+# Generated, not committed as a .pbxproj:
+#
+#     brew install xcodegen && xcodegen generate
+#
+# It also carries the package's own tests, because an .xcodeproj beside Package.swift
+# shadows the package's `Sild` scheme — one project running both suites beats two
+# commands and a path puzzle.
+#
+# The library itself (Sild, SildCore) stays a plain SwiftPM package; this project
+# consumes it as a local package dependency.
+name: SildSample
+options:
+  bundleIdPrefix: io.sild
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  Sild:
+    path: .
+
+targets:
+  SildSample:
+    type: application
+    platform: iOS
+    sources: [Sample/Sources]
+    info:
+      path: Sample/Info.plist
+      properties:
+        UILaunchScreen: {}
+        CFBundleDisplayName: Acme Rides
+        # The dev server is plain http on localhost.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSPhotoLibraryUsageDescription: Attach a photo to your support conversation.
+    dependencies:
+      - package: Sild
+        product: Sild
+
+  SildSampleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Sample/UITests]
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: SildSample
+      - package: Sild
+        product: Sild
+
+  # The package's own tests (transport seams, state bridge, REST smoke).
+  SildUnitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/SildTests]
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: Sild
+        product: Sild
+
+schemes:
+  SildSample:
+    build:
+      targets:
+        SildSample: all
+        SildUnitTests: [test]
+        SildSampleUITests: [test]
+    test:
+      targets: [SildUnitTests, SildSampleUITests]

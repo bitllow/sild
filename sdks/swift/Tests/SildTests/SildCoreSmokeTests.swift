@@ -1,5 +1,5 @@
 import XCTest
-@testable import Sild
+import Sild
 import SildCore
 
 // Runs on the iOS simulator against a live sild-dev, calling through the XCFramework
@@ -62,6 +62,36 @@ final class SildCoreSmokeTests: XCTestCase {
         XCTAssertEqual(msg?.direction, Direction.out)
     }
 
+    // The same abandonment, through SildModel: a send awaiting a support request that
+    // close() cancels must report failure so the composer keeps the draft, not hang.
+    func testModelSendDuringCloseReportsFailureInsteadOfHanging() async throws {
+        let model = SildModel(config: SildConfig(
+            baseUrl: "http://127.0.0.1:1",
+            tokenProvider: ClosureTokenProvider {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+                return "never-arrives"
+            },
+            userId: "u_model_close",
+            metadata: [:],
+            uploadSizeLimitBytes: 1024
+        ))
+        model.start()
+        model.beginDraft()
+
+        let resumed = expectation(description: "the abandoned send resumes")
+        let outcome = SendOutcomeBox()
+        Task {
+            outcome.value = await model.send("hello", attachments: [])
+            resumed.fulfill()
+        }
+
+        try? await Task.sleep(nanoseconds: 200_000_000) // let it reach the token request
+        model.close()
+
+        await fulfillment(of: [resumed], timeout: 5)
+        XCTAssertEqual(outcome.value, false, "an abandoned send must report failure")
+    }
+
     // Kotlin drops the callback when its scope is cancelled, so closing mid-flight must
     // still complete the Swift await — otherwise the caller waits forever.
     //
@@ -96,4 +126,8 @@ final class SildCoreSmokeTests: XCTestCase {
 /// Carries the awaited outcome out of the detached task.
 private final class OutcomeBox: @unchecked Sendable {
     var value: Result<String?, Error>?
+}
+
+private final class SendOutcomeBox: @unchecked Sendable {
+    var value: Bool?
 }
