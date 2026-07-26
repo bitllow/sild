@@ -1,0 +1,120 @@
+name: sdk-release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Builds the iOS binary artifact for a tag, rewrites Package.swift's binaryTarget to
+# the release URL + checksum, and moves the tag onto that commit — so `git checkout
+# vX.Y.Z` (and SPM resolving the tag) gets a package that actually points at the asset.
+# The committed default stays the local path, for day-to-day development.
+jobs:
+  ios-xcframework:
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag is moved onto a new commit, so we need real history.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
+
+      # A tag that disagrees with the shipped version would publish an asset whose
+      # SDK_VERSION lies about itself — catch it before anything is built.
+      - name: Check the tag matches the SDK version
+        working-directory: sdks/kotlin
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          gradle_version=$(./gradlew -q :core:properties --console=plain \
+            | awk -F': ' '/^version: /{print $2}')
+          sdk_version=$(sed -n 's/.*SDK_VERSION = "\(.*\)".*/\1/p' \
+            core/src/commonMain/kotlin/io/sild/core/Version.kt)
+          echo "tag=$tag gradle=$gradle_version SDK_VERSION=$sdk_version"
+          [ "$tag" = "$gradle_version" ] && [ "$tag" = "$sdk_version" ] || {
+            echo "::error::tag $tag does not match gradle $gradle_version / SDK_VERSION $sdk_version"
+            exit 1
+          }
+
+      - name: Assemble the XCFramework
+        working-directory: sdks/kotlin
+        run: ./gradlew :core:assembleSildCoreReleaseXCFramework
+
+      # Normalized so the same framework always yields the same checksum: fixed
+      # timestamps, sorted entry order, and no uid/gid or extra-attribute records.
+      - name: Zip and checksum
+        id: pack
+        run: |
+          cd sdks/kotlin/core/build/XCFrameworks/release
+          find SildCore.xcframework -exec touch -h -t 198001010000 {} +
+          find SildCore.xcframework -print | sort | zip -qXy@ "$GITHUB_WORKSPACE/SildCore.xcframework.zip"
+          cd "$GITHUB_WORKSPACE"
+          checksum=$(swift package compute-checksum SildCore.xcframework.zip)
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          echo "url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/SildCore.xcframework.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Point Package.swift at the release asset
+        env:
+          URL: ${{ steps.pack.outputs.url }}
+          CHECKSUM: ${{ steps.pack.outputs.checksum }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          path = "sdks/swift/Package.swift"
+          src = open(path).read()
+          local = re.compile(r'\.binaryTarget\(\s*name: "SildCore",\s*path: "[^"]*"\s*\)')
+          found = local.findall(src)
+          if len(found) != 1:
+              sys.exit(f"Package.swift: expected exactly one local-path binaryTarget, found {len(found)}")
+          released = (
+              '.binaryTarget(\n'
+              '            name: "SildCore",\n'
+              f'            url: "{os.environ["URL"]}",\n'
+              f'            checksum: "{os.environ["CHECKSUM"]}"\n'
+              '        )'
+          )
+          open(path, "w").write(local.sub(lambda _: released, src, count=1))
+          PY
+          git diff --stat sdks/swift/Package.swift
+
+      - name: Commit and move the tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sdks/swift/Package.swift
+          git commit -m "release ${GITHUB_REF_NAME}: point SildCore at the release asset"
+          # Only the tag moves; no branch is touched.
+          git tag -f "$GITHUB_REF_NAME"
+          git push -f origin "refs/tags/$GITHUB_REF_NAME"
+
+      # Rerunnable: the release may already exist from an earlier attempt.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" SildCore.xcframework.zip --clobber
+
+      - name: Summary
+        env:
+          URL: ${{ steps.pack.outputs.url }}
+          CHECKSUM: ${{ steps.pack.outputs.checksum }}
+        run: |
+          {
+            echo "## SildCore ${GITHUB_REF_NAME}"
+            echo
+            echo "- asset: \`$URL\`"
+            echo "- checksum: \`$CHECKSUM\`"
+            echo
+            echo "\`Package.swift\` at this tag points at the asset; the branch keeps the local path."
+          } >> "$GITHUB_STEP_SUMMARY"

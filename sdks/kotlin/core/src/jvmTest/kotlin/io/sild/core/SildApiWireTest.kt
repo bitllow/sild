@@ -63,6 +63,7 @@ class SildApiWireTest {
         assertEquals("Bearer tok1", server.takeRequest().getHeader("Authorization"))
         val retry = server.takeRequest()
         assertEquals("Bearer tok2", retry.getHeader("Authorization"), "the retry carries the fresh token")
+        // Pinned: Android hosts consume this variant, and the tag is already in server logs.
         assertEquals("android/$SDK_VERSION", retry.getHeader("X-Sild-SDK"))
     }
 }

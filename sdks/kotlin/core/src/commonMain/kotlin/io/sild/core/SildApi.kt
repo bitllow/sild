@@ -58,7 +58,7 @@ internal class SildApi(
             this.method = HttpMethod.parse(method)
             header(HttpHeaders.Authorization, "Bearer $tok")
             // API surface only — an extra header can break a signed upload URL.
-            header("X-Sild-SDK", "android/$SDK_VERSION")
+            header("X-Sild-SDK", "$SDK_PLATFORM/$SDK_VERSION")
             if (method == "POST") setBody(TextContent(body.orEmpty(), ContentType.Application.Json))
         }
 

@@ -3,9 +3,21 @@ name: android-sdk
 on:
   push:
     branches: [master]
-    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+    paths:
+      - "sdks/kotlin/**"
+      - "sdks/swift/**"
+      - "backend/**"
+      - ".github/workflows/android-sdk.yml"
+      # Release-workflow edits get PR CI too — its XCFramework build is this job's.
+      - ".github/workflows/sdk-release.yml"
   pull_request:
-    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+    paths:
+      - "sdks/kotlin/**"
+      - "sdks/swift/**"
+      - "backend/**"
+      - ".github/workflows/android-sdk.yml"
+      # Release-workflow edits get PR CI too — its XCFramework build is this job's.
+      - ".github/workflows/sdk-release.yml"
 
 jobs:
   # Build the Android SDK (core JAR + ui AAR + sample APK) and run the pure-JVM
@@ -135,6 +147,49 @@ jobs:
       # The Apple artifacts, which only a macOS host can build.
       - name: Publish artifacts to Maven local (smoke test packaging)
         run: ./gradlew :core:publishToMavenLocal
+
+      # Everything below proves the shipping scheme: the Swift package consumes the
+      # XCFramework exactly as a host app would, and its tests call through it into the
+      # shared Kotlin code against the same live sild-dev.
+      - name: Assemble the XCFramework
+        run: ./gradlew :core:assembleSildCoreReleaseXCFramework
+
+      # xcodebuild does not forward the job's environment into the simulator, and the
+      # TEST_RUNNER_ prefix does not reach a SwiftPM-generated scheme — so publish the
+      # variable on the booted device's launchd, which apps do inherit.
+      - name: Boot the simulator with SILD_BASE_URL
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available -j \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for v in d.values() for x in v if x['name'].startswith('iPhone')))")
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl spawn "$udid" launchctl setenv SILD_BASE_URL http://localhost:8080
+
+      - name: Swift package tests on the iOS simulator (against sild-dev)
+        working-directory: sdks/swift
+        # Keep in step with the tests in SildCoreSmokeTests.
+        env:
+          EXPECTED_TESTS: "3"
+        run: |
+          set -o pipefail
+          xcodebuild test -scheme Sild \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            | tee /tmp/xcodebuild.log
+          # One test skipping (SILD_BASE_URL never reached the simulator) must not hide
+          # behind another passing, so pin the count and forbid skips outright.
+          line=$(grep -E "Executed [0-9]+ test" /tmp/xcodebuild.log | tail -1)
+          [ -n "$line" ] || { echo "::error::xcodebuild printed no test summary"; exit 1; }
+          ran=$(sed -n 's/.*Executed \([0-9]*\) test.*/\1/p' <<<"$line")
+          skipped=$(sed -n 's/.*with \([0-9]*\) test[s]* skipped.*/\1/p' <<<"$line")
+          echo "ran=$ran skipped=${skipped:-0} ($line)"
+          [ "$ran" = "$EXPECTED_TESTS" ] || {
+            echo "::error::expected $EXPECTED_TESTS Swift tests, $ran ran"; exit 1
+          }
+          [ "${skipped:-0}" = "0" ] || {
+            echo "::error::${skipped} Swift test(s) skipped — SILD_BASE_URL did not reach the simulator"
+            exit 1
+          }
 
       - name: Dump sild-dev log on failure
         if: failure()

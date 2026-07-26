@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 // :core — the Sild client: REST + realtime policy + models + brand, shared by the
@@ -19,22 +20,28 @@ fun firstAvailableIphone(): String =
         ?: error("no iPhone simulator is available")
 
 kotlin {
+
     jvmToolchain(17)
 
     jvm()
-    iosArm64()
-    iosSimulatorArm64 {
-        // The plugin's default simulator does not exist on every Xcode, and it just
-        // disables the test task when it is missing. Override with -Psild.iosDevice=... .
-        if (System.getProperty("os.name").startsWith("Mac")) testRuns.configureEach {
-            deviceId = findProperty("sild.iosDevice") as String? ?: firstAvailableIphone()
+
+    // SildCore.xcframework is what the Swift package consumes (SPM binaryTarget); the
+    // framework name is the Swift module name, so it must not drift.
+    val xcf = XCFramework("SildCore")
+    listOf(iosArm64(), iosSimulatorArm64()).forEach {
+        it.binaries.framework {
+            baseName = "SildCore"
+            isStatic = true
+            xcf.add(this)
         }
     }
 
     sourceSets {
         commonMain.dependencies {
             api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+            // api: JsonElement/JsonObject are public surface (RealtimeEnvelope.data, the
+            // member metadata fields) and a host writing its own RealtimeTransport needs them.
+            api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
             implementation("io.ktor:ktor-client-core:3.4.3")
         }
         jvmMain.dependencies {
@@ -83,6 +90,14 @@ tasks.named<Test>("jvmTest") {
 }
 
 tasks.withType<KotlinNativeSimulatorTest>().configureEach {
+    // The plugin's default simulator does not exist on every Xcode, and it just
+    // disables the test task when it is missing. Override with -Psild.iosDevice=... .
+    // Lazy: querying simctl while configuring would break every other task on a Mac
+    // with no simulator installed.
+    device.set(
+        providers.gradleProperty("sild.iosDevice")
+            .orElse(providers.provider { firstAvailableIphone() }),
+    )
     // simctl only forwards variables to the spawned test binary under this prefix.
     environment("SIMCTL_CHILD_SILD_BASE_URL", sildBaseUrl)
     testLogging { events("passed", "failed", "skipped") }

@@ -70,7 +70,8 @@ class SildApiTest {
         assertEquals(2, minted.size, "the 401 forces exactly one refresh")
         assertEquals("Bearer tok1", header(0, "Authorization"))
         assertEquals("Bearer tok2", header(1, "Authorization"), "the retry carries the fresh token")
-        assertEquals("android/$SDK_VERSION", header(1, "X-Sild-SDK"))
+        assertEquals("$SDK_PLATFORM/$SDK_VERSION", header(1, "X-Sild-SDK"))
+        assertTrue(SDK_PLATFORM.isNotEmpty(), "every platform names itself in the SDK header")
     }
 
     @Test fun aSecond401IsNotRetriedAgain() = runBlockingTest {
