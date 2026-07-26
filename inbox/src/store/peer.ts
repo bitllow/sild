@@ -1,5 +1,11 @@
 import { makeAutoObservable, runInAction } from "mobx";
-import { adminApi, type ApiMember, type ApiMessage, type ApiQueueConversation } from "@/api/admin";
+import {
+  adminApi,
+  type ApiMember,
+  type ApiMessage,
+  type ApiQueueConversation,
+  type ConversationParams,
+} from "@/api/admin";
 import type { RealtimeEnvelope } from "@/api/realtime";
 import type { MessageAttachment, Presence } from "@/components/ds";
 import { AttachmentQueue } from "./attachments";
@@ -127,12 +133,17 @@ export class PeerStore {
   private unreadByConv = new Map<string, number>();
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private searchSeq = 0;
+  // Bumped whenever the list identity changes (role filter, query). A page
+  // in flight when it changes belongs to the previous filter set, so appending it
+  // would mix results and hand back a cursor minted for a different fingerprint.
+  private listSeq = 0;
 
   constructor(private root: PeerRoot) {
     makeAutoObservable(this, { owns: false, atts: false });
   }
 
   reset() {
+    this.retireInFlight(); // or a response in flight lands into the cleared store
     this.conversations = [];
     this.activeId = null;
     this.loaded = false;
@@ -140,18 +151,24 @@ export class PeerStore {
     this.searchOpen = false;
     this.roleFilter = null;
     this.searching = false;
-    this.cursor = null;
-    this.hasMore = false;
     this.composer = "";
     this.sendError = null;
     this.atts.reset();
     this.unreadByConv.clear();
   }
 
-  // A text search is active — the list shows server search hits, not the paginated
-  // default list, so infinite scroll is paused (search has its own result set).
+  // A text search is active. Search is a filter on the same list endpoint, so it
+  // pages the same way — only the filter set differs.
   private get isSearching(): boolean {
     return this.query.trim().length > 0;
+  }
+
+  // listParams is the filter set for the current mode. A cursor is bound to a
+  // fingerprint of these, so the continuation MUST send exactly what the first
+  // page sent — building both from here is what keeps them identical.
+  private listParams(): ConversationParams {
+    if (this.isSearching) return { kind: "peer", q: this.query.trim() };
+    return { kind: "peer", role: this.roleFilter || undefined };
   }
 
   // owns reports whether a conversation id belongs to the peer surface, so the
@@ -163,11 +180,10 @@ export class PeerStore {
   // loadConversations (re)loads the FIRST page of the default list, honoring the
   // active role filter. Server-side keyset pagination — not a fetch-all.
   loadConversations = async () => {
+    const seq = ++this.listSeq;
     try {
-      const { items, next_cursor, has_more } = await adminApi.listConversations({
-        kind: "peer",
-        role: this.roleFilter || undefined,
-      });
+      const { items, next_cursor, has_more } = await adminApi.listConversations(this.listParams());
+      if (seq !== this.listSeq) return; // a newer load superseded this one
       runInAction(() => {
         this.conversations = items.map((c) => this.buildRow(c));
         this.cursor = has_more ? next_cursor : null;
@@ -182,16 +198,19 @@ export class PeerStore {
     }
   };
 
-  // loadMore appends the next keyset page (infinite scroll), default list only.
+  // loadMore appends the next keyset page (infinite scroll), search included.
   loadMore = async () => {
-    if (this.isSearching || !this.hasMore || this.loadingMore || !this.cursor) return;
-    this.loadingMore = true;
+    if (!this.hasMore || this.loadingMore || !this.cursor) return;
+    const seq = this.listSeq;
+    runInAction(() => {
+      this.loadingMore = true;
+    });
     try {
       const { items, next_cursor, has_more } = await adminApi.listConversations({
-        kind: "peer",
-        role: this.roleFilter || undefined,
+        ...this.listParams(),
         cursor: this.cursor,
       });
+      if (seq !== this.listSeq) return; // filter changed mid-flight — drop this page
       runInAction(() => {
         const seen = new Set(this.conversations.map((c) => c.id));
         for (const it of items) {
@@ -199,28 +218,33 @@ export class PeerStore {
         }
         this.cursor = has_more ? next_cursor : null;
         this.hasMore = has_more;
-        this.loadingMore = false;
       });
     } catch {
+      /* transient; user can scroll again to retry */
+    } finally {
+      // Unconditional: a superseded page still owns the flag, and nothing else
+      // clears it — leaving it set wedges pagination for good.
       runInAction(() => {
         this.loadingMore = false;
       });
     }
   };
 
-  // Search is a filter on the same list endpoint, so it returns full rows.
+  // Search is a filter on the same list endpoint, so it returns full rows and
+  // pages like any other list.
   private runSearch = async (q: string) => {
     const seq = ++this.searchSeq;
+    this.listSeq++; // a page in flight for the previous query must not land here
     runInAction(() => {
       this.searching = true;
     });
     try {
-      const { items } = await adminApi.listConversations({ kind: "peer", q });
+      const { items, next_cursor, has_more } = await adminApi.listConversations({ kind: "peer", q });
       if (seq !== this.searchSeq) return; // stale response
       runInAction(() => {
         this.conversations = items.map((it) => this.buildRow(it, it.snippet));
-        this.cursor = null;
-        this.hasMore = false;
+        this.cursor = has_more ? next_cursor : null;
+        this.hasMore = has_more;
         this.searching = false;
       });
     } catch {
@@ -503,6 +527,9 @@ export class PeerStore {
     this.query = v;
     this.searchOpen = true;
     if (this.searchTimer) clearTimeout(this.searchTimer);
+    // query updates on every keystroke while runSearch is debounced, so anything
+    // in flight belongs to text the user has already replaced.
+    this.retireInFlight();
     if (!v.trim()) {
       this.searching = false;
       void this.loadConversations();
@@ -510,6 +537,16 @@ export class PeerStore {
     }
     this.searchTimer = setTimeout(() => void this.runSearch(v), 280);
   };
+
+  // retireInFlight abandons every request already on the wire and drops the
+  // cursor they were positioned by. BOTH generations: a search response landing
+  // after the default list was restored would replace it with stale hits.
+  private retireInFlight() {
+    this.listSeq++;
+    this.searchSeq++;
+    this.cursor = null;
+    this.hasMore = false;
+  }
   openSearch = () => {
     this.searchOpen = true;
   };
@@ -521,10 +558,12 @@ export class PeerStore {
     this.roleFilter = role;
     this.query = "";
     this.searchOpen = false;
+    this.retireInFlight();
     void this.loadConversations();
   };
   clearRole = () => {
     this.roleFilter = null;
+    this.retireInFlight();
     void this.loadConversations();
   };
 

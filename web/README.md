@@ -17,6 +17,9 @@ a **custom element + shadow DOM**, so it can't clash with the host page's styles
 <script src="https://chat.sild.io/widget.js"></script>
 <script>
   Sild.init({
+    // Required: identifies the tenant for the unauthenticated brand load.
+    // Find it in the inbox under Settings → Installation.
+    appId: 'app_...',
     // mints a user JWT via the host backend (which holds the API key);
     // the browser never sees the API key. A guest is the same call with a
     // host-generated id.

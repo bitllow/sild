@@ -19,15 +19,27 @@ import (
 func (h *Handler) postPeerMessage(c *gin.Context) {
 	convID := c.Param("id")
 	var req struct {
-		Body        string `json:"body"`
-		ClientMsgID string `json:"client_msg_id"`
+		Body        string            `json:"body"`
+		ClientMsgID string            `json:"client_msg_id"`
+		Visibility  models.Visibility `json:"visibility"`
 		Attachments []struct {
 			ObjectKey   string `json:"object_key"`
 			Disposition string `json:"disposition"`
 		} `json:"attachments"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	// One URL, one body: the shared send path takes visibility, so this branch must
+	// accept it too. PeerAgentSend does not carry the field, so an unchecked value
+	// would be dropped and the message sent participant-visible regardless.
+	//
+	// Peer conversations carry no internal side. Refused rather than downgraded, or an
+	// operator would believe they left a private note in a chat the end user reads.
+	if !req.Visibility.Valid() || req.Visibility == models.VisibilityInternal {
+		httpx.FieldError(c, http.StatusBadRequest, httpx.CodeBadRequest,
+			"a peer conversation has no internal side",
+			map[string]string{"visibility": "only \"participants\" is accepted here"})
 		return
 	}
 	tenant := apiutil.Tenant(c)

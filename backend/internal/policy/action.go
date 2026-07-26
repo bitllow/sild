@@ -54,8 +54,6 @@ const (
 	WebhooksManage         Action = "webhooks.manage"
 	WebhooksReadDeliveries Action = "webhooks.read_deliveries"
 	TeamManage             Action = "team.manage"
-
-	EmailInbound Action = "email.inbound"
 )
 
 // grant lists which principals hold an action — the only place roles map to
@@ -114,13 +112,19 @@ var capabilities = map[Action]grant{
 	WebhooksManage:         {adminPriv: true},
 	WebhooksReadDeliveries: {adminPriv: true},
 	TeamManage:             {adminPriv: true},
-
-	EmailInbound: {},
 }
 
 // Actions returns every declared action, so the route manifest can be checked
 // against the catalog.
 func Actions() []Action { return sortedActions() }
+
+// RequiresPrivilegedAdmin reports that only an owner/admin session carries the
+// action, so a route guarding it must refuse a plain agent. Exported for the
+// manifest conformance test, which asserts the mounted guard against it.
+func RequiresPrivilegedAdmin(a Action) bool {
+	g, ok := capabilities[a]
+	return ok && g.adminPriv && !g.admin && !g.apiKey && !g.user
+}
 
 func sortedActions() []Action {
 	out := make([]Action, 0, len(capabilities))

@@ -300,6 +300,12 @@ export const adminApi = {
   },
   getConversation: (id: string) => api.get<ApiConversation>(`/conversations/${id}`),
   listMessages: (id: string) => api.get<ApiMessagesPage>(`/conversations/${id}/messages?limit=100`),
+  // ?since= is a sync read, not a page: oldest-first, next_cursor always null, and
+  // continuation is `since=<last id received>` while has_more holds.
+  catchUpMessages: (id: string, since: string, limit = 100) =>
+    api.get<ApiMessagesPage>(
+      `/conversations/${id}/messages?since=${encodeURIComponent(since)}&limit=${limit}`
+    ),
   postMessage: (
     id: string,
     body: string,

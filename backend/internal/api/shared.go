@@ -272,8 +272,7 @@ func (h *Handler) markRead(c *gin.Context) {
 	var req struct {
 		LastReadMessageID string `json:"last_read_message_id"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	if err := h.svc.MarkRead(c.Request.Context(), apiutil.Tenant(c), convID, apiutil.CallerParticipant(c), req.LastReadMessageID); err != nil {
@@ -322,8 +321,7 @@ func (h *Handler) issueUpload(c *gin.Context) {
 		SizeBytes int64  `json:"size_bytes"`
 		Filename  string `json:"filename"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	signed, err := h.svc.IssueUpload(c.Request.Context(), apiutil.Tenant(c), domain.IssueUploadInput{

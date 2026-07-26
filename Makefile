@@ -1,6 +1,6 @@
 # Sild monorepo orchestrator. Delegates to each component's own Makefile.
 
-.PHONY: build test dev dev-infra web-build backend-build backend-test backend-migrate up down logs
+.PHONY: build test dev dev-infra web-build backend-build backend-test backend-migrate up down logs docs openapi
 
 # Build the web drop-in FIRST so the backend embeds the current bundle (§9),
 # then build the Go binaries.
@@ -50,6 +50,25 @@ dev-infra:
 	  sleep 1; \
 	done
 	@echo "postgres + redis healthy."
+
+# ── API docs ─────────────────────────────────────────────────────────────────
+# The spec is generated from the route manifest, so it is only ever as current as
+# the running binary — these read it from the server rather than a checked-in copy.
+#
+#     make docs        # open the rendered docs (needs a server; `make dev`)
+#     make openapi     # print the spec, e.g. `make openapi | jq .paths`
+SILD_URL ?= http://localhost:8080
+
+docs:
+	@curl -fsS -o /dev/null "$(SILD_URL)/openapi.json" 2>/dev/null || \
+	  { echo "no server at $(SILD_URL) — start one with 'make dev', or set SILD_URL"; exit 1; }
+	@echo "opening $(SILD_URL)/docs"
+	@if command -v open >/dev/null 2>&1; then open "$(SILD_URL)/docs"; \
+	 elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$(SILD_URL)/docs"; \
+	 else echo "open it yourself: $(SILD_URL)/docs"; fi
+
+openapi:
+	@curl -fsS "$(SILD_URL)/openapi.json"
 
 # Full local stack: Postgres + Redis (+ the backend binaries).
 up:   ; docker compose up -d

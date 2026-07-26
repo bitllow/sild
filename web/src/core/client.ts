@@ -212,6 +212,9 @@ export class SildClient implements WidgetClient {
   private activeNames: Record<string, string> = {};
   private token: string | null = null;
   private cf: Centrifuge | null = null;
+  // True once the socket has connected, so the first connect is not treated as a
+  // reconnect (the thread load already fetched everything).
+  private hadConnection = false;
   private listeners = new Set<() => void>();
 
   state: WidgetState = {
@@ -295,9 +298,8 @@ export class SildClient implements WidgetClient {
 
   // fetchPublicBrand loads branding unauthenticated, keyed by the host-embedded
   // app id (= tenant id). No Authorization header → no token, no user record.
-  async fetchPublicBrand(appId?: string): Promise<BrandResponse> {
-    const q = appId ? `?app_id=${encodeURIComponent(appId)}` : "";
-    const res = await fetch(this.base + "/v1/brands/active" + q);
+  async fetchPublicBrand(appId: string): Promise<BrandResponse> {
+    const res = await fetch(this.base + `/v1/brands/active?app_id=${encodeURIComponent(appId)}`);
     if (!res.ok) throw new Error("brand fetch failed");
     return (await res.json()) as BrandResponse;
   }
@@ -326,11 +328,61 @@ export class SildClient implements WidgetClient {
     this.cf = new Centrifuge([{ transport: "sse", endpoint: this.base + "/v1/ws/sse" }], {
       getToken: async () => this.getToken(true),
     });
-    this.cf.on("connected", () => this.patch({ connection: "connected" }));
+    this.cf.on("connected", () => {
+      const reconnected = this.state.connection !== "connected";
+      this.patch({ connection: "connected" });
+      // A publication missed while the socket was down is never replayed, so read
+      // the gap back (§5.4). Not on the first connect: the thread load covers it.
+      if (reconnected && this.hadConnection) void this.catchUp();
+      this.hadConnection = true;
+    });
     this.cf.on("connecting", () => this.patch({ connection: "connecting" }));
     this.cf.on("disconnected", () => this.patch({ connection: "disconnected" }));
     this.cf.on("publication", (ctx) => this.onEvent(ctx.data as Envelope));
     this.cf.connect();
+  }
+
+  // catchUp is the spec §5.4 reconnect sequence: re-fetch the conversation list
+  // (to pick up conversations added while offline), THEN drain ?since= for the
+  // thread whose messages we hold. Ordered, not concurrent — openConversation and
+  // the author-name lookup read off the list rows.
+  //
+  // Only the active thread is drained because it is the only one whose messages
+  // this client retains; the list refetch already carries every other
+  // conversation's current preview and unread state.
+  private async catchUp() {
+    await this.loadConversations().catch(() => {});
+    await this.catchUpActiveThread();
+  }
+
+  // catchUpActiveThread drains ?since= until has_more clears. One page is not
+  // enough: a gap longer than the limit would leave a hole mid-thread, and the
+  // continuation is `since=<last id received>`, never the original id.
+  private async catchUpActiveThread() {
+    const id = this.state.activeId;
+    if (!id) return;
+    let since = this.state.messages[this.state.messages.length - 1]?.id;
+    if (!since) return;
+    try {
+      for (;;) {
+        const page = await this.api<ApiPage<ApiMessage>>(
+          "GET",
+          `/conversations/${id}/messages?since=${encodeURIComponent(since)}&limit=100`
+        );
+        const items = page.items || [];
+        if (!items.length) return;
+        if (this.state.activeId !== id) return; // switched threads mid-flight
+        const have = new Set(this.state.messages.map((m) => m.id));
+        const fresh = items
+          .filter((m) => !have.has(m.id))
+          .map((m) => mapMessage(m, this.selfId, this.activeNames));
+        if (fresh.length) this.patch({ messages: [...this.state.messages, ...fresh] });
+        since = items[items.length - 1].id;
+        if (!page.has_more) return;
+      }
+    } catch {
+      /* the next reconnect retries from the same id */
+    }
   }
 
   private onEvent(env: Envelope) {

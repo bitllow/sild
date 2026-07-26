@@ -68,7 +68,10 @@ func (h *Handler) adminPasswordLogin(c *gin.Context) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Email == "" || req.Password == "" {
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if req.Email == "" || req.Password == "" {
 		httpx.BadRequest(c, "email and password are required")
 		return
 	}
@@ -112,8 +115,7 @@ func (h *Handler) setAgentPassword(c *gin.Context) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	// A password reset is account takeover by another name.
@@ -156,7 +158,9 @@ func (h *Handler) createAPIKey(c *gin.Context) {
 	var req struct {
 		Label string `json:"label"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	if !httpx.DecodeJSONOptional(c, &req) {
+		return
+	}
 	full, rec, err := h.svc.CreateAPIKey(c.Request.Context(), apiutil.Tenant(c), req.Label)
 	if err != nil {
 		apiutil.Fail(c, err)
@@ -198,8 +202,7 @@ func (h *Handler) createWebhook(c *gin.Context) {
 		URL    string   `json:"url"`
 		Events []string `json:"events"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	ep, err := h.svc.CreateWebhook(c.Request.Context(), apiutil.Tenant(c), req.URL, req.Events)
@@ -250,7 +253,20 @@ func (h *Handler) listDeliveries(c *gin.Context) {
 		return
 	}
 	sort.Slice(ds, func(i, j int) bool { return ds[i].ID > ds[j].ID })
-	apiutil.RespondPage(c, resourceDeliveries, store.SlicePage(ds, page, func(d *models.WebhookDelivery) string { return d.ID }))
+	res := store.SlicePage(ds, page, func(d *models.WebhookDelivery) string { return d.ID })
+	// Rendered, not serialized from the model: the row has no JSON tags, so it
+	// would go out with Go field names and carry tenant_id to the client.
+	items := make([]gin.H, 0, len(res.Items))
+	for _, d := range res.Items {
+		items = append(items, gin.H{
+			"id": d.ID, "event_id": d.EventID, "event_type": d.EventType,
+			"attempt": d.Attempt, "status": d.Status, "status_code": d.StatusCode,
+			"response": d.Response, "created_at": d.CreatedAt,
+		})
+	}
+	apiutil.RespondPage(c, resourceDeliveries, store.Page[gin.H]{
+		Items: items, NextCursor: res.NextCursor, HasMore: res.HasMore,
+	})
 }
 
 func (h *Handler) listTeam(c *gin.Context) {
@@ -280,7 +296,10 @@ func (h *Handler) updateWebhook(c *gin.Context) {
 	var req struct {
 		Active *bool `json:"active"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Active == nil {
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if req.Active == nil {
 		httpx.BadRequest(c, "active is required")
 		return
 	}
@@ -296,8 +315,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		PlatformRole *models.PlatformRole `json:"platform_role"`
 		PeerAccess   *bool                `json:"peer_access"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	if req.PlatformRole == nil && req.PeerAccess == nil {
@@ -337,8 +355,7 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 		LastName     string              `json:"last_name"`
 		PlatformRole models.PlatformRole `json:"platform_role"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	if !h.guardOwnerMutation(c, "", &req.PlatformRole) {

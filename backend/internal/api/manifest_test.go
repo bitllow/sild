@@ -31,7 +31,7 @@ func TestManifestMatchesMountedRoutes(t *testing.T) {
 // declaration is describing a guard that cannot exist.
 func TestManifestActionsExistInPolicy(t *testing.T) {
 	known := policy.Actions()
-	for _, r := range routeManifest {
+	for _, r := range routeManifest() {
 		if r.Class == classAction && len(r.Actions) == 0 {
 			t.Errorf("%s %s is action-classified but names no action", r.Method, r.Path)
 		}
@@ -46,7 +46,7 @@ func TestManifestActionsExistInPolicy(t *testing.T) {
 // Every action route names the principals that may call it — the fact the path
 // used to carry and no longer does.
 func TestManifestActionRoutesDeclarePrincipals(t *testing.T) {
-	for _, r := range routeManifest {
+	for _, r := range routeManifest() {
 		if r.Class == classAction && len(r.Principals) == 0 {
 			t.Errorf("%s %s is action-classified but names no principals", r.Method, r.Path)
 		}

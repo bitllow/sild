@@ -107,9 +107,18 @@ func (h *Handler) getActiveBrand(c *gin.Context) {
 		return
 	}
 
-	// An empty app_id resolves against a single-tenant deployment and 404s when
-	// ambiguous, so the dev widget works without one.
-	b, err := h.svc.PublicBrand(c.Request.Context(), c.Query("app_id"))
+	// app_id is REQUIRED without a credential. Resolving a sole tenant instead
+	// would make the response depend on how many tenants the deployment happens to
+	// hold, and let an anonymous caller read tenant data without naming the
+	// application it belongs to.
+	appID := c.Query("app_id")
+	if appID == "" {
+		httpx.FieldError(c, http.StatusBadRequest, httpx.CodeBadRequest,
+			"app_id is required without a credential",
+			map[string]string{"app_id": "the tenant's app id; find it in Settings → Installation"})
+		return
+	}
+	b, err := h.svc.PublicBrand(c.Request.Context(), appID)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return

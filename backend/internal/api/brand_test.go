@@ -203,9 +203,15 @@ func TestPublicBrandUnauthenticated(t *testing.T) {
 	if got.Config.Brand != "#2563FD" {
 		t.Fatalf("default brand not returned: %+v", got.Config)
 	}
-	// Single-tenant dev: app_id optional (ambiguous only with several tenants).
-	if w = h.Request("GET", "/v1/brands/active").Do(); w.Code != http.StatusOK {
-		t.Fatalf("public brand (no app_id): %d %s", w.Code, w.Body)
+	// app_id is required, never inferred from a sole tenant: otherwise the response
+	// would depend on how many tenants the deployment holds, and an anonymous
+	// caller could read tenant data without naming the application.
+	w = h.Request("GET", "/v1/brands/active").Do()
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("public brand without app_id: expected 400, got %d %s", w.Code, w.Body)
+	}
+	if !strings.Contains(w.Body.String(), `"app_id"`) {
+		t.Errorf("the 400 must name the missing field, got %s", w.Body)
 	}
 	// Unknown tenant → 404.
 	if w = h.Request("GET", "/v1/brands/active?app_id=t_does_not_exist").Do(); w.Code != http.StatusNotFound {

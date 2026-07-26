@@ -66,6 +66,18 @@ func main() {
 			c.Data(200, "text/html; charset=utf-8", webasset.Demo)
 		})
 
+		// The demo page needs the app id the same way a real host page does — it is
+		// required on the anonymous brand read. A production host hardcodes the
+		// value from Settings → Installation; the demo asks the dev server.
+		srv.Engine().GET("/v1/dev/app-id", func(c *gin.Context) {
+			ids, err := st.Tenants().AllIDs(c.Request.Context())
+			if err != nil || len(ids) == 0 {
+				c.JSON(500, gin.H{"error": "no tenant"})
+				return
+			}
+			c.JSON(200, gin.H{"app_id": ids[0]})
+		})
+
 		// Dev-only token mint standing in for the host backend's tokenProvider
 		// endpoint: mints a user JWT for a (guest) id in the dev tenant. Never
 		// exposes the API key. Production hosts mint via POST /v1/tokens.

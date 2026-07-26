@@ -6,6 +6,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -41,7 +42,11 @@ class SildClient(
     private val realtime = SildRealtime(
         cfg = cfg,
         scope = scope,
-        onConnection = { conn -> _state.update { it.copy(connection = conn) } },
+        onConnection = { conn ->
+            val reconnected = conn == ConnectionState.CONNECTED &&
+                _state.getAndUpdate { it.copy(connection = conn) }.connection != ConnectionState.CONNECTED
+            if (reconnected) catchUpOnReconnect()
+        },
         onEnvelope = { onEvent(it) },
     )
 
@@ -198,6 +203,56 @@ class SildClient(
 
     /** Whether [id] is the open conversation — guards async results that land after
      *  the user switched away. */
+
+    /** The reconnect sequence (§5.4): re-fetch the conversation list, then drain
+     *  ?since= for the thread whose messages this client holds.
+     *
+     *  Reconnecting only re-establishes subscriptions; anything published while the
+     *  connection was down was never sent to anyone and is not replayed. Without this
+     *  the gap is permanent until the thread is reopened.
+     *
+     *  Drains rather than taking one page: has_more means the gap is longer than the
+     *  limit, and stopping there would leave a hole in the middle of the thread.
+     *
+     *  Only the active thread is drained: it is the only one whose messages are in
+     *  state, and the list refetch already carries every other conversation's
+     *  current preview and unread count.
+     */
+    private fun catchUpOnReconnect() {
+        scope.launch {
+            // The list FIRST, awaited: a conversation added while offline is invisible
+            // until its row is refetched, and namesOf() resolves authors off those
+            // rows — draining concurrently would label the gap's messages against a
+            // stale member set.
+            runCatching { loadConversations() }
+
+            val id = _state.value.activeId ?: return@launch
+            // No messages yet means the thread load will fetch them anyway, and there
+            // is no id to resume from.
+            var since = _state.value.messages.lastOrNull()?.id ?: return@launch
+            runCatching {
+                while (true) {
+                    val page = api.catchUpMessages(id, since)
+                    if (page.items.isEmpty()) return@runCatching
+                    // The user may have switched threads while this was in flight.
+                    if (!isActive(id)) return@runCatching
+                    val names = namesOf(id)
+                    _state.update { s ->
+                        val have = s.messages.mapTo(HashSet()) { m -> m.id }
+                        val fresh = page.items.filterNot { it.id in have }.map { mapMessage(it, names) }
+                        if (fresh.isEmpty()) s else s.copy(messages = s.messages + fresh)
+                    }
+                    since = page.items.last().id
+                    if (!page.hasMore) return@runCatching
+                }
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                // A failed catch-up must not replace the thread with an error banner;
+                // the next reconnect tries again from the same id.
+            }
+        }
+    }
+
     private fun isActive(id: String): Boolean = _state.value.activeId == id
 
     /** external_user_id → display name for [id]'s members. Read at use time so an

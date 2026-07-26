@@ -206,23 +206,18 @@ func (s *Service) ActiveBrand(ctx context.Context, tenantID string) (Brand, erro
 
 // PublicBrand returns a tenant's active brand for the unauthenticated widget
 // load path (§9), keyed by the host-embedded app id (= tenant id). No token, no
-// user/session record — branding is public. In single-tenant dev the app id may
-// be omitted.
+// user/session record — branding is public.
+//
+// The app id names the tenant outright; the caller rejects an empty one, so this
+// never guesses from how many tenants happen to exist.
 func (s *Service) PublicBrand(ctx context.Context, appID string) (Brand, error) {
-	tenantID := appID
-	if tenantID == "" {
-		ids, err := s.store.Tenants().AllIDs(ctx)
-		if err != nil {
-			return Brand{}, err
-		}
-		if len(ids) != 1 {
-			return Brand{}, ErrNotFound // app_id is required when multiple tenants exist
-		}
-		tenantID = ids[0]
-	} else if _, err := s.store.Tenants().Get(ctx, tenantID); err != nil {
+	if appID == "" {
+		return Brand{}, ErrNotFound
+	}
+	if _, err := s.store.Tenants().Get(ctx, appID); err != nil {
 		return Brand{}, mapStoreErr(err)
 	}
-	return s.ActiveBrand(ctx, tenantID)
+	return s.ActiveBrand(ctx, appID)
 }
 
 // SaveBrands replaces the tenant's whole brand set with the staged edits from

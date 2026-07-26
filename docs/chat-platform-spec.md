@@ -289,9 +289,11 @@ so it is exempt from the list contract.
 
 `GET /v1/brands/active` is public when keyed by `app_id` and tenant-scoped when a
 credential is present. Credential first; an authenticated caller's `app_id` is
-ignored. A credential that is present but **invalid** is a 401 — never a silent
-downgrade to the public form, which would turn an expired session into a quiet
-tenant switch. Public responses are `Cache-Control: public, max-age=60`;
+ignored. Without a credential `app_id` is **required** — a missing one is a 400,
+never a sole-tenant guess, or the response would depend on how many tenants the
+deployment happens to hold. A credential that is present but **invalid** is a 401 —
+never a silent downgrade to the public form, which would turn an expired session
+into a quiet tenant switch. Public responses are `Cache-Control: public, max-age=60`;
 authenticated ones are `private, no-store`, both with
 `Vary: Authorization, Cookie`.
 
@@ -388,9 +390,17 @@ Envelope: `{ "type": "...", "conversation_id": "c_abc", "data": { }, "ts": 17300
 
 ### 5.4 Reconnect & catch-up (the only correctness mechanism)
 The socket guarantees nothing — a missed event is invisible until reconnect. The SDK MUST, on every
-(re)connect: re-auth (fresh JWT via `tokenProvider`) → re-fetch `GET /v1/conversations` (to pick up
-conversations added while offline) → `GET /v1/conversations/:id/messages?since=<last_seen>` per
-conversation. Multi-node fan-out is handled by Centrifuge's Redis broker.
+(re)connect, in this order: re-auth (fresh JWT via `tokenProvider`) → re-fetch
+`GET /v1/conversations` (to pick up conversations added while offline) →
+`GET /v1/conversations/:id/messages?since=<last_seen>` for **each conversation whose messages the
+SDK is holding**. Multi-node fan-out is handled by Centrifuge's Redis broker.
+
+Catch-up repairs client state; it is not a history fetch. A conversation the SDK holds no messages
+for has no `<last_seen>` to resume from, and its refreshed list row already carries the current
+preview, activity and unread count — so nothing is dropped by skipping it. Opening such a
+conversation later fetches its thread the normal way, which is bounded by `limit` exactly as it
+would be with no outage at all: reading further back is pagination (`?cursor=`), a separate
+mechanism from catch-up.
 
 **`?since=` is a sync read, not a page.** It returns everything after a message id,
 oldest-first, bounded by `limit`, in the standard envelope with `next_cursor: null`.
@@ -406,7 +416,7 @@ unbounded-looking `after=` did at its hidden 500-row cap.
 - Fan-out only to members with **no live connection** (Centrifuge presence) — connected clients already
   got the event; no double-notify.
 - Payload is a nudge: `{ conversation_id, message_id, preview?, unread_count }`. Body inclusion is a
-  per-tenant flag. SDK `onPush` builds/suppresses the notification; tap → open → `after=` catch-up.
+  per-tenant flag. SDK `onPush` builds/suppresses the notification; tap → open → `since=` catch-up.
 - Transport: FCM (Android/web) + APNs (iOS).
 
 ### 5.6 Internal notes — enforced by the channel split
@@ -502,6 +512,9 @@ distribution modes.
 <script src="https://chat.sild.io/widget.js"></script>
 <script>
   Sild.init({
+    // REQUIRED: the tenant's app id, for the unauthenticated brand load. Surfaced in
+    // the inbox under Settings → Installation; grants no access on its own.
+    appId: 'app_...',
     // tokenProvider hits the host's endpoint, which mints a user token via the secret key.
     // For a guest, that endpoint mints a token for a host-generated id — same call, no special key.
     tokenProvider: () => fetch('/wp-json/sild/token').then(r => r.json()).then(d => d.token),
@@ -561,7 +574,7 @@ client.registerPush(token: String, platform: ios|android)   // call on connect +
 client.deregisterPush(token: String)                         // call on logout
 client.onPush(handler: (PushPayload) -> Notification?)       // build/customize notification; nil = suppress
 // PushPayload = { conversationId, messageId, preview?, unreadCount }
-// on tap → client.conversation(id).open() runs the after= catch-up automatically
+// on tap → client.conversation(id).open() runs the since= catch-up automatically
 
 // events (delegate / listener / flow)
 onMessage(Message)              // Message.attachments[] = { objectKey, disposition, mimeType, url }
@@ -573,7 +586,7 @@ onConnectionStateChange(state)
 ```
 
 Reconnect/catch-up is handled inside the SDK (subscriptions are server-side; the SDK just re-auths and
-runs the `after=` fetch). Idempotency via
+runs the `since=` fetch). Idempotency via
 `clientMsgId`.
 
 **Rollout:** the SDK's first target is the **support client** (open request → agent answers), mirroring

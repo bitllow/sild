@@ -80,6 +80,14 @@ const (
 	VisibilityInternal     Visibility = "internal"
 )
 
+// Valid reports whether v is a known visibility. Empty is valid and means "use the
+// default" — an UNKNOWN value must never reach storage: reads disagree about it
+// (thread history matches `= participants`, unread counts match `<> internal`), so
+// it would arrive, chime and bump a badge while being absent from the thread.
+func (v Visibility) Valid() bool {
+	return v == "" || v == VisibilityParticipants || v == VisibilityInternal
+}
+
 // Channel: how a message entered/left — app (WS/SDK) | email (mail connector).
 type Channel string
 
@@ -87,6 +95,13 @@ const (
 	ChannelApp   Channel = "app"
 	ChannelEmail Channel = "email"
 )
+
+// Valid reports whether c is a known channel. Empty means "use the default"; an
+// unknown value would slip past the outbound-mail gate, which suppresses only the
+// exact email channel.
+func (c Channel) Valid() bool {
+	return c == "" || c == ChannelApp || c == ChannelEmail
+}
 
 // Disposition is an attachment render hint, not storage (§11).
 type Disposition string

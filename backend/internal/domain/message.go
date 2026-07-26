@@ -42,8 +42,17 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	if in.External == nil && in.Internal == nil {
 		return nil, invalid("a sender identity is required")
 	}
+	// Checked before the internal gate below, which only recognises the exact
+	// value: an unknown one would slip past it and become a record no participant
+	// can read but webhooks still fire for.
+	if !in.Visibility.Valid() {
+		return nil, invalid("visibility must be participants or internal")
+	}
 	if in.Visibility == "" {
 		in.Visibility = models.VisibilityParticipants
+	}
+	if !in.Channel.Valid() {
+		return nil, invalid("channel must be app or email")
 	}
 	if in.Channel == "" {
 		in.Channel = models.ChannelApp

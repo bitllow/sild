@@ -29,3 +29,8 @@ coverage.*
 .claude/
 CLAUDE.md
 tasks
+issues
+
+# npm/yarn failure logs
+npm-debug.log*
+yarn-error.log*

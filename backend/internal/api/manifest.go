@@ -1,17 +1,22 @@
 package api
 
 import (
+	"net/http"
+
+	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/principal"
+	"github.com/gin-gonic/gin"
 )
 
-// The route manifest is the declared contract for the whole surface: for every
-// route, what it authorizes and who may call it.
+// The route manifest is the whole REST surface: for every route, what it
+// authorizes, who may call it, what it will read and which limiter it answers to.
+// Mount builds the router FROM these descriptors, so a route cannot exist without
+// a declared classification — and its guard is DERIVED from the declaration
+// rather than assigned beside it.
 //
-// Dropping the /admin prefix moved authentication from the path to the route
-// group, so nothing in a URL says what guards it any more. The manifest says it
-// instead, and manifest_test.go enforces that the mounted router matches —
-// making "a moved route cannot lose its guard" mechanical rather than reviewed.
+// Dropping the /admin prefix moved authentication off the path, so nothing in a
+// URL says what protects it any more. This does.
 type routeClass string
 
 const (
@@ -26,6 +31,20 @@ const (
 	classInfrastructure routeClass = "infrastructure"
 )
 
+// rateClass names a limiter bucket. Routes sharing a class share the bucket —
+// two credential-acquisition routes with a budget each is two ways to spend one.
+type rateClass string
+
+const (
+	rateNone    rateClass = ""
+	rateAuth    rateClass = "auth"    // credential acquisition
+	rateIngress rateClass = "ingress" // unauthenticated write ingress
+)
+
+// handlerFn is a handler as a method expression, so a descriptor names the method
+// itself: `(*Handler).listConversations`.
+type handlerFn func(*Handler, *gin.Context)
+
 type routeSpec struct {
 	Method string
 	Path   string
@@ -35,6 +54,24 @@ type routeSpec struct {
 	// create_support or create_peer, PATCH /assignments/:id claim or close.
 	Actions    []policy.Action
 	Principals []principal.Kind
+	Handler    handlerFn
+	// BodyLimit caps the request body. Zero means the JSON default; the raw
+	// upload and inbound-email paths declare their own, larger cap.
+	BodyLimit int64
+	Rate      rateClass
+	// IdempotencyField names the request field that makes a repeat safe, when one
+	// exists. Conditional on purpose: `client_msg_id` is optional, so retrying
+	// WITHOUT it creates a second message — a route-level "idempotent: true" would
+	// promise something the server does not give. `Idempotency-Key` is not
+	// implemented, and is not described here until it is.
+	IdempotencyField string
+	// Success is the status a satisfied request answers with. Zero means 200 —
+	// declared rather than inferred from the method, because POST is 200, 201 and
+	// 204 across this surface and a documented status that lies is worse than none.
+	Success int
+	// Enabled gates registration on deployment shape (storage backend, dev-only
+	// login). Nil means always mounted.
+	Enabled func(*Handler) bool
 }
 
 var (
@@ -45,75 +82,189 @@ var (
 	signedOnly   = []principal.Kind{principal.KindSigned}
 )
 
-var routeManifest = []routeSpec{
-	// Infrastructure and well-known.
-	{"GET", "/.well-known/jwks.json", classInfrastructure, nil, nil},
-	{"GET", "/widget.js", classInfrastructure, nil, nil},
+// routeManifest is a function, not a var: the OpenAPI route is itself declared
+// here and reads the manifest, which as a package var would be an init cycle.
+func routeManifest() []routeSpec {
+	return []routeSpec{
+		// Infrastructure and well-known.
+		{Method: "GET", Path: "/.well-known/jwks.json", Class: classInfrastructure, Handler: (*Handler).jwks},
+		{Method: "GET", Path: "/widget.js", Class: classInfrastructure, Handler: (*Handler).widgetBundle},
+		// Generated from this manifest, so the document cannot describe a surface the
+		// router does not serve.
+		{Method: "GET", Path: "/openapi.json", Class: classInfrastructure, Handler: (*Handler).serveOpenAPI},
+		{Method: "GET", Path: "/docs", Class: classInfrastructure, Handler: (*Handler).serveDocs,
+			Enabled: (*Handler).docsAvailable},
 
-	// Credential acquisition — the deliberate consumer-shaped exception.
-	{"GET", "/v1/admin/auth/google", classPublic, nil, nil},
-	{"GET", "/v1/admin/auth/google/callback", classPublic, nil, nil},
-	{"GET", "/v1/admin/auth/google/dev", classPublic, nil, nil},
-	{"POST", "/v1/admin/auth/password", classPublic, nil, nil},
-	{"POST", "/v1/admin/auth/logout", classPublic, nil, nil},
+		// Credential acquisition — the deliberate consumer-shaped exception.
+		{Method: "GET", Path: "/v1/admin/auth/google", Class: classPublic, Handler: (*Handler).adminGoogleLogin, Success: http.StatusFound},
+		{Method: "GET", Path: "/v1/admin/auth/google/callback", Class: classPublic, Handler: (*Handler).adminGoogleCallback},
+		{Method: "GET", Path: "/v1/admin/auth/google/dev", Class: classPublic, Handler: (*Handler).adminDevLogin,
+			Enabled: (*Handler).devLoginAvailable},
+		{Method: "POST", Path: "/v1/admin/auth/password", Class: classPublic, Handler: (*Handler).adminPasswordLogin, Rate: rateAuth},
+		{Method: "POST", Path: "/v1/admin/auth/logout", Class: classPublic, Handler: (*Handler).adminLogout, Success: http.StatusNoContent},
 
-	// Signature-gated ingress and signed object access.
-	{"POST", "/v1/email/inbound", classSignedIngress, nil, nil},
-	{"PUT", "/v1/uploads/local/*objectKey", classAction, []policy.Action{policy.UploadsWrite}, signedOnly},
-	{"GET", "/v1/uploads/local/*objectKey", classAction, []policy.Action{policy.UploadsRead}, signedOnly},
+		// Signature-gated ingress and signed object access.
+		{Method: "POST", Path: "/v1/email/inbound", Class: classSignedIngress, Handler: (*Handler).emailInbound,
+			BodyLimit: middleware.BodyLimitEmail, Rate: rateIngress},
+		{Method: "PUT", Path: "/v1/uploads/local/*objectKey", Class: classAction,
+			Actions: []policy.Action{policy.UploadsWrite}, Principals: signedOnly, Handler: (*Handler).localUploadPut,
+			BodyLimit: middleware.BodyLimitUpload, Rate: rateIngress, Enabled: (*Handler).localStorageServed},
+		{Method: "GET", Path: "/v1/uploads/local/*objectKey", Class: classAction,
+			Actions: []policy.Action{policy.UploadsRead}, Principals: signedOnly, Handler: (*Handler).localUploadGet,
+			Enabled: (*Handler).localStorageServed},
 
-	// Conversations.
-	{"GET", "/v1/conversations", classAction, []policy.Action{policy.ConversationsList}, anyPrincipal},
-	{"POST", "/v1/conversations", classAction, []policy.Action{policy.ConversationsCreateSupport, policy.ConversationsCreatePeer}, anyPrincipal},
-	{"GET", "/v1/conversations/:id", classAction, []policy.Action{policy.ConversationsRead}, anyPrincipal},
-	{"GET", "/v1/conversations/:id/messages", classAction, []policy.Action{policy.MessagesRead}, anyPrincipal},
-	{"POST", "/v1/conversations/:id/messages", classAction, []policy.Action{policy.MessagesSend}, anyPrincipal},
-	{"POST", "/v1/conversations/:id/read", classAction, []policy.Action{policy.ReceiptsWrite}, anyPrincipal},
-	{"POST", "/v1/conversations/:id/typing", classAction, []policy.Action{policy.TypingWrite}, anyPrincipal},
-	{"POST", "/v1/conversations/:id/close", classAction, []policy.Action{policy.ConversationsClose}, anyPrincipal},
-	{"POST", "/v1/conversations/:id/assignments", classAction, []policy.Action{policy.AssignmentsCreate}, anyPrincipal},
-	{"POST", "/v1/conversations/:id/members", classAction, []policy.Action{policy.MembersManage}, keyOnly},
-	{"DELETE", "/v1/conversations/:id/members/:user_id", classAction, []policy.Action{policy.MembersManage}, keyOnly},
-	{"POST", "/v1/conversations/:id/members/remap", classAction, []policy.Action{policy.MembersRemap}, keyOnly},
+		// Conversations.
+		{Method: "GET", Path: "/v1/conversations", Class: classAction,
+			Actions: []policy.Action{policy.ConversationsList}, Principals: anyPrincipal, Handler: (*Handler).listConversations},
+		{Method: "POST", Path: "/v1/conversations", Class: classAction,
+			Actions:    []policy.Action{policy.ConversationsCreateSupport, policy.ConversationsCreatePeer},
+			Principals: anyPrincipal, Handler: (*Handler).createConversation, Success: http.StatusCreated},
+		{Method: "GET", Path: "/v1/conversations/:id", Class: classAction,
+			Actions: []policy.Action{policy.ConversationsRead}, Principals: anyPrincipal, Handler: (*Handler).getConversation},
+		{Method: "GET", Path: "/v1/conversations/:id/messages", Class: classAction,
+			Actions: []policy.Action{policy.MessagesRead}, Principals: anyPrincipal, Handler: (*Handler).listMessages},
+		{Method: "POST", Path: "/v1/conversations/:id/messages", Class: classAction,
+			Actions: []policy.Action{policy.MessagesSend}, Principals: anyPrincipal, Handler: (*Handler).postMessage, Success: http.StatusCreated, IdempotencyField: "client_msg_id"},
+		{Method: "POST", Path: "/v1/conversations/:id/read", Class: classAction,
+			Actions: []policy.Action{policy.ReceiptsWrite}, Principals: anyPrincipal, Handler: (*Handler).markRead, Success: http.StatusNoContent},
+		{Method: "POST", Path: "/v1/conversations/:id/typing", Class: classAction,
+			Actions: []policy.Action{policy.TypingWrite}, Principals: anyPrincipal, Handler: (*Handler).typing, Success: http.StatusNoContent},
+		{Method: "POST", Path: "/v1/conversations/:id/close", Class: classAction,
+			Actions: []policy.Action{policy.ConversationsClose}, Principals: anyPrincipal, Handler: (*Handler).closeConversation},
+		{Method: "POST", Path: "/v1/conversations/:id/assignments", Class: classAction,
+			Actions: []policy.Action{policy.AssignmentsCreate}, Principals: anyPrincipal, Handler: (*Handler).addAssignment, Success: http.StatusCreated},
+		{Method: "POST", Path: "/v1/conversations/:id/members", Class: classAction,
+			Actions: []policy.Action{policy.MembersManage}, Principals: keyOnly, Handler: (*Handler).addMember, Success: http.StatusCreated},
+		{Method: "DELETE", Path: "/v1/conversations/:id/members/:user_id", Class: classAction,
+			Actions: []policy.Action{policy.MembersManage}, Principals: keyOnly, Handler: (*Handler).removeMember, Success: http.StatusNoContent},
+		{Method: "POST", Path: "/v1/conversations/:id/members/remap", Class: classAction,
+			Actions: []policy.Action{policy.MembersRemap}, Principals: keyOnly, Handler: (*Handler).remap},
 
-	// Assignments, contacts, identity, uploads, tokens.
-	{"PATCH", "/v1/assignments/:id", classAction, []policy.Action{policy.AssignmentsClaim, policy.AssignmentsClose}, adminOnly},
-	{"GET", "/v1/contacts", classAction, []policy.Action{policy.ContactsList}, adminOnly},
-	{"GET", "/v1/contacts/:external_user_id", classAction, []policy.Action{policy.ContactsRead}, adminOnly},
-	{"GET", "/v1/principal", classAction, []policy.Action{policy.PrincipalRead}, anyPrincipal},
-	{"GET", "/v1/realtime/token", classAction, []policy.Action{policy.RealtimeToken}, adminOnly},
-	{"POST", "/v1/uploads", classAction, []policy.Action{policy.UploadsIssue}, anyPrincipal},
-	{"POST", "/v1/tokens", classAction, []policy.Action{policy.TokensMint}, keyOnly},
-	{"POST", "/v1/push-tokens", classAction, []policy.Action{policy.PushTokensManage}, userOnly},
-	{"DELETE", "/v1/push-tokens", classAction, []policy.Action{policy.PushTokensManage}, userOnly},
+		// Assignments, contacts, identity, uploads, tokens.
+		{Method: "PATCH", Path: "/v1/assignments/:id", Class: classAction,
+			Actions:    []policy.Action{policy.AssignmentsClaim, policy.AssignmentsClose},
+			Principals: adminOnly, Handler: (*Handler).patchAssignment},
+		{Method: "GET", Path: "/v1/contacts", Class: classAction,
+			Actions: []policy.Action{policy.ContactsList}, Principals: adminOnly, Handler: (*Handler).listContacts},
+		{Method: "GET", Path: "/v1/contacts/:external_user_id", Class: classAction,
+			Actions: []policy.Action{policy.ContactsRead}, Principals: adminOnly, Handler: (*Handler).getContact},
+		{Method: "GET", Path: "/v1/principal", Class: classAction,
+			Actions: []policy.Action{policy.PrincipalRead}, Principals: anyPrincipal, Handler: (*Handler).getPrincipal},
+		{Method: "GET", Path: "/v1/realtime/token", Class: classAction,
+			Actions: []policy.Action{policy.RealtimeToken}, Principals: adminOnly, Handler: (*Handler).realtimeToken},
+		{Method: "POST", Path: "/v1/uploads", Class: classAction,
+			Actions: []policy.Action{policy.UploadsIssue}, Principals: anyPrincipal, Handler: (*Handler).issueUpload, Success: http.StatusCreated},
+		{Method: "POST", Path: "/v1/tokens", Class: classAction,
+			Actions: []policy.Action{policy.TokensMint}, Principals: keyOnly, Handler: (*Handler).mintToken, Rate: rateAuth},
+		{Method: "POST", Path: "/v1/push-tokens", Class: classAction,
+			Actions: []policy.Action{policy.PushTokensManage}, Principals: userOnly, Handler: (*Handler).registerPush, Success: http.StatusCreated},
+		{Method: "DELETE", Path: "/v1/push-tokens", Class: classAction,
+			Actions: []policy.Action{policy.PushTokensManage}, Principals: userOnly, Handler: (*Handler).deregisterPush, Success: http.StatusNoContent},
 
-	// Brands: active is optional-auth, the set is owner/admin.
-	{"GET", "/v1/brands/active", classPublic, []policy.Action{policy.BrandsReadActive}, anyPrincipal},
-	{"GET", "/v1/brands", classAction, []policy.Action{policy.BrandsRead}, adminOnly},
-	{"PUT", "/v1/brands", classAction, []policy.Action{policy.BrandsWrite}, adminOnly},
+		// Brands: active is optional-auth, the set is owner/admin.
+		{Method: "GET", Path: "/v1/brands/active", Class: classPublic,
+			Actions: []policy.Action{policy.BrandsReadActive}, Principals: anyPrincipal, Handler: (*Handler).getActiveBrand},
+		{Method: "GET", Path: "/v1/brands", Class: classAction,
+			Actions: []policy.Action{policy.BrandsRead}, Principals: adminOnly, Handler: (*Handler).listBrands},
+		{Method: "PUT", Path: "/v1/brands", Class: classAction,
+			Actions: []policy.Action{policy.BrandsWrite}, Principals: adminOnly, Handler: (*Handler).saveBrands},
 
-	// Settings, owner/admin only.
-	{"GET", "/v1/channels/email", classAction, []policy.Action{policy.SettingsRead}, adminOnly},
-	{"PATCH", "/v1/channels/email", classAction, []policy.Action{policy.SettingsWrite}, adminOnly},
-	{"GET", "/v1/api-keys", classAction, []policy.Action{policy.APIKeysManage}, adminOnly},
-	{"POST", "/v1/api-keys", classAction, []policy.Action{policy.APIKeysManage}, adminOnly},
-	{"DELETE", "/v1/api-keys/:id", classAction, []policy.Action{policy.APIKeysManage}, adminOnly},
-	{"GET", "/v1/webhooks", classAction, []policy.Action{policy.WebhooksManage}, adminOnly},
-	{"POST", "/v1/webhooks", classAction, []policy.Action{policy.WebhooksManage}, adminOnly},
-	{"PATCH", "/v1/webhooks/:id", classAction, []policy.Action{policy.WebhooksManage}, adminOnly},
-	{"DELETE", "/v1/webhooks/:id", classAction, []policy.Action{policy.WebhooksManage}, adminOnly},
-	{"GET", "/v1/webhooks/:id/deliveries", classAction, []policy.Action{policy.WebhooksReadDeliveries}, adminOnly},
-	{"GET", "/v1/team", classAction, []policy.Action{policy.TeamManage}, adminOnly},
-	{"POST", "/v1/team", classAction, []policy.Action{policy.TeamManage}, adminOnly},
-	{"PATCH", "/v1/team/:id", classAction, []policy.Action{policy.TeamManage}, adminOnly},
-	{"POST", "/v1/team/:id/password", classAction, []policy.Action{policy.TeamManage}, adminOnly},
+		// Settings, owner/admin only.
+		{Method: "GET", Path: "/v1/channels/email", Class: classAction,
+			Actions: []policy.Action{policy.SettingsRead}, Principals: adminOnly, Handler: (*Handler).getEmailChannel},
+		{Method: "PATCH", Path: "/v1/channels/email", Class: classAction,
+			Actions: []policy.Action{policy.SettingsWrite}, Principals: adminOnly, Handler: (*Handler).updateEmailChannel},
+		{Method: "GET", Path: "/v1/api-keys", Class: classAction,
+			Actions: []policy.Action{policy.APIKeysManage}, Principals: adminOnly, Handler: (*Handler).listAPIKeys},
+		{Method: "POST", Path: "/v1/api-keys", Class: classAction,
+			Actions: []policy.Action{policy.APIKeysManage}, Principals: adminOnly, Handler: (*Handler).createAPIKey, Success: http.StatusCreated},
+		{Method: "DELETE", Path: "/v1/api-keys/:id", Class: classAction,
+			Actions: []policy.Action{policy.APIKeysManage}, Principals: adminOnly, Handler: (*Handler).revokeAPIKey, Success: http.StatusNoContent},
+		{Method: "GET", Path: "/v1/webhooks", Class: classAction,
+			Actions: []policy.Action{policy.WebhooksManage}, Principals: adminOnly, Handler: (*Handler).listWebhooks},
+		{Method: "POST", Path: "/v1/webhooks", Class: classAction,
+			Actions: []policy.Action{policy.WebhooksManage}, Principals: adminOnly, Handler: (*Handler).createWebhook, Success: http.StatusCreated},
+		{Method: "PATCH", Path: "/v1/webhooks/:id", Class: classAction,
+			Actions: []policy.Action{policy.WebhooksManage}, Principals: adminOnly, Handler: (*Handler).updateWebhook, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/webhooks/:id", Class: classAction,
+			Actions: []policy.Action{policy.WebhooksManage}, Principals: adminOnly, Handler: (*Handler).deleteWebhook, Success: http.StatusNoContent},
+		{Method: "GET", Path: "/v1/webhooks/:id/deliveries", Class: classAction,
+			Actions: []policy.Action{policy.WebhooksReadDeliveries}, Principals: adminOnly, Handler: (*Handler).listDeliveries},
+		{Method: "GET", Path: "/v1/team", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).listTeam},
+		{Method: "POST", Path: "/v1/team", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).inviteAgent, Success: http.StatusCreated},
+		{Method: "PATCH", Path: "/v1/team/:id", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).updateAgent, Success: http.StatusNoContent},
+		{Method: "POST", Path: "/v1/team/:id/password", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).setAgentPassword, Success: http.StatusNoContent},
+	}
 }
 
 // RouteManifestKeys is the manifest as "METHOD PATH", for the contract test.
 func RouteManifestKeys() []string {
-	out := make([]string, 0, len(routeManifest))
-	for _, r := range routeManifest {
+	out := make([]string, 0, len(routeManifest()))
+	for _, r := range routeManifest() {
 		out = append(out, r.Method+" "+r.Path)
 	}
 	return out
+}
+
+// RouteGuard is one declared guard, exported so the conformance test can fire
+// real requests at the mounted router and check the declaration holds.
+type RouteGuard struct {
+	Method     string
+	Path       string
+	Actions    []policy.Action
+	Principals []principal.Kind
+	// PrivilegedOnly means every action on the route is owner/admin-only, so a
+	// plain agent session must be refused — the dimension Principals cannot
+	// express, since an agent and an owner are both principal.KindAdmin.
+	PrivilegedOnly bool
+}
+
+// RouteSuccess is a route's declared success status, exported so a test can
+// drive the route and check the document does not publish a status it never
+// answers with.
+type RouteSuccess struct {
+	Method string
+	Path   string
+	Status int
+}
+
+// RouteSuccessStatuses returns the declared success status of every route.
+func RouteSuccessStatuses() []RouteSuccess {
+	out := make([]RouteSuccess, 0, len(routeManifest()))
+	for _, r := range routeManifest() {
+		out = append(out, RouteSuccess{Method: r.Method, Path: r.Path, Status: r.successStatus()})
+	}
+	return out
+}
+
+// RouteGuards returns the action-classified routes and the guards they declare.
+func RouteGuards() []RouteGuard {
+	out := make([]RouteGuard, 0, len(routeManifest()))
+	for _, r := range routeManifest() {
+		if r.Class != classAction {
+			continue
+		}
+		out = append(out, RouteGuard{
+			Method: r.Method, Path: r.Path,
+			Actions: r.Actions, Principals: r.Principals, PrivilegedOnly: r.privilegedOnly(),
+		})
+	}
+	return out
+}
+
+// privilegedOnly reports that every action on the route is owner/admin-only.
+func (r routeSpec) privilegedOnly() bool {
+	if len(r.Actions) == 0 {
+		return false
+	}
+	for _, a := range r.Actions {
+		if !policy.RequiresPrivilegedAdmin(a) {
+			return false
+		}
+	}
+	return true
 }

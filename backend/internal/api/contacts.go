@@ -30,7 +30,10 @@ func contactView(c *store.Contact) gin.H {
 
 // listContacts: GET /v1/contacts?q=&limit=&cursor=
 func (h *Handler) listContacts(c *gin.Context) {
-	scope := apiutil.Scope(c, policy.ContactsList)
+	scope, ok := apiutil.Scope(c, policy.ContactsList)
+	if !ok {
+		return
+	}
 	if scope.DenyAll() {
 		apiutil.RespondPage(c, resourceContacts, store.Page[gin.H]{})
 		return
@@ -64,7 +67,10 @@ func (h *Handler) listContacts(c *gin.Context) {
 
 // getContact: GET /v1/contacts/:external_user_id
 func (h *Handler) getContact(c *gin.Context) {
-	scope := apiutil.Scope(c, policy.ContactsRead)
+	scope, ok := apiutil.Scope(c, policy.ContactsRead)
+	if !ok {
+		return
+	}
 	// Same rule the write boundaries enforce; gin unescapes the path before
 	// matching, so a "/" sent as %2F never reaches here at all.
 	ext := c.Param("external_user_id")

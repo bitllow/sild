@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -39,10 +40,21 @@ func DecodeJSON(c *gin.Context, dst any) bool {
 }
 
 // DecodeJSONOptional is DecodeJSON for bodies that may legitimately be empty.
+// An absent body is detected by reading, not by ContentLength, which a chunked
+// request does not declare.
 func DecodeJSONOptional(c *gin.Context, dst any) bool {
-	if c.Request.ContentLength == 0 {
+	probe, err := io.ReadAll(io.LimitReader(c.Request.Body, 1))
+	if err != nil {
+		failDecode(c, err)
+		return false
+	}
+	if len(probe) == 0 {
 		return true
 	}
+	c.Request.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(probe), c.Request.Body), c.Request.Body}
 	return DecodeJSON(c, dst)
 }
 

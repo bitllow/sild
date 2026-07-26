@@ -88,7 +88,9 @@ export const api = {
  *
  * Bounded settings lists and a contact's history are rendered whole, with no
  * scroll UI to continue from — reading only the first page would silently hide
- * the rest. `pages` caps the walk so a runaway cursor cannot loop forever.
+ * the rest. `pages` caps the walk so a runaway cursor cannot loop forever, and
+ * hitting the cap throws: returning a short list would be the same silent
+ * truncation this exists to avoid.
  */
 export async function collectAll<T>(
   fetchPage: (cursor: string | null) => Promise<{ items: T[]; next_cursor: string | null; has_more: boolean }>,
@@ -102,5 +104,5 @@ export async function collectAll<T>(
     if (!page.has_more || !page.next_cursor) return out;
     cursor = page.next_cursor;
   }
-  return out;
+  throw new ApiError(0, `Collection did not end within ${pages} pages`);
 }

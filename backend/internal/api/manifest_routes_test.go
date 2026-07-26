@@ -9,18 +9,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// newManifestProbeHandler builds a Handler wired only enough to register routes
+// and answer descriptor questions. Mount and the Enabled predicates dereference
+// nothing else, so the zero wiring is sufficient.
+func newManifestProbeHandler(t *testing.T) *Handler {
+	t.Helper()
+	cfg := &config.Config{Env: "development"}
+	cfg.Storage.Backend = "local"
+	return New(nil, nil, middleware.NewAuth(nil, nil), nil, auth.NewAdminAuthenticator(cfg), nil, cfg)
+}
+
 // mountedRouteKeys mounts the real route table and returns "METHOD PATH" for
-// each route. Mount only touches the engine, so no dependencies are needed.
+// each route.
 func mountedRouteKeys(t *testing.T) []string {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
-	// Mount only registers handlers; nothing it calls dereferences a dependency,
-	// so the zero wiring is enough to enumerate the table.
-	cfg := &config.Config{Env: "development"}
-	cfg.Storage.Backend = "local"
-	h := New(nil, nil, middleware.NewAuth(nil, nil), nil, auth.NewAdminAuthenticator(cfg), nil, cfg)
-	h.Mount(e)
+	newManifestProbeHandler(t).Mount(e)
 
 	out := make([]string, 0, 64)
 	for _, r := range e.Routes() {

@@ -163,7 +163,8 @@ func (s *Service) searchConversations(ctx context.Context, tenantID string, scop
 	for i := range page.Items {
 		byID[page.Items[i].Conversation.ID] = &page.Items[i]
 	}
-	// Preserve the search's ranking rather than the list's ordering.
+	// Keep the search's ordering (id DESC, the key it pages on) rather than the
+	// list's.
 	ordered := make([]store.ConversationItem, 0, len(ids))
 	for _, id := range ids {
 		if it, ok := byID[id]; ok { // scope may drop one between the two queries

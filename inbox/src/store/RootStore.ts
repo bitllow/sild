@@ -4,6 +4,7 @@ import {
   adminApi,
   type ApiAssignmentStatus,
   type ApiMessage,
+  type ApiQueueConversation,
   type QueueOrder,
   type ConversationParams,
   type ApiQueuePage,
@@ -171,6 +172,10 @@ export class RootStore {
   searchQuery = "";
   searching = false;
   searchResults: Conversation[] | null = null;
+  // Search is a filter on the same list endpoint, so it pages like the queue —
+  // but on its own cursor, since the queue's belongs to a different filter set.
+  searchCursor: string | null = null;
+  searchHasMore = false;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private searchSeq = 0;
 
@@ -212,6 +217,11 @@ export class RootStore {
   // peer-conversations nav. The peer surface lives in its own store, fed the shared
   // realtime connection's events for peer conversation ids.
   meId: string | null = null;
+  // The tenant's public app id, which the widget embed must carry. Surfaced in
+  // Settings → Installation because a customer has nowhere else to find it.
+  appId = "";
+  appIdCopied = false;
+  snippetCopied = false;
   peerAccess = false;
   peer = new PeerStore(this);
 
@@ -231,6 +241,7 @@ export class RootStore {
       const me = await adminApi.me();
       runInAction(() => {
         this.meId = me.subject?.id ?? "";
+        this.appId = me.tenant_id;
         // Peer visibility is the scope of conversations.list, not a flag
         // re-interpreted here.
         const list = me.grants.find((g) => g.action === "conversations.list");
@@ -306,6 +317,7 @@ export class RootStore {
       this.settingsLoaded = false;
       this.inboxView = "inbox";
       this.meId = null;
+    this.appId = "";
       this.peerAccess = false;
       this.peer.reset();
     });
@@ -381,10 +393,11 @@ export class RootStore {
     }
   };
 
-  // Append the next page (scroll-loading). No-op while a load is in flight, when
-  // exhausted, or while a search is active (search results aren't paginated here).
+  // Append the next page (scroll-loading). No-op while a load is in flight or the
+  // current list is exhausted. A search pages through its own cursor.
   loadMore = async () => {
-    if (this.loadingMore || !this.hasMore || !this.nextCursor || this.searchResults !== null) return;
+    if (this.searchResults !== null) return this.loadMoreSearch();
+    if (this.loadingMore || !this.hasMore || !this.nextCursor) return;
     const seq = this.queueSeq; // page belongs to the current filter generation
     runInAction(() => {
       this.loadingMore = true;
@@ -403,11 +416,56 @@ export class RootStore {
     } catch {
       /* transient; user can scroll again to retry */
     } finally {
-      if (seq === this.queueSeq) {
+      // Unconditional: a superseded page still owns the flag, and the fresh load
+      // clears loadingConvs, not this one — leaving it set wedges pagination.
+      runInAction(() => {
+        this.loadingMore = false;
+      });
+    }
+  };
+
+  // The spec §5.4 reconnect sequence: re-fetch the conversation list, THEN drain
+  // ?since= for the open thread. Ordered, not concurrent — the drain reads the row
+  // the sync refreshes, and maps authors against its members.
+  //
+  // A drain, not a reload: replacing the thread with the newest 100 both caps the
+  // gap it can recover and discards whatever the operator had scrolled back to.
+  private catchUpOnReconnect = async () => {
+    await this.syncQueue();
+    const id = this.activeId;
+    if (!id) return;
+    const conv = this.convs.find((c) => c.id === id);
+    const last = conv?.messages[conv.messages.length - 1];
+    // Nothing held means there is no position to resume from; the row the sync just
+    // refreshed already carries the thread.
+    if (!conv || !last) return;
+
+    let since = last.id;
+    try {
+      for (;;) {
+        const page = await adminApi.catchUpMessages(id, since);
+        const items = page.items || [];
+        if (!items.length) return;
+        // The operator may have switched threads while this was in flight.
+        if (this.activeId !== id) return;
         runInAction(() => {
-          this.loadingMore = false;
+          const have = new Set(conv.messages.map((m) => m.id));
+          for (const api of items) {
+            if (have.has(api.id)) continue;
+            const msg = mapRealtimeMessage(api, conv);
+            conv.messages.push(msg);
+            if (!msg.internal && !msg.system) {
+              conv.preview = msg.body;
+              conv.time = relativeTime(api.created_at);
+              conv.lastActivity = api.created_at;
+            }
+          }
         });
+        since = items[items.length - 1].id;
+        if (!page.has_more) return;
       }
+    } catch {
+      /* the next reconnect resumes from the same id */
     }
   };
 
@@ -447,10 +505,7 @@ export class RootStore {
           this.rtState = s;
         });
         // reconnect catch-up is the only correctness mechanism (§5.4)
-        if (s === "connected") {
-          void this.refreshActiveMessages();
-          void this.syncQueue();
-        }
+        if (s === "connected") void this.catchUpOnReconnect();
       },
       onEvent: (channel, env) => this.handleEvent(channel, env),
     });
@@ -848,6 +903,12 @@ export class RootStore {
   setSearchQuery = (q: string) => {
     this.searchQuery = q;
     if (this.searchTimer) clearTimeout(this.searchTimer);
+    // Retire the previous query's generation and its cursor together: searchQuery
+    // updates on every keystroke while runSearch is debounced, so a page still in
+    // flight belongs to text the user has already replaced.
+    this.searchSeq++;
+    this.searchCursor = null;
+    this.searchHasMore = false;
     if (!q.trim()) {
       this.searchResults = null;
       this.searching = false;
@@ -862,29 +923,68 @@ export class RootStore {
       this.searching = true;
     });
     try {
-      const { items } = await adminApi.listConversations({ kind: "support", q });
-      const built = await Promise.all(
-        items.map(async (hit) => {
-          // Rows arrive whole from the list, so only the thread is fetched.
-          const page = await adminApi.listMessages(hit.id);
-          const c = buildConversation(hit, page);
-          if (hit.snippet) c.preview = hit.snippet;
-          return c;
-        })
-      );
+      const page = await adminApi.listConversations({ kind: "support", q });
+      const built = await this.hydrateHits(page.items);
       if (seq !== this.searchSeq) return; // stale response
       runInAction(() => {
         this.searchResults = built;
+        this.searchCursor = page.has_more ? page.next_cursor : null;
+        this.searchHasMore = page.has_more;
         this.searching = false;
       });
     } catch {
       if (seq !== this.searchSeq) return;
       runInAction(() => {
         this.searchResults = [];
+        this.searchCursor = null;
+        this.searchHasMore = false;
         this.searching = false;
       });
     }
   };
+
+  // The cursor is bound to a fingerprint of the filter set, so the continuation
+  // sends exactly what runSearch sent.
+  private loadMoreSearch = async () => {
+    if (this.loadingMore || !this.searchHasMore || !this.searchCursor) return;
+    const seq = this.searchSeq;
+    runInAction(() => {
+      this.loadingMore = true;
+    });
+    try {
+      const page = await adminApi.listConversations({
+        kind: "support",
+        q: this.searchQuery.trim(),
+        cursor: this.searchCursor,
+      });
+      const built = await this.hydrateHits(page.items);
+      if (seq !== this.searchSeq) return; // query changed mid-flight
+      runInAction(() => {
+        const have = new Set((this.searchResults ?? []).map((c) => c.id));
+        this.searchResults = [...(this.searchResults ?? []), ...built.filter((c) => !have.has(c.id))];
+        this.searchCursor = page.has_more ? page.next_cursor : null;
+        this.searchHasMore = page.has_more;
+      });
+    } catch {
+      /* transient; user can scroll again to retry */
+    } finally {
+      runInAction(() => {
+        this.loadingMore = false;
+      });
+    }
+  };
+
+  // hydrateHits turns list rows into conversations. Rows arrive whole from the
+  // list, so only the thread is fetched.
+  private hydrateHits = async (items: ApiQueueConversation[]): Promise<Conversation[]> =>
+    Promise.all(
+      items.map(async (hit) => {
+        const page = await adminApi.listMessages(hit.id);
+        const c = buildConversation(hit, page);
+        if (hit.snippet) c.preview = hit.snippet;
+        return c;
+      })
+    );
 
   get assignLabel(): string {
     const s = this.active?.status;
@@ -1135,6 +1235,32 @@ export class RootStore {
       });
     }
   };
+
+  // ─────────────────────────── settings: installation ──────────────────────
+  // The <script> src a customer embeds. The widget bundle is served by the
+  // backend, not the inbox, so it comes from the API origin.
+  get widgetSrc(): string {
+    const base = process.env.NEXT_PUBLIC_SILD_API_URL || "http://localhost:8080";
+    return `${base}/widget.js`;
+  }
+
+  copyAppId = () => this.copyToClipboard(this.appId, "appIdCopied");
+  copySnippet = (snippet: string) => this.copyToClipboard(snippet, "snippetCopied");
+
+  private copyToClipboard(text: string, flag: "appIdCopied" | "snippetCopied") {
+    if (!text) return;
+    try {
+      void navigator.clipboard.writeText(text);
+      runInAction(() => {
+        this[flag] = true;
+      });
+      setTimeout(() => runInAction(() => {
+        this[flag] = false;
+      }), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
 
   // ─────────────────────────── settings: channels (§6.2) ───────────────────
   copyForwardingAddress = () => {

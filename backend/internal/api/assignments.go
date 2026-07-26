@@ -19,8 +19,7 @@ func (h *Handler) patchAssignment(c *gin.Context) {
 		AssigneeActorID *string `json:"assignee_actor_id"`
 		Status          *string `json:"status"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	if req.AssigneeActorID != nil && req.Status != nil {

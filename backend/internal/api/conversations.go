@@ -15,7 +15,10 @@ import (
 // listConversations: GET /v1/conversations — the one conversation list. The
 // credential decides the subset; kind/participant/assignee/q are just filters.
 func (h *Handler) listConversations(c *gin.Context) {
-	scope := apiutil.Scope(c, policy.ConversationsList)
+	scope, ok := apiutil.Scope(c, policy.ConversationsList)
+	if !ok {
+		return
+	}
 	if scope.DenyAll() {
 		apiutil.RespondPage(c, resourceConversations, store.Page[map[string]any]{})
 		return

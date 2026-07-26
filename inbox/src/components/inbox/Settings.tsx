@@ -39,6 +39,9 @@ export const Settings = observer(function Settings() {
       <div style={{ padding: "22px 28px 0", flex: "none" }}>
         <h1 style={{ fontSize: 22 }}>Settings</h1>
         <div style={{ display: "flex", gap: 24, marginTop: 18, borderBottom: "1px solid var(--border-default)" }}>
+          <button onClick={() => store.setSettingsTab("installation")} style={tabStyle(tab === "installation")}>
+            Installation
+          </button>
           <button onClick={() => store.setSettingsTab("channels")} style={tabStyle(tab === "channels")}>
             Channels
           </button>
@@ -181,11 +184,77 @@ export const Settings = observer(function Settings() {
             </div>
           )}
 
+          {tab === "installation" && <Installation />}
+
           {tab === "channels" && <Channels />}
         </div>
       </div>
       )}
     </div>
+  );
+});
+
+// Installation shows the App ID and the embed snippet. The widget's first paint is
+// unauthenticated and keyed by app_id, so without this a customer has nowhere to
+// read the one value the embed cannot work without.
+const Installation = observer(function Installation() {
+  const store = useStore();
+  const appId = store.appId;
+  const snippet = `<script src="${store.widgetSrc}"></script>
+<script>
+  Sild.init({
+    appId: "${appId || "<your app id>"}",
+    tokenProvider: () => fetch("/your-backend/sild-token").then((r) => r.text()),
+  });
+</script>`;
+
+  return (
+    <>
+      <div style={card}>
+        <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
+          <div style={{ fontWeight: 600 }}>App ID</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: 13, marginTop: 2 }}>
+            Identifies your tenant to the messenger before a visitor has a token. Safe to
+            put in page source — it grants no access on its own.
+          </div>
+        </div>
+        <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+          <code style={{ flex: 1, minWidth: 0, fontSize: 13, overflowWrap: "anywhere" }}>
+            {appId || "—"}
+          </code>
+          <Button variant="secondary" onClick={() => store.copyAppId()} disabled={!appId}>
+            <CopyIcon />
+            {store.appIdCopied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+      </div>
+
+      <div style={{ ...card, marginTop: 18 }}>
+        <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
+          <div style={{ fontWeight: 600 }}>Embed the messenger</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: 13, marginTop: 2 }}>
+            Drop this into any page. <code>tokenProvider</code> returns a token your backend
+            mints with <code>POST /v1/tokens</code>.
+          </div>
+        </div>
+        <div style={{ padding: "14px 18px" }}>
+          <pre
+            style={{
+              margin: 0, fontSize: 12.5, lineHeight: 1.55, overflowX: "auto",
+              background: "var(--surface-page)", border: rowBorder, borderRadius: 8, padding: 12,
+            }}
+          >
+            {snippet}
+          </pre>
+          <div style={{ marginTop: 12 }}>
+            <Button variant="secondary" onClick={() => store.copySnippet(snippet)}>
+              <CopyIcon />
+              {store.snippetCopied ? "Copied" : "Copy snippet"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 });
 

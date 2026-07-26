@@ -137,6 +137,29 @@ class SildApiTest {
         assertEquals("Acme", res.name)
         assertEquals("${base()}/v1/uploads/local/logo.png", res.config.logoUrl)
     }
+
+    // ?since= is a sync read, not a page: the caller resumes from the last id it got
+    // and repeats while has_more, so a gap longer than one limit is not truncated.
+    @Test fun catchUpDrainsEveryMissedMessageAcrossPages() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"m2"},{"id":"m3"}],"next_cursor":null,"has_more":true}"""))
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"m4"}],"next_cursor":null,"has_more":false}"""))
+        val api = api()
+
+        val first = api.catchUpMessages("c1", "m1")
+        assertEquals(listOf("m2", "m3"), first.items.map { it.id })
+        assertTrue(first.hasMore, "has_more survives decoding — without it the drain stops early")
+
+        val second = api.catchUpMessages("c1", first.items.last().id)
+        assertEquals(listOf("m4"), second.items.map { it.id })
+        assertTrue(!second.hasMore)
+
+        val a = server.takeRequest()
+        assertEquals("/v1/conversations/c1/messages?since=m1&limit=100", a.path)
+        val b = server.takeRequest()
+        assertEquals("/v1/conversations/c1/messages?since=m3&limit=100", b.path,
+            "the second call resumes from the last id received, not from the original")
+    }
+
 }
 
 // Local-dev storage is rewritten onto our base (an emulator reaches the host at

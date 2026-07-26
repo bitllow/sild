@@ -55,10 +55,11 @@ export interface SildConfig {
   tokenProvider: () => Promise<string> | string;
   /** Base URL of the Sild backend. Defaults to the script's origin. */
   baseUrl?: string;
-  /** Public app id (the tenant's id) used to fetch branding at load without
-   *  authenticating — no token minted, no user record. Omit in single-tenant dev.
-   *  Without it the launcher renders with defaults (+ any inline `brand`). */
-  appId?: string;
+  /** Public app id (the tenant's id), used to fetch branding at load without
+   *  authenticating — no token minted, no user record. REQUIRED: the anonymous
+   *  brand read names its tenant outright rather than being inferred from how many
+   *  the deployment holds. Find it in the inbox under Settings → Installation. */
+  appId: string;
   /** Open directly to this conversation. Required for guest tokens (§9); omit
    *  for an authed user to show the conversation list / open a new request. */
   conversationId?: string;

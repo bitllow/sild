@@ -103,6 +103,14 @@ internal class SildApi(private val cfg: SildConfig) {
     suspend fun listMessages(id: String): ApiMessagesPage =
         json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100"))
 
+    /** GET /v1/conversations/{id}/messages?since={id} → messages after [since],
+     *  OLDEST first. A sync read, not a page: next_cursor is always null and
+     *  has_more means "call again with the last id you got". */
+    suspend fun catchUpMessages(id: String, since: String, limit: Int = 100): ApiMessagesPage =
+        json.decodeFromString(
+            api("GET", "/conversations/$id/messages?since=${URLEncoder.encode(since, "UTF-8")}&limit=$limit")
+        )
+
     /** POST /v1/conversations { metadata } → { id }; always a support request. */
     suspend fun openSupportRequest(): String {
         val body = buildJsonObject {

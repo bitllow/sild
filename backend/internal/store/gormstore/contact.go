@@ -36,10 +36,13 @@ var sqlTimeLayouts = []string{
 	"2006-01-02 15:04:05",
 }
 
+// parseSQLTime keeps the driver's ORIGINAL offset: the value round-trips through
+// a cursor into a comparison against the stored column, and SQLite compares
+// datetimes as strings.
 func parseSQLTime(v any) time.Time {
 	switch t := v.(type) {
 	case time.Time:
-		return t.UTC()
+		return t
 	case []byte:
 		return parseTimeText(string(t))
 	case string:
@@ -51,7 +54,7 @@ func parseSQLTime(v any) time.Time {
 func parseTimeText(v string) time.Time {
 	for _, layout := range sqlTimeLayouts {
 		if t, err := time.Parse(layout, v); err == nil {
-			return t.UTC()
+			return t
 		}
 	}
 	return time.Time{}

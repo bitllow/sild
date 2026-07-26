@@ -33,8 +33,8 @@ export const ConversationList = observer(function ConversationList() {
   const searchActive = store.searchResults !== null;
 
   // Scroll-loading: fetch the next page as the list nears the bottom (§4.3).
+  // Search pages too — it is a filter on the same list endpoint.
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (searchActive) return;
     const el = e.currentTarget;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
       void store.loadMore();
@@ -237,7 +237,7 @@ export const ConversationList = observer(function ConversationList() {
               : "No conversations in this view. New support requests land here the moment they're assigned."}
           </div>
         )}
-        {!searchActive && store.loadingMore && (
+        {store.loadingMore && (
           <div style={{ padding: "14px 24px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 12 }}>
             Loading more…
           </div>
