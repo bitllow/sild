@@ -210,7 +210,7 @@ jobs:
           set -euo pipefail
           work=$(mktemp -d)
           mkdir -p "$work/Sources/App"
-          python3 - sdks/swift/README.md "$work/Sources/App/App.swift" <<'PY'
+          python3 - "$GITHUB_WORKSPACE/sdks/swift/README.md" "$work/Sources/App/App.swift" <<'PY'
           import re, sys
           block = re.search(
               r'<!-- consumer-smoke:start -->\s*```swift\n(.*?)```\s*<!-- consumer-smoke:end -->',
