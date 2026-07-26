@@ -4,10 +4,14 @@ import PackageDescription
 // The Sild iOS SDK. `SildCore` is the Kotlin Multiplatform core shipped as a binary
 // XCFramework; `Sild` is the Swift layer on top of it.
 //
+// This manifest lives at the repository root because SPM only reads a manifest there —
+// a consumer's `.package(url: "…/sild.git", from: "…")` resolves this file. The sources
+// themselves stay under sdks/swift/, alongside the Kotlin SDK, via `path:`.
+//
 // On a branch the binary target points at a locally built framework, so a checkout can
 // build and test without a published release:
 //
-//     cd ../kotlin && ./gradlew :core:assembleSildCoreReleaseXCFramework
+//     ./gradlew -p sdks/kotlin :core:assembleSildCoreReleaseXCFramework
 //
 // At a `v*` tag the sdk-release workflow rewrites this one target to the release asset
 // (`url:` + `checksum:`) and moves the tag onto that commit, so resolving the tag from
@@ -27,15 +31,20 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "SildCore",
-            path: "../kotlin/core/build/XCFrameworks/release/SildCore.xcframework"
+            path: "sdks/kotlin/core/build/XCFrameworks/release/SildCore.xcframework"
         ),
         .target(
             name: "Sild",
             dependencies: [
                 "SildCore",
                 .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
-            ]
+            ],
+            path: "sdks/swift/Sources/Sild"
         ),
-        .testTarget(name: "SildTests", dependencies: ["Sild"]),
+        .testTarget(
+            name: "SildTests",
+            dependencies: ["Sild"],
+            path: "sdks/swift/Tests/SildTests"
+        ),
     ]
 )

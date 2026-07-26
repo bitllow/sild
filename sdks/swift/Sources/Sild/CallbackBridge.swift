@@ -24,21 +24,38 @@ private final class Once<T>: @unchecked Sendable {
     }
 }
 
-/// Hands the cancellation handler a reference to the in-flight `Once`.
+/// Couples the cancellation handler to the in-flight `Once`, in either order.
+///
+/// `onCancel` can run before the continuation exists — the task may already be cancelled
+/// when `run` is entered. Recording that fact means the `Once` installed afterwards is
+/// failed immediately instead of waiting for a Kotlin callback that may never come.
 private final class OnceBox<T>: @unchecked Sendable {
     private let lock = NSLock()
     private var once: Once<T>?
+    private var cancelled = false
 
-    func set(_ value: Once<T>) {
+    /// Install the continuation; false when cancellation already won, and the caller
+    /// must not start the underlying call.
+    func set(_ value: Once<T>) -> Bool {
         lock.lock()
+        if cancelled {
+            lock.unlock()
+            value.resume(.failure(CancellationError()))
+            return false
+        }
         once = value
         lock.unlock()
+        return true
     }
 
-    func get() -> Once<T>? {
+    /// Fail the continuation now, or mark it to be failed on arrival.
+    func cancel() {
         lock.lock()
-        defer { lock.unlock() }
-        return once
+        cancelled = true
+        let current = once
+        once = nil
+        lock.unlock()
+        current?.resume(.failure(CancellationError()))
     }
 }
 
@@ -64,7 +81,7 @@ final class CallbackBridge: @unchecked Sendable {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let once = Once<T>(continuation)
-                box.set(once)
+                guard box.set(once) else { return }
                 guard track(id, abandon: { once.resume(.failure(SildError.closed)) }) else {
                     once.resume(.failure(SildError.closed))
                     return
@@ -76,7 +93,7 @@ final class CallbackBridge: @unchecked Sendable {
             }
         } onCancel: {
             finish(id)
-            box.get()?.resume(.failure(CancellationError()))
+            box.cancel()
         }
     }
 

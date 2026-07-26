@@ -91,6 +91,11 @@ internal class SildApi(
         return page.items
     }
 
+    /** GET /v1/conversations/{id} → one row, the same shape the list returns. For a
+     *  conversation opened directly, which the bounded recent page need not contain. */
+    suspend fun getConversation(id: String): ApiConversation =
+        json.decodeFromString(api("GET", "/conversations/$id"))
+
     /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope. */
     suspend fun listMessages(id: String): ApiMessagesPage =
         json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100"))

@@ -3,12 +3,11 @@
 #
 #     brew install xcodegen && xcodegen generate
 #
-# It also carries the package's own tests, because an .xcodeproj beside Package.swift
-# shadows the package's `Sild` scheme — one project running both suites beats two
-# commands and a path puzzle.
+# It also carries the package's own tests, so one scheme runs every iOS test — the unit
+# suite and the UI suite — in a single command.
 #
-# The library itself (Sild, SildCore) stays a plain SwiftPM package; this project
-# consumes it as a local package dependency.
+# The library itself (Sild, SildCore) stays a plain SwiftPM package, declared by the
+# manifest at the repository root; this project consumes it as a local dependency.
 name: SildSample
 options:
   bundleIdPrefix: io.sild
@@ -18,7 +17,9 @@ options:
 
 packages:
   Sild:
-    path: .
+    # The manifest is at the repo root, and package paths are written relative to the
+    # generated .xcodeproj (which lands beside this spec).
+    path: ../..
 
 targets:
   SildSample:

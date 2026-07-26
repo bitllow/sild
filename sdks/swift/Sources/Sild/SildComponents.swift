@@ -130,7 +130,7 @@ public struct SildMessageBubble: View {
             let out = message.direction == .out
             VStack(alignment: out ? .trailing : .leading, spacing: 0) {
                 metaRow(out: out)
-                ForEach(inlineImages, id: \.url) { att in
+                ForEach(Array(inlineImages.enumerated()), id: \.offset) { _, att in
                     AsyncImage(url: URL(string: att.url ?? "")) { image in
                         image.resizable().scaledToFill()
                     } placeholder: {
@@ -149,7 +149,7 @@ public struct SildMessageBubble: View {
                         .background(out ? style.colors.brand : style.colors.sunken)
                         .clipShape(RoundedRectangle(cornerRadius: style.radii.bubble))
                 }
-                ForEach(files, id: \.filename) { att in
+                ForEach(Array(files.enumerated()), id: \.offset) { _, att in
                     fileChip(att)
                 }
             }

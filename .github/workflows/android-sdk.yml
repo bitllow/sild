@@ -6,6 +6,7 @@ on:
     paths:
       - "sdks/kotlin/**"
       - "sdks/swift/**"
+      - "Package.swift"
       - "backend/**"
       - ".github/workflows/android-sdk.yml"
       # Release-workflow edits get PR CI too — its XCFramework build is this job's.
@@ -14,6 +15,7 @@ on:
     paths:
       - "sdks/kotlin/**"
       - "sdks/swift/**"
+      - "Package.swift"
       - "backend/**"
       - ".github/workflows/android-sdk.yml"
       # Release-workflow edits get PR CI too — its XCFramework build is this job's.
@@ -180,7 +182,7 @@ jobs:
         working-directory: sdks/swift
         # Keep in step with SildUnitTests + SildSampleUITests.
         env:
-          EXPECTED_TESTS: "10"
+          EXPECTED_TESTS: "11"
         run: |
           set -o pipefail
           xcodebuild test -project SildSample.xcodeproj -scheme SildSample \

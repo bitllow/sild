@@ -62,6 +62,33 @@ final class SildCoreSmokeTests: XCTestCase {
         XCTAssertEqual(msg?.direction, Direction.out)
     }
 
+    // Cancellation can win before the continuation is even installed, and then the
+    // handler has nothing to fail — so the await must resume from the recorded
+    // cancellation rather than wait for a callback Kotlin may never send.
+    func testAwaitInAnAlreadyCancelledTaskResumesInsteadOfHanging() async throws {
+        let s = SildCoreSmoke(baseURL: "http://127.0.0.1:1", userId: uid("u_swift_precancel")) {
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+            return "never-arrives"
+        }
+        defer { s.close() }
+
+        let resumed = expectation(description: "the cancelled call resumes")
+        let outcome = OutcomeBox()
+        let task = Task {
+            // Cancelled before the first suspension point, so `run` is entered cancelled.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            do { outcome.value = .success(try await s.openSupportRequest()) }
+            catch { outcome.value = .failure(error) }
+            resumed.fulfill()
+        }
+        task.cancel()
+
+        await fulfillment(of: [resumed], timeout: 5)
+        guard case .failure = outcome.value else {
+            return XCTFail("expected the cancelled call to fail, got \(String(describing: outcome.value))")
+        }
+    }
+
     // The same abandonment, through SildModel: a send awaiting a support request that
     // close() cancels must report failure so the composer keeps the draft, not hang.
     func testModelSendDuringCloseReportsFailureInsteadOfHanging() async throws {

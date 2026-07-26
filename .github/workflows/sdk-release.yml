@@ -69,7 +69,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import os, re, sys
-          path = "sdks/swift/Package.swift"
+          path = "Package.swift"
           src = open(path).read()
           local = re.compile(r'\.binaryTarget\(\s*name: "SildCore",\s*path: "[^"]*"\s*\)')
           found = local.findall(src)
@@ -84,13 +84,13 @@ jobs:
           )
           open(path, "w").write(local.sub(lambda _: released, src, count=1))
           PY
-          git diff --stat sdks/swift/Package.swift
+          git diff --stat Package.swift
 
       - name: Commit and move the tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add sdks/swift/Package.swift
+          git add Package.swift
           git commit -m "release ${GITHUB_REF_NAME}: point SildCore at the release asset"
           # Only the tag moves; no branch is touched.
           git tag -f "$GITHUB_REF_NAME"

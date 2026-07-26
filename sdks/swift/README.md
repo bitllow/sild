@@ -1,9 +1,23 @@
 # Sild iOS SDK
 
 Swift package wrapping `SildCore.xcframework` — the same Kotlin Multiplatform `:core`
-the Android SDK uses (`sdks/kotlin`), compiled for `ios-arm64` and `ios-arm64-simulator`.
-Only the REST/state layer is wired up so far; the SwiftUI messenger and the Centrifugo
-`RealtimeTransport` are still to come.
+the Android SDK uses (`sdks/kotlin`), compiled for `ios-arm64` and `ios-arm64-simulator`
+— plus the SwiftUI messenger and the Centrifugo realtime transport on top of it.
+
+The manifest lives at the **repository root** (`/Package.swift`), because SPM only reads
+a manifest there; the sources stay here under `sdks/swift/` via `path:` targets.
+
+## Install
+
+```swift
+.package(url: "https://github.com/bitllow/sild.git", from: "0.1.1")
+```
+
+```swift
+import Sild
+
+SildMessenger(config: config, target: .support) { dismiss() }
+```
 
 ## Requirements
 
@@ -16,16 +30,20 @@ those three; it is a deliberate floor for a greenfield SDK, not an accident.
 | Target | What it is |
 |---|---|
 | `SildCore` | binary target — the XCFramework, built by Gradle |
-| `Sild` | the Swift layer; today a `SildCoreSmoke` helper proving the interop |
+| `Sild` | the Swift layer: `SildMessenger`, `SildModel`, the Centrifugo transport |
 | `SildTests` | XCTest running on the simulator against a live `sild-dev` |
 
 ## Build & test
 
-The `binaryTarget` points at a locally built framework, so build it first:
+On a branch the `binaryTarget` points at a locally built framework, so **assemble it
+first** — without it, resolving the package fails on the missing artifact:
 
 ```bash
-cd ../kotlin && ./gradlew :core:assembleSildCoreReleaseXCFramework
+./gradlew -p sdks/kotlin :core:assembleSildCoreReleaseXCFramework
 ```
+
+At a `v*` tag the target instead points at the release asset, so consumers need no
+Gradle. Only path-based/local development has this step.
 
 The tests need a running `sild-dev` (`cd backend && make dev`) and read `SILD_BASE_URL`.
 `xcodebuild` does not forward the shell environment into the simulator, so publish the
@@ -37,6 +55,9 @@ xcrun simctl bootstatus "$udid" -b
 xcrun simctl spawn "$udid" launchctl setenv SILD_BASE_URL http://localhost:8080
 xcodebuild test -scheme Sild -destination "platform=iOS Simulator,id=$udid"
 ```
+
+The package is iOS-only, so a bare `swift build`/`swift test` at the repo root will not
+work — everything goes through an iOS simulator destination.
 
 Without `SILD_BASE_URL` the tests report as skipped rather than passing silently.
 
@@ -59,8 +80,8 @@ is generated, not committed:
 
 ```bash
 brew install xcodegen
-xcodegen generate
-xcodebuild test -project SildSample.xcodeproj -scheme SildSample \
+xcodegen generate --spec sdks/swift/project.yml
+xcodebuild test -project sdks/swift/SildSample.xcodeproj -scheme SildSample \
   -destination "platform=iOS Simulator,id=$udid"
 ```
 

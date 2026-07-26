@@ -21,7 +21,7 @@ struct HomeScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     newConversationCard
-                    ForEach(state.brand.topicList, id: \.self) { topic in
+                    ForEach(Array(state.brand.topicList.enumerated()), id: \.offset) { _, topic in
                         topicRow(topic)
                     }
                     if !state.conversations.isEmpty {
