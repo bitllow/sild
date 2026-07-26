@@ -18,7 +18,11 @@ import (
 func New(cfg *config.Config) (Bucket, error) {
 	switch cfg.Storage.Backend {
 	case "local", "":
-		return &localBucket{publicURL: strings.TrimRight(cfg.Storage.PublicURL, "/"), dir: cfg.Storage.LocalDir}, nil
+		return &localBucket{
+			publicURL: strings.TrimRight(cfg.Storage.PublicURL, "/"),
+			dir:       cfg.Storage.LocalDir,
+			signer:    NewLocalSigner(cfg.Storage.SigningKey),
+		}, nil
 	case "gcs":
 		return newGCSBucket(cfg.Storage)
 	case "s3":
@@ -33,6 +37,7 @@ func New(cfg *config.Config) (Bucket, error) {
 type localBucket struct {
 	publicURL string
 	dir       string
+	signer    *LocalSigner
 }
 
 func (b *localBucket) NewObjectKey(tenantID, filename string) string {
@@ -41,16 +46,24 @@ func (b *localBucket) NewObjectKey(tenantID, filename string) string {
 }
 
 func (b *localBucket) SignPut(_ context.Context, objectKey, _ string, _ int64) (SignedUpload, error) {
+	exp := time.Now().Add(15 * time.Minute)
 	return SignedUpload{
 		ObjectKey: objectKey,
-		UploadURL: b.publicURL + "/v1/uploads/local/" + objectKey,
-		ExpiresAt: time.Now().Add(15 * time.Minute),
+		UploadURL: b.publicURL + "/v1/uploads/local/" + objectKey + "?" + b.signer.Sign("PUT", objectKey, exp),
+		ExpiresAt: exp,
 	}, nil
 }
 
-func (b *localBucket) SignGet(_ context.Context, objectKey string, _ time.Duration) (string, error) {
-	return b.publicURL + "/v1/uploads/local/" + objectKey, nil
+func (b *localBucket) SignGet(_ context.Context, objectKey string, ttl time.Duration) (string, error) {
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	exp := time.Now().Add(ttl)
+	return b.publicURL + "/v1/uploads/local/" + objectKey + "?" + b.signer.Sign("GET", objectKey, exp), nil
 }
+
+// Signer exposes the URL signer so the local PUT/GET routes can verify grants.
+func (b *localBucket) Signer() *LocalSigner { return b.signer }
 
 // Put writes bytes to the on-disk object store, under the same objects/ root the
 // local PUT/GET routes use (so a server-side write is readable via SignGet).

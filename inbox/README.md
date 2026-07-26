@@ -42,7 +42,7 @@ requests trigger a resubscribe so their conv channel is covered.
 
 ### Search (§4.3)
 
-The list's search bar calls `GET /v1/admin/search` (debounced) — mixed tokens:
+The list's search bar calls `GET /v1/conversations?q=` (debounced) — mixed tokens:
 `status:`/`assignee:me`/`role:`/`channel:`/`meta.*:` filters plus free keywords
 (partial trigram match on message bodies + member metadata). Results replace the
 queue list with the matched-message snippet as the preview.

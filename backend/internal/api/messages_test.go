@@ -18,8 +18,10 @@ func TestInternalNoteIsolation(t *testing.T) {
 	h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
 	agentCookie := loginAs(t, h, "agent@test")
 
-	var conv struct{ ID string `json:"id"` }
-	w := h.Request("POST", "/v1/me/support-requests").Bearer(tok).JSON(map[string]any{}).Do()
+	var conv struct {
+		ID string `json:"id"`
+	}
+	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{}).Do()
 	testutil.DecodeJSON(t, w, &conv)
 
 	// agent posts an internal note
@@ -34,7 +36,7 @@ func TestInternalNoteIsolation(t *testing.T) {
 
 	// client history excludes the internal note
 	var clientView struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []map[string]any `json:"items"`
 	}
 	w = h.Request("GET", "/v1/conversations/"+conv.ID+"/messages").Bearer(tok).Do()
 	testutil.DecodeJSON(t, w, &clientView)
@@ -46,7 +48,7 @@ func TestInternalNoteIsolation(t *testing.T) {
 
 	// agent history includes it
 	var agentView struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []map[string]any `json:"items"`
 	}
 	w = h.Request("GET", "/v1/conversations/"+conv.ID+"/messages").Cookie("sild_admin", agentCookie).Do()
 	testutil.DecodeJSON(t, w, &agentView)
@@ -71,8 +73,10 @@ func TestUserCannotPostInternal(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	tok := h.MintToken(tenant.ID, "u_client")
-	var conv struct{ ID string `json:"id"` }
-	w := h.Request("POST", "/v1/me/support-requests").Bearer(tok).JSON(map[string]any{}).Do()
+	var conv struct {
+		ID string `json:"id"`
+	}
+	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{}).Do()
 	testutil.DecodeJSON(t, w, &conv)
 
 	w = h.Request("POST", "/v1/conversations/"+conv.ID+"/messages").
@@ -87,8 +91,10 @@ func TestPaginationBeforeHasMore(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	tok := h.MintToken(tenant.ID, "u_client")
-	var conv struct{ ID string `json:"id"` }
-	w := h.Request("POST", "/v1/me/support-requests").Bearer(tok).JSON(map[string]any{}).Do()
+	var conv struct {
+		ID string `json:"id"`
+	}
+	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{}).Do()
 	testutil.DecodeJSON(t, w, &conv)
 
 	for i := 0; i < 5; i++ {
@@ -96,7 +102,7 @@ func TestPaginationBeforeHasMore(t *testing.T) {
 			Bearer(tok).JSON(map[string]any{"body": fmt.Sprintf("m%d", i)}).Do()
 	}
 	var page struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []map[string]any `json:"items"`
 		HasMore  bool             `json:"has_more"`
 	}
 	w = h.Request("GET", "/v1/conversations/"+conv.ID+"/messages?limit=2").Bearer(tok).Do()

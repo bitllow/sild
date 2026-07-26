@@ -7,7 +7,7 @@ import type {
   ApiTeamMember,
   ApiWebhook,
 } from "@/api/admin";
-import type { ApiMessagesPage, ApiQueueItem } from "@/api/admin";
+import type { ApiMessagesPage, ApiQueueConversation } from "@/api/admin";
 import type { ApiAssignment } from "@/api/admin";
 import type { MessageAttachment } from "@/components/ds";
 import type { Channel, Conversation, EmailChannel, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
@@ -152,12 +152,12 @@ export function buildConversation(
   assignment?: ApiAssignment
 ): Conversation {
   const a = assignment || conv.assignment;
-  const msgs = [...page.messages]
+  const msgs = [...page.items]
     .sort((x, y) => x.created_at.localeCompare(y.created_at))
     .map((m) => mapMessage(m, conv));
   const last = msgs.filter((m) => !m.system).slice(-1)[0] || msgs.slice(-1)[0];
   const preview = conv.status === "closed" ? "Conversation closed" : last?.body || "";
-  const lastTs = page.messages.length ? page.messages[page.messages.length - 1].created_at : conv.created_at;
+  const lastTs = page.items.length ? page.items[page.items.length - 1].created_at : conv.created_at;
 
   return {
     ...conversationShell(conv, a),
@@ -171,12 +171,13 @@ export function buildConversation(
 
 /** Build a queue row from the paginated list endpoint: members + last-message
  *  preview + last activity, but NO history (messages load on open). */
-export function buildQueueRow(item: ApiQueueItem): Conversation {
-  const conv = item.conversation;
+export function buildQueueRow(conv: ApiQueueConversation): Conversation {
   const lastTs = conv.last_activity;
-  const preview = conv.status === "closed" ? "Conversation closed" : conv.last_message?.body || "";
+  // Preview the matching fragment, or an old-message hit looks unrelated.
+  const preview =
+    conv.snippet || (conv.status === "closed" ? "Conversation closed" : conv.last_message?.body || "");
   return {
-    ...conversationShell(conv, item.assignment),
+    ...conversationShell(conv, conv.assignment),
     time: relativeTime(lastTs),
     lastActivity: lastTs,
     preview,

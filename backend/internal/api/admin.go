@@ -2,10 +2,9 @@ package api
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
@@ -13,7 +12,6 @@ import (
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
-	"github.com/bitllow/sild/backend/internal/views"
 	"github.com/gin-gonic/gin"
 )
 
@@ -70,7 +68,10 @@ func (h *Handler) adminPasswordLogin(c *gin.Context) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Email == "" || req.Password == "" {
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if req.Email == "" || req.Password == "" {
 		httpx.BadRequest(c, "email and password are required")
 		return
 	}
@@ -114,8 +115,7 @@ func (h *Handler) setAgentPassword(c *gin.Context) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	// A password reset is account takeover by another name.
@@ -152,183 +152,15 @@ func (h *Handler) realtimeToken(c *gin.Context) {
 
 // ── Inbox (§4.3) ────────────────────────────────────────────────────────────
 
-func (h *Handler) listAssignments(c *gin.Context) {
-	p := store.QueueParams{Sort: store.QueueSortLastActivity, Desc: true, Limit: 30}
-	if s := c.Query("status"); s != "" {
-		v := models.AssignmentStatus(s)
-		p.Status = &v
-	}
-	if a := c.Query("assignee"); a != "" {
-		if a == "me" {
-			a = middleware.Get(c).AdminID
-		}
-		p.Assignee = &a
-	}
-	// "Show closed" off (the default for the All scope) drops closed assignments.
-	if c.Query("exclude_closed") == "true" {
-		p.ExcludeClosed = true
-	}
-	switch store.QueueSort(c.Query("sort")) {
-	case store.QueueSortCreated:
-		p.Sort = store.QueueSortCreated
-	case store.QueueSortWaiting:
-		p.Sort = store.QueueSortWaiting
-	}
-	if c.Query("order") == "asc" {
-		p.Desc = false
-	}
-	p.Limit = atoiDefault(c.Query("limit"), p.Limit) // store clamps to [1,100]
-	if cur := c.Query("cursor"); cur != "" {
-		cc, err := decodeQueueCursor(cur)
-		if err != nil {
-			httpx.BadRequest(c, "invalid cursor")
-			return
-		}
-		p.Cursor = cc
-	}
-
-	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
-	actor := middleware.Get(c).AdminID
-	// The badges (open count + the You/Unassigned/Closed scope counters) are
-	// independent of the page, so compute them concurrently with the queue query
-	// rather than adding serial round-trips. Buffered so the goroutines never
-	// block if ListQueue errors out below.
-	openCh := make(chan int64, 1)
-	go func() {
-		n, _ := h.svc.CountOpenConversations(ctx, tenant)
-		openCh <- n
-	}()
-	countsCh := make(chan store.QueueCounts, 1)
-	go func() {
-		cnt, _ := h.svc.CountQueue(ctx, tenant, actor)
-		countsCh <- cnt
-	}()
-
-	page, err := h.svc.ListQueue(ctx, tenant, p)
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	items := make([]map[string]any, 0, len(page.Items))
-	for i := range page.Items {
-		items = append(items, views.QueueRow(&page.Items[i]))
-	}
-	counts := <-countsCh
-	c.JSON(http.StatusOK, gin.H{
-		"items":            items,
-		"next_cursor":      encodeQueueCursor(page.NextCursor),
-		"has_more":         page.HasMore,
-		"open_count":       <-openCh,
-		"you_count":        counts.You,
-		"unassigned_count": counts.Unassigned,
-		"closed_count":     counts.Closed,
-	})
-}
-
-// listContactConversations: GET /v1/admin/contacts/conversations?external_user_id=…
-// returns every thread the contact takes part in (Details-panel history + the
-// "View all from" contact filter, §4.3).
-func (h *Handler) listContactConversations(c *gin.Context) {
-	ext := c.Query("external_user_id")
-	if ext == "" {
-		httpx.BadRequest(c, "external_user_id is required")
-		return
-	}
-	convs, err := h.svc.ListContactConversations(c.Request.Context(), apiutil.Tenant(c), ext)
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"conversations": convs})
-}
-
-// queueCursorDTO is the wire form of a keyset cursor, base64(JSON).
-type queueCursorDTO struct {
-	V  time.Time `json:"v"`
-	ID string    `json:"id"`
-}
-
-func encodeQueueCursor(c *store.QueueCursor) any {
-	if c == nil {
-		return nil
-	}
-	b, err := json.Marshal(queueCursorDTO{V: c.Value, ID: c.ID})
-	if err != nil {
-		return nil
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func decodeQueueCursor(s string) (*store.QueueCursor, error) {
-	b, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return nil, err
-	}
-	var dto queueCursorDTO
-	if err := json.Unmarshal(b, &dto); err != nil {
-		return nil, err
-	}
-	return &store.QueueCursor{Value: dto.V, ID: dto.ID}, nil
-}
-
-func (h *Handler) adminOpenSupportRequest(c *gin.Context) {
-	var req struct {
-		ExternalUserID string          `json:"external_user_id"`
-		Metadata       json.RawMessage `json:"metadata"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
-		return
-	}
-	conv, assignment, err := h.svc.OpenSupportRequest(c.Request.Context(), apiutil.Tenant(c), req.ExternalUserID, req.Metadata)
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.JSON(http.StatusCreated, views.Conversation(conv, conv.Members, assignment))
-}
-
-func (h *Handler) claimAssignment(c *gin.Context) {
-	a, err := h.svc.ClaimAssignment(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), middleware.Get(c).AdminID)
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, views.Assignment(a))
-}
-
-func (h *Handler) closeAssignmentAdmin(c *gin.Context) {
-	a, err := h.svc.CloseAssignment(c.Request.Context(), apiutil.Tenant(c), c.Param("id"))
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, views.Assignment(a))
-}
-
-func (h *Handler) adminSearch(c *gin.Context) {
-	// ?peer=true scopes the search to peer conversations — gated on peer access,
-	// mirroring the peer-list endpoint.
-	peerOnly := c.Query("peer") == "true"
-	if peerOnly && !requirePeerAccess(c) {
-		return
-	}
-	res, err := h.search.Search(c.Request.Context(), apiutil.Tenant(c),
-		c.Query("q"), middleware.Get(c).AdminID, c.Query("before"), atoiDefault(c.Query("limit"), 25), peerOnly)
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, res)
-}
-
 // ── Settings: API keys, webhooks, team (§4.3, owner/admin only) ──────────────
 
 func (h *Handler) createAPIKey(c *gin.Context) {
 	var req struct {
 		Label string `json:"label"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	if !httpx.DecodeJSONOptional(c, &req) {
+		return
+	}
 	full, rec, err := h.svc.CreateAPIKey(c.Request.Context(), apiutil.Tenant(c), req.Label)
 	if err != nil {
 		apiutil.Fail(c, err)
@@ -338,6 +170,10 @@ func (h *Handler) createAPIKey(c *gin.Context) {
 }
 
 func (h *Handler) listAPIKeys(c *gin.Context) {
+	page, ok := apiutil.PageParams(c, settingsPageDefaults(resourceAPIKeys))
+	if !ok {
+		return
+	}
 	keys, err := h.svc.ListAPIKeys(c.Request.Context(), apiutil.Tenant(c))
 	if err != nil {
 		apiutil.Fail(c, err)
@@ -350,7 +186,7 @@ func (h *Handler) listAPIKeys(c *gin.Context) {
 			"created_at": k.CreatedAt, "revoked_at": k.RevokedAt,
 		})
 	}
-	c.JSON(http.StatusOK, out)
+	apiutil.RespondPage(c, resourceAPIKeys, store.SlicePage(descByID(out), page, mapID))
 }
 
 func (h *Handler) revokeAPIKey(c *gin.Context) {
@@ -366,8 +202,7 @@ func (h *Handler) createWebhook(c *gin.Context) {
 		URL    string   `json:"url"`
 		Events []string `json:"events"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	ep, err := h.svc.CreateWebhook(c.Request.Context(), apiutil.Tenant(c), req.URL, req.Events)
@@ -379,6 +214,10 @@ func (h *Handler) createWebhook(c *gin.Context) {
 }
 
 func (h *Handler) listWebhooks(c *gin.Context) {
+	page, ok := apiutil.PageParams(c, settingsPageDefaults(resourceWebhooks))
+	if !ok {
+		return
+	}
 	eps, err := h.svc.ListWebhooks(c.Request.Context(), apiutil.Tenant(c))
 	if err != nil {
 		apiutil.Fail(c, err)
@@ -392,7 +231,7 @@ func (h *Handler) listWebhooks(c *gin.Context) {
 		}
 		out = append(out, map[string]any{"id": e.ID, "url": e.URL, "events": events, "active": e.Active, "created_at": e.CreatedAt})
 	}
-	c.JSON(http.StatusOK, out)
+	apiutil.RespondPage(c, resourceWebhooks, store.SlicePage(descByID(out), page, mapID))
 }
 
 func (h *Handler) deleteWebhook(c *gin.Context) {
@@ -404,15 +243,37 @@ func (h *Handler) deleteWebhook(c *gin.Context) {
 }
 
 func (h *Handler) listDeliveries(c *gin.Context) {
+	page, ok := apiutil.PageParams(c, settingsPageDefaults(resourceDeliveries))
+	if !ok {
+		return
+	}
 	ds, err := h.svc.ListDeliveries(c.Request.Context(), apiutil.Tenant(c), c.Param("id"))
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, ds)
+	sort.Slice(ds, func(i, j int) bool { return ds[i].ID > ds[j].ID })
+	res := store.SlicePage(ds, page, func(d *models.WebhookDelivery) string { return d.ID })
+	// Rendered, not serialized from the model: the row has no JSON tags, so it
+	// would go out with Go field names and carry tenant_id to the client.
+	items := make([]gin.H, 0, len(res.Items))
+	for _, d := range res.Items {
+		items = append(items, gin.H{
+			"id": d.ID, "event_id": d.EventID, "event_type": d.EventType,
+			"attempt": d.Attempt, "status": d.Status, "status_code": d.StatusCode,
+			"response": d.Response, "created_at": d.CreatedAt,
+		})
+	}
+	apiutil.RespondPage(c, resourceDeliveries, store.Page[gin.H]{
+		Items: items, NextCursor: res.NextCursor, HasMore: res.HasMore,
+	})
 }
 
 func (h *Handler) listTeam(c *gin.Context) {
+	page, ok := apiutil.PageParams(c, settingsPageDefaults(resourceTeam))
+	if !ok {
+		return
+	}
 	admins, err := h.svc.ListAdmins(c.Request.Context(), apiutil.Tenant(c))
 	if err != nil {
 		apiutil.Fail(c, err)
@@ -428,14 +289,17 @@ func (h *Handler) listTeam(c *gin.Context) {
 			"has_password": a.PasswordHash != nil, "created_at": a.CreatedAt,
 		})
 	}
-	c.JSON(http.StatusOK, out)
+	apiutil.RespondPage(c, resourceTeam, store.SlicePage(descByID(out), page, mapID))
 }
 
 func (h *Handler) updateWebhook(c *gin.Context) {
 	var req struct {
 		Active *bool `json:"active"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Active == nil {
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if req.Active == nil {
 		httpx.BadRequest(c, "active is required")
 		return
 	}
@@ -451,8 +315,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		PlatformRole *models.PlatformRole `json:"platform_role"`
 		PeerAccess   *bool                `json:"peer_access"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	if req.PlatformRole == nil && req.PeerAccess == nil {
@@ -485,22 +348,6 @@ func (h *Handler) updateAgent(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// adminMe: GET /v1/admin/me — the signed-in operator's identity, so the inbox
-// can gate the peer-conversations nav on peer_access and mark "You" in the team
-// list. Any authenticated admin may read their own record.
-func (h *Handler) adminMe(c *gin.Context) {
-	p := middleware.Get(c)
-	a, err := h.svc.GetAdmin(c.Request.Context(), p.TenantID, p.AdminID)
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"id": a.ID, "email": a.Email, "platform_role": a.PlatformRole,
-		"first_name": a.FirstName, "last_name": a.LastName, "peer_access": a.PeerAccess,
-	})
-}
-
 func (h *Handler) inviteAgent(c *gin.Context) {
 	var req struct {
 		Email        string              `json:"email"`
@@ -508,8 +355,7 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 		LastName     string              `json:"last_name"`
 		PlatformRole models.PlatformRole `json:"platform_role"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	if !h.guardOwnerMutation(c, "", &req.PlatformRole) {
@@ -521,4 +367,32 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "first_name": a.FirstName, "last_name": a.LastName, "platform_role": a.PlatformRole})
+}
+
+// settingsPageDefaults is the paging contract for tenant-settings collections.
+// They are bounded per tenant, so the default limit of 100 means one page covers
+// a whole team or key list in practice — but the mechanism is real, not a stub:
+// seed 150 keys and the second page works, because nothing here is special-cased.
+func settingsPageDefaults(resource string) apiutil.PageDefaults {
+	return apiutil.PageDefaults{
+		Resource:   resource,
+		Limit:      100,
+		Sort:       store.SortID,
+		Order:      store.OrderDesc,
+		FixedOrder: true,
+	}
+}
+
+// mapID is the keyset id for a rendered settings row.
+func mapID(m *map[string]any) string {
+	id, _ := (*m)["id"].(string)
+	return id
+}
+
+// descByID orders rendered settings rows newest-first, matching the descending
+// cursor SlicePage mints. The repos return them oldest-first, and a cursor taken
+// from an ascending slice would re-serve page one instead of advancing.
+func descByID(rows []map[string]any) []map[string]any {
+	sort.Slice(rows, func(i, j int) bool { return mapID(&rows[i]) > mapID(&rows[j]) })
+	return rows
 }

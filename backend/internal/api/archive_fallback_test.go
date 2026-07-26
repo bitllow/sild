@@ -21,8 +21,10 @@ func TestArchivedReadFallbackThroughAPI(t *testing.T) {
 	ctx := context.Background()
 
 	// client opens a support request and sends a message
-	var conv struct{ ID string `json:"id"` }
-	w := h.Request("POST", "/v1/me/support-requests").Bearer(tok).JSON(map[string]any{}).Do()
+	var conv struct {
+		ID string `json:"id"`
+	}
+	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{}).Do()
 	testutil.DecodeJSON(t, w, &conv)
 	h.Request("POST", "/v1/conversations/"+conv.ID+"/messages").Bearer(tok).JSON(map[string]any{"body": "archived hello"}).Do()
 
@@ -39,7 +41,7 @@ func TestArchivedReadFallbackThroughAPI(t *testing.T) {
 
 	// the former member can still read the (archived) messages
 	var page struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []map[string]any `json:"items"`
 	}
 	w = h.Request("GET", "/v1/conversations/"+conv.ID+"/messages").Bearer(tok).Do()
 	if w.Code != http.StatusOK {

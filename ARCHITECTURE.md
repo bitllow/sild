@@ -68,7 +68,9 @@ backend/
 │   ├── di/                   # dig container = the composition root
 │   │
 │   ├── server/               # gin engine + router + middleware ONLY
-│   │   └── middleware/       # auth, tenant-scope, request-id, recovery
+│   │   ├── middleware/       # auth, tenant-scope, request-id, body limits, rate limit
+│   │   ├── policy/           # the authorization decision point (actions, scopes)
+│   │   └── principal/        # the authenticated caller (dependency-neutral)
 │   │
 │   ├── api/                  # gin handlers, grouped by audience (§4)
 │   │   ├── integration/      #   §4.1 API-key   (server↔server)
@@ -235,6 +237,76 @@ needed; AutoMigrate covers development and the OSS install path until then.
 
 ## 5. Cross-cutting concerns
 
+### APIs are data-model-oriented, not consumer-oriented
+
+A path names *what* is being addressed. The credential names *who* is asking, and
+therefore what subset of that model they may see. Two consumers reading the same
+model call the same URL — the inbox, the web drop-in, the native SDK and a host
+backend all `GET /v1/conversations`; they differ only in the scope their
+principal resolves to.
+
+The sole exception is **authentication**: obtaining a credential genuinely
+differs per consumer, so `/v1/admin/auth/*` stays consumer-shaped. A route that
+exists because "the inbox needs it" and not because it addresses a distinct
+model is a bug.
+
+A resource may be a **read model** rather than a table — `contacts` projects over
+`conversation_members` — provided its projection rules (identity, precedence,
+ordering, what counts) are written down. A resource may also be an **aggregate**
+rather than a collection when it is read and written as a unit: `/v1/brands`
+returns `{brands, active_brand_id}` and `PUT` replaces the whole set, so a
+paginated read would be incoherent. The test is the write path — if `PUT`
+replaces everything, `GET` is not a page.
+
+### Collections page one way
+
+Every list response is `{ items, next_cursor, has_more }` and every list request
+takes `?limit=` and `?cursor=`. `next_cursor` is null exactly when `has_more` is
+false. A resource does not get to invent its own paging dialect.
+
+The cursor is **opaque, versioned and fully bound** — base64url(JSON) carrying
+the resource, sort key, direction and a fingerprint of the filter set (every
+non-paging query parameter plus the path parameters, hashed generically from the
+request). A cursor replayed under a different ordering, resource or filter set is
+a 400 rather than a wrong answer under a 200.
+
+Keyset, never offset. But keyset is only *stable* when the ordering key is
+immutable: `last_activity` is rewritten by every inbound message, so paging on it
+is **live-view** — duplicates and gaps are possible across page boundaries while
+rows change. Clients deduplicate by id and refresh page one on a realtime
+reorder. Sorts on `created` or id are exact.
+
+Catch-up is not pagination. `?since=<message_id>` is the reconnect primitive
+(§5.4): oldest-first, bounded, continued by re-issuing with the last id received.
+It shares the envelope so clients keep one parser, but `next_cursor` is always
+null — the message id *is* the position.
+
+### Authorization is attribute-based and lives in one package
+
+A decision depends on principal kind, platform role, `peer_access`, membership,
+assignment existence, conversation kind and status — not on a role alone.
+`internal/policy` owns all of it:
+
+- `policy.Authorize(principal, action, attrs)` decides a named action against a
+  resource; `policy.Scope(principal, action)` produces the ceiling for a
+  collection query.
+- Roles map to capabilities in **one** table. Handlers do not read `Role` or
+  `PeerAccess`.
+- Repositories take a `policy.ResourceScope` that only `policy` can construct
+  (unexported fields, no public constructor), so a query that skipped
+  authorization does not compile. Inspection is exported and returns copies —
+  readable, never widenable.
+- **REST and realtime consume the same decisions.** `agentSubscriptions` derives
+  its channel set from `policy.Scope`, because two implementations of one policy
+  is how a socket leaks what an endpoint refuses.
+- A client filter may only *narrow* a scope. Lists intersect (an out-of-scope
+  filter returns an empty page); a named single object returns 403, because there
+  the caller identified something specific and silence is the worse answer.
+
+`policy` imports neither `middleware` nor `store`. The `Principal` type lives in
+`internal/principal` so that stays true — `middleware` imports `store` to resolve
+credentials, which would otherwise close a cycle.
+
 ### Tenancy
 
 The spec invariant — *tenant is never client-supplied; `tenant_id` on every
@@ -267,7 +339,7 @@ row* — is enforced structurally:
 
 ULIDs with a type prefix (`c_…`, `m_…`), generated in `internal/id`.
 Lexicographic order == chronological order, which is load-bearing for:
-- cursor pagination (`?before=` / `?after=`), and
+- keyset cursor pagination (`?cursor=`) and reconnect catch-up (`?since=`), and
 - the monotonic read-receipt guard (compare ids directly).
 
 ---
@@ -280,7 +352,7 @@ These came out of spec review; this records their resolution in the structure.
 |---|---|
 | `tenant_id` missing on `conversation_members`, `message_attachments`, `read_receipts` | column added to every model; repo signatures take `tenantID` |
 | Archive read auth vs. deleted `conversation_members` | `archive` persists a **membership snapshot** in the tombstone; archived reads authorize against the snapshot, not hot membership |
-| Reconnect catch-up misses convos added while offline | SDK contract: re-fetch `/v1/me/conversations` **before** per-conv `after=` catch-up (doc-only; no backend change) |
+| Reconnect catch-up misses convos added while offline | SDK contract: re-fetch `/v1/conversations` **before** per-conv `since=` catch-up (doc-only; no backend change) |
 | Unsortable message ids break pagination & `GREATEST` | ULID ids (`internal/id`) — sortable strings |
 | Admin tenant resolution underspecified | admin session carries tenant + platform role; multi-tenant admins use an explicit tenant selector (open spec decision, surfaced in P2) |
 | Guests not distinguishable from users | explicit `guest:true` member metadata + token scope hint; widget gates the list-view affordance on it (open spec decision, surfaced in P3) |

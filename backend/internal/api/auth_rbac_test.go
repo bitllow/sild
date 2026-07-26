@@ -20,16 +20,48 @@ func TestInvalidAPIKeyRejected(t *testing.T) {
 	}
 }
 
-// §4.0: a user JWT may NOT create arbitrary conversations (API-key only route).
-func TestUserCannotCreateConversation(t *testing.T) {
+// §4.0: a user JWT may open a SUPPORT conversation for itself, but never a peer
+// one — a peer conversation is visible to every peer_access operator, so minting
+// one would let a user inject rows into the operator peer inbox.
+func TestUserCanOpenSupportButNotPeer(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	tok := h.MintToken(tenant.ID, "u_client")
-	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{
-		"members": []map[string]any{{"user_id": "u_client"}},
+
+	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{}).Do()
+	if w.Code != http.StatusCreated {
+		t.Fatalf("user should open a support conversation, got %d %s", w.Code, w.Body)
+	}
+
+	w = h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{
+		"open_assignment": false,
 	}).Do()
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for user creating conversation, got %d %s", w.Code, w.Body)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("user must not create a peer conversation, got %d %s", w.Code, w.Body)
+	}
+}
+
+// The member list in the body is ignored for a user JWT: self is the only
+// member, so a user cannot add anyone to a conversation they open.
+func TestUserCreateIgnoresSuppliedMembers(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	tok := h.MintToken(tenant.ID, "u_client")
+
+	var conv struct {
+		Members []struct {
+			ExternalUserID string `json:"external_user_id"`
+		} `json:"members"`
+	}
+	w := h.Request("POST", "/v1/conversations").Bearer(tok).JSON(map[string]any{
+		"members": []map[string]any{{"user_id": "u_someone_else"}},
+	}).Do()
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	testutil.DecodeJSON(t, w, &conv)
+	if len(conv.Members) != 1 || conv.Members[0].ExternalUserID != "u_client" {
+		t.Fatalf("expected self as the only member, got %+v", conv.Members)
 	}
 }
 
@@ -38,7 +70,9 @@ func TestNonMemberForbidden(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	key := h.SeedAPIKey(tenant.ID)
-	var conv struct{ ID string `json:"id"` }
+	var conv struct {
+		ID string `json:"id"`
+	}
 	w := h.Request("POST", "/v1/conversations").Bearer(key).JSON(map[string]any{
 		"members": []map[string]any{{"user_id": "u_member"}},
 	}).Do()
@@ -60,10 +94,10 @@ func TestPlatformRoleGuardsAPIKeys(t *testing.T) {
 	agentCookie := loginAs(t, h, "agent@test")
 	ownerCookie := loginAs(t, h, "owner@test")
 
-	if w := h.Request("POST", "/v1/admin/api-keys").Cookie("sild_admin", agentCookie).JSON(map[string]any{"label": "x"}).Do(); w.Code != http.StatusForbidden {
+	if w := h.Request("POST", "/v1/api-keys").Cookie("sild_admin", agentCookie).JSON(map[string]any{"label": "x"}).Do(); w.Code != http.StatusForbidden {
 		t.Fatalf("agent must not create api keys, got %d %s", w.Code, w.Body)
 	}
-	if w := h.Request("POST", "/v1/admin/api-keys").Cookie("sild_admin", ownerCookie).JSON(map[string]any{"label": "x"}).Do(); w.Code != http.StatusCreated {
+	if w := h.Request("POST", "/v1/api-keys").Cookie("sild_admin", ownerCookie).JSON(map[string]any{"label": "x"}).Do(); w.Code != http.StatusCreated {
 		t.Fatalf("owner should create api keys, got %d %s", w.Code, w.Body)
 	}
 }

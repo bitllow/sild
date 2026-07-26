@@ -15,11 +15,12 @@ import (
 // settings: the forwarding address an org points its support mailbox at, the
 // verification status, and the per-tenant toggles.
 func (h *Handler) getEmailChannel(c *gin.Context) {
-	ch, err := h.svc.GetEmailChannel(c.Request.Context(), apiutil.Tenant(c))
+	ch, version, err := h.svc.GetEmailChannelVersioned(c.Request.Context(), apiutil.Tenant(c))
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
+	c.Header("ETag", version)
 	c.JSON(http.StatusOK, emailChannelView(ch))
 }
 
@@ -32,17 +33,23 @@ func (h *Handler) updateEmailChannel(c *gin.Context) {
 		FromName    *string `json:"from_name"`
 		FromAddress *string `json:"from_address"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	ch, err := h.svc.UpdateEmailChannel(c.Request.Context(), apiutil.Tenant(c), domain.EmailChannelUpdate{
+	expect, ok := apiutil.RequireIfMatch(c)
+	if !ok {
+		return
+	}
+	ch, version, err := h.svc.UpdateEmailChannel(c.Request.Context(), apiutil.Tenant(c), domain.EmailChannelUpdate{
 		AutoReply: req.AutoReply, SpamFilter: req.SpamFilter, FromName: req.FromName, FromAddress: req.FromAddress,
-	})
+	}, expect)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
+	// The NEW version: without it a client stores null and falls back to
+	// If-Match: * on every later edit, silently losing the protection.
+	c.Header("ETag", version)
 	c.JSON(http.StatusOK, emailChannelView(ch))
 }
 

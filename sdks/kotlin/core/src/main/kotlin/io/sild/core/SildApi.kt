@@ -11,9 +11,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import java.net.URLEncoder
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+
+/** How many conversations the messenger's recent list asks for. */
+internal const val RECENT_CONVERSATIONS = 20
 
 /** Thrown for a non-2xx REST response; message is the server's `error.message`. */
 class SildApiException(val status: Int, message: String) : RuntimeException(message)
@@ -75,27 +79,39 @@ internal class SildApi(private val cfg: SildConfig) {
 
     // ── endpoints ────────────────────────────────────────────────────────────
 
-    /** GET /v1/me/brand → { name, config }. The SDK is authed, so it uses /me/brand.
-     *  The logo URL is re-based onto our base so it loads from any host (see rebaseLocalUrl). */
+    /** GET /v1/brands/active → { name, config }; a credential scopes it to our
+     *  tenant. The logo URL is re-based so it loads from any host. */
     suspend fun fetchBrand(): BrandResponse {
-        val res: BrandResponse = json.decodeFromString(api("GET", "/me/brand"))
+        val res: BrandResponse = json.decodeFromString(api("GET", "/brands/active"))
         return res.copy(config = res.config.copy(logoUrl = rebaseLocalUrl(cfg.base, res.config.logoUrl)))
     }
 
-    /** GET /v1/me/conversations → array of conversations (members + assignment + last_message). */
-    suspend fun listConversations(): List<ApiConversation> =
-        json.decodeFromString(api("GET", "/me/conversations"))
+    /** GET /v1/conversations?limit= → the most recent rows, scoped by credential.
+     *  One bounded page: the messenger shows a short recent list with no paging, and
+     *  this also runs on every reconnect. */
+    suspend fun listConversations(limit: Int = RECENT_CONVERSATIONS): List<ApiConversation> {
+        val page: ApiConversationsPage = json.decodeFromString(api("GET", "/conversations?limit=$limit"))
+        return page.items
+    }
 
-    /** GET /v1/conversations/{id}/messages?limit=100 → { messages }. */
+    /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope. */
     suspend fun listMessages(id: String): ApiMessagesPage =
         json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100"))
 
-    /** POST /v1/me/support-requests { metadata } → { id }. */
+    /** GET /v1/conversations/{id}/messages?since={id} → messages after [since],
+     *  OLDEST first. A sync read, not a page: next_cursor is always null and
+     *  has_more means "call again with the last id you got". */
+    suspend fun catchUpMessages(id: String, since: String, limit: Int = 100): ApiMessagesPage =
+        json.decodeFromString(
+            api("GET", "/conversations/$id/messages?since=${URLEncoder.encode(since, "UTF-8")}&limit=$limit")
+        )
+
+    /** POST /v1/conversations { metadata } → { id }; always a support request. */
     suspend fun openSupportRequest(): String {
         val body = buildJsonObject {
             put("metadata", JsonObject(cfg.metadata.mapValues { JsonPrimitive(it.value) }))
         }
-        val obj = json.parseToJsonElement(api("POST", "/me/support-requests", body.toString())).jsonObject
+        val obj = json.parseToJsonElement(api("POST", "/conversations", body.toString())).jsonObject
         return obj.getValue("id").jsonPrimitive.content
     }
 

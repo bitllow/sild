@@ -34,7 +34,7 @@ func TestPeerAccessGatesEveryRole(t *testing.T) {
 			{"POST", "/v1/conversations/" + peer.ID + "/close"},
 			{"POST", "/v1/conversations/" + peer.ID + "/read"},
 			{"POST", "/v1/conversations/" + peer.ID + "/typing"},
-			{"POST", "/v1/admin/peer-conversations/" + peer.ID + "/messages"},
+			{"POST", "/v1/conversations/" + peer.ID + "/messages"},
 		} {
 			w := h.Request(req.method, req.path).Cookie("sild_admin", cookie).JSON(map[string]any{}).Do()
 			if w.Code != http.StatusForbidden {
@@ -73,7 +73,7 @@ func TestOnlyOwnerMayGrantPeerAccess(t *testing.T) {
 	adminCookie := loginAs(t, h, "admin@test")
 
 	for _, target := range []struct{ who, id string }{{"self", admin.ID}, {"a colleague", agent.ID}} {
-		w := h.Request("PATCH", "/v1/admin/team/"+target.id).
+		w := h.Request("PATCH", "/v1/team/"+target.id).
 			Cookie("sild_admin", adminCookie).JSON(map[string]any{"peer_access": true}).Do()
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("admin granting peer access to %s = %d %s, want 403", target.who, w.Code, w.Body)
@@ -91,14 +91,14 @@ func TestOnlyOwnerMayGrantPeerAccess(t *testing.T) {
 	}
 
 	// Role changes are still an admin's to make.
-	w := h.Request("PATCH", "/v1/admin/team/"+agent.ID).
+	w := h.Request("PATCH", "/v1/team/"+agent.ID).
 		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": string(models.PlatformAdmin)}).Do()
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("admin changing a role = %d %s, want 204", w.Code, w.Body)
 	}
 
 	owner := loginAs(t, h, "owner@test")
-	w = h.Request("PATCH", "/v1/admin/team/"+agent.ID).
+	w = h.Request("PATCH", "/v1/team/"+agent.ID).
 		Cookie("sild_admin", owner).JSON(map[string]any{"peer_access": true}).Do()
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("owner granting peer access = %d %s, want 204", w.Code, w.Body)
@@ -122,20 +122,20 @@ func TestAdminCannotEscalateToOwnerForPeerAccess(t *testing.T) {
 	adminCookie := loginAs(t, h, "admin@test")
 
 	// Self-promotion is refused.
-	w := h.Request("PATCH", "/v1/admin/team/"+admin.ID).
+	w := h.Request("PATCH", "/v1/team/"+admin.ID).
 		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": "owner"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin self-promoting to owner = %d %s, want 403", w.Code, w.Body)
 	}
 	// Nor promoting a colleague.
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
-	w = h.Request("PATCH", "/v1/admin/team/"+agent.ID).
+	w = h.Request("PATCH", "/v1/team/"+agent.ID).
 		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": "owner"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin appointing another owner = %d %s, want 403", w.Code, w.Body)
 	}
 	// Nor demoting the real owner out of the way.
-	w = h.Request("PATCH", "/v1/admin/team/"+ownerRec.ID).
+	w = h.Request("PATCH", "/v1/team/"+ownerRec.ID).
 		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": "agent"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin demoting the owner = %d %s, want 403", w.Code, w.Body)
@@ -171,7 +171,7 @@ func TestOwnerAccountIsProtectedOnEveryTeamRoute(t *testing.T) {
 	adminCookie := loginAs(t, h, "admin@test")
 
 	// POST /team — no minting an owner you control.
-	w := h.Request("POST", "/v1/admin/team").Cookie("sild_admin", adminCookie).
+	w := h.Request("POST", "/v1/team").Cookie("sild_admin", adminCookie).
 		JSON(map[string]any{"email": "attacker@test", "platform_role": "owner"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin inviting an owner = %d %s, want 403", w.Code, w.Body)
@@ -183,7 +183,7 @@ func TestOwnerAccountIsProtectedOnEveryTeamRoute(t *testing.T) {
 	}
 
 	// POST /team/:id/password — no taking over the owner's login.
-	w = h.Request("POST", "/v1/admin/team/"+owner.ID+"/password").Cookie("sild_admin", adminCookie).
+	w = h.Request("POST", "/v1/team/"+owner.ID+"/password").Cookie("sild_admin", adminCookie).
 		JSON(map[string]any{"password": "attacker-chosen-password"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin resetting the owner's password = %d %s, want 403", w.Code, w.Body)
@@ -199,22 +199,22 @@ func TestOwnerAccountIsProtectedOnEveryTeamRoute(t *testing.T) {
 	}
 
 	// Legitimate team management still works.
-	if w := h.Request("POST", "/v1/admin/team").Cookie("sild_admin", adminCookie).
+	if w := h.Request("POST", "/v1/team").Cookie("sild_admin", adminCookie).
 		JSON(map[string]any{"email": "helper@test", "platform_role": "agent"}).Do(); w.Code != http.StatusCreated {
 		t.Fatalf("admin inviting an agent = %d %s, want 201", w.Code, w.Body)
 	}
-	if w := h.Request("POST", "/v1/admin/team/"+agent.ID+"/password").Cookie("sild_admin", adminCookie).
+	if w := h.Request("POST", "/v1/team/"+agent.ID+"/password").Cookie("sild_admin", adminCookie).
 		JSON(map[string]any{"password": "a-fine-password"}).Do(); w.Code != http.StatusNoContent {
 		t.Fatalf("admin resetting an agent's password = %d %s, want 204", w.Code, w.Body)
 	}
 
 	// The owner may do all of it.
 	ownerCookie := loginAs(t, h, "owner@test")
-	if w := h.Request("POST", "/v1/admin/team").Cookie("sild_admin", ownerCookie).
+	if w := h.Request("POST", "/v1/team").Cookie("sild_admin", ownerCookie).
 		JSON(map[string]any{"email": "co-owner@test", "platform_role": "owner"}).Do(); w.Code != http.StatusCreated {
 		t.Fatalf("owner inviting an owner = %d %s, want 201", w.Code, w.Body)
 	}
-	if w := h.Request("POST", "/v1/admin/team/"+owner.ID+"/password").Cookie("sild_admin", ownerCookie).
+	if w := h.Request("POST", "/v1/team/"+owner.ID+"/password").Cookie("sild_admin", ownerCookie).
 		JSON(map[string]any{"password": "owner-new-password"}).Do(); w.Code != http.StatusNoContent {
 		t.Fatalf("owner resetting their own password = %d %s, want 204", w.Code, w.Body)
 	}
@@ -238,10 +238,10 @@ func TestLastOwnerCannotBeDemoted(t *testing.T) {
 	ctx := context.Background()
 	cookie := loginAs(t, h, "owner@test")
 
-	w := h.Request("PATCH", "/v1/admin/team/"+owner.ID).
+	w := h.Request("PATCH", "/v1/team/"+owner.ID).
 		Cookie("sild_admin", cookie).JSON(map[string]any{"platform_role": "admin"}).Do()
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("sole owner self-demotion = %d %s, want 400", w.Code, w.Body)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("sole owner self-demotion = %d %s, want 422", w.Code, w.Body)
 	}
 	if a, err := h.Store.Admins().Get(ctx, tenant.ID, owner.ID); err != nil || a.PlatformRole != models.PlatformOwner {
 		t.Fatalf("owner must still be owner (err=%v)", err)
@@ -249,11 +249,11 @@ func TestLastOwnerCannotBeDemoted(t *testing.T) {
 
 	// With a co-owner, stepping down is allowed.
 	second := h.SeedAdmin(tenant.ID, "second@test", models.PlatformAgent)
-	if w := h.Request("PATCH", "/v1/admin/team/"+second.ID).
+	if w := h.Request("PATCH", "/v1/team/"+second.ID).
 		Cookie("sild_admin", cookie).JSON(map[string]any{"platform_role": "owner"}).Do(); w.Code != http.StatusNoContent {
 		t.Fatalf("owner appointing a second owner = %d %s, want 204", w.Code, w.Body)
 	}
-	if w := h.Request("PATCH", "/v1/admin/team/"+owner.ID).
+	if w := h.Request("PATCH", "/v1/team/"+owner.ID).
 		Cookie("sild_admin", cookie).JSON(map[string]any{"platform_role": "admin"}).Do(); w.Code != http.StatusNoContent {
 		t.Fatalf("owner stepping down with a co-owner = %d %s, want 204", w.Code, w.Body)
 	}
@@ -300,9 +300,10 @@ func TestCloseRequiresConversationAccess(t *testing.T) {
 	}
 }
 
-// Operator peer messages must go through the dedicated route, which owns the
-// implicit join; the shared route would post as an agent who never joined.
-func TestSharedSendRejectsOperatorPeerWrite(t *testing.T) {
+// An operator sending into a peer conversation implicitly joins it. That is a
+// property of the data — operator + peer conversation — not of the URL, so it
+// fires on the shared send route rather than a separate one.
+func TestSharedSendImplicitlyJoinsOperator(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
@@ -314,32 +315,30 @@ func TestSharedSendRejectsOperatorPeerWrite(t *testing.T) {
 	peer := mkPeer(t, h, tenant.ID, "trip_send")
 
 	w := h.Request("POST", "/v1/conversations/"+peer.ID+"/messages").
-		Cookie("sild_admin", owner).JSON(map[string]any{"body": "sneaking in"}).Do()
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("operator peer write on the shared route: %d %s, want 403", w.Code, w.Body)
+		Cookie("sild_admin", owner).JSON(map[string]any{"body": "stepping in"}).Do()
+	if w.Code != http.StatusCreated {
+		t.Fatalf("operator peer write on the shared route: %d %s, want 201", w.Code, w.Body)
 	}
 	page, err := h.Store.Messages().ListBefore(ctx, tenant.ID, peer.ID, "", 50, true)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(page.Messages) != 0 {
-		t.Fatalf("no message should have been created, got %d", len(page.Messages))
+	// The agent message plus the system join-note.
+	if len(page.Messages) != 2 {
+		t.Fatalf("expected the message and a join note, got %d", len(page.Messages))
 	}
 	members, err := h.Store.Members().ListActive(ctx, tenant.ID, peer.ID)
 	if err != nil {
 		t.Fatalf("members: %v", err)
 	}
+	joined := false
 	for i := range members {
 		if members[i].MemberKind == models.MemberAgent {
-			t.Fatalf("no agent should have been joined")
+			joined = true
 		}
 	}
-
-	// The dedicated route still works.
-	w = h.Request("POST", "/v1/admin/peer-conversations/"+peer.ID+"/messages").
-		Cookie("sild_admin", owner).JSON(map[string]any{"body": "stepping in"}).Do()
-	if w.Code != http.StatusCreated {
-		t.Fatalf("peer route: %d %s, want 201", w.Code, w.Body)
+	if !joined {
+		t.Fatal("the operator should have been joined as an agent participant")
 	}
 
 	// Support conversations are unaffected.

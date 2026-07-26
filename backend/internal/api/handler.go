@@ -4,12 +4,17 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"slices"
 
+	"github.com/bitllow/sild/backend/internal/apiutil"
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/webasset"
@@ -32,101 +37,126 @@ func New(svc *domain.Service, search *domain.SearchService, mw *middleware.Auth,
 	return &Handler{svc: svc, search: search, mw: mw, km: km, authn: authn, bucket: bucket, cfg: cfg}
 }
 
-// Mount attaches every route to the engine.
+// Mount builds the router from the route manifest. Each route's middleware chain
+// is DERIVED from its descriptor, so a route cannot be registered without a
+// declared classification and principal set, and cannot be moved into a weaker
+// guard — there is no second place to move it to.
+//
+// Every route carries its own body cap and is registered on the bare engine
+// rather than under a capped group: a nested MaxBytesReader can only lower a
+// limit, so a group cap would silently bound the raw upload and email paths.
 func (h *Handler) Mount(e *gin.Engine) {
-	e.GET("/.well-known/jwks.json", h.jwks)
-
-	// Web drop-in bundle (§9), embedded at build time so the binary is
-	// self-contained. CORS is already applied engine-wide, so customer sites can
-	// load it cross-origin; front it with a CDN in production.
-	e.GET("/widget.js", func(c *gin.Context) {
-		c.Header("Cache-Control", "public, max-age=300")
-		c.Data(http.StatusOK, "application/javascript; charset=utf-8", webasset.Widget)
-	})
-
-	v1 := e.Group("/v1")
-
-	// Email inbound (§6.2): provider posts here, signature is the gate.
-	v1.POST("/email/inbound", h.emailInbound)
-
-	// Public brand for the web drop-in's load path (§9): unauthenticated, keyed by
-	// the host-embedded app id. Branding is public; this mints no token/user.
-	v1.GET("/public/brand", h.getPublicBrand)
-
-	// Local storage backend serves attachment bytes here (§11). GCS/S3 use
-	// direct-to-bucket signed URLs and don't mount these.
-	if h.cfg.Storage.Backend == "local" || h.cfg.Storage.Backend == "" {
-		v1.PUT("/uploads/local/*objectKey", h.localUploadPut)
-		v1.GET("/uploads/local/*objectKey", h.localUploadGet)
+	// One limiter per rate class, shared by every route declaring it. A bucket per
+	// route would give credential acquisition two budgets to spend.
+	limiters := map[rateClass]gin.HandlerFunc{
+		rateAuth:    h.mw.RateLimitAuth(),
+		rateIngress: h.mw.RateLimitIngress(),
 	}
 
-	// Shared paths (API key | user JWT | admin), §4.1/§4.2 same URLs.
-	any := v1.Group("", h.mw.Any())
-	any.GET("/conversations/:id", h.getConversation)
-	any.POST("/conversations/:id/messages", h.postMessage)
-	any.GET("/conversations/:id/messages", h.listMessages)
-	any.POST("/conversations/:id/read", h.markRead)
-	any.POST("/conversations/:id/typing", h.typing)
-	any.POST("/conversations/:id/close", h.closeConversation)
-	any.POST("/uploads", h.issueUpload)
-
-	// Integration (API key only), §4.1.
-	key := v1.Group("", h.mw.APIKey())
-	key.POST("/tokens", h.mintToken)
-	key.POST("/conversations", h.createConversation)
-	key.POST("/conversations/:id/members", h.addMember)
-	key.DELETE("/conversations/:id/members/:user_id", h.removeMember)
-	key.POST("/conversations/:id/assignments", h.addAssignment)
-	key.POST("/conversations/:id/members/remap", h.remap)
-
-	// User (JWT only), §4.2.
-	me := v1.Group("/me", h.mw.UserJWT())
-	me.GET("/conversations", h.listMyConversations)
-	me.POST("/support-requests", h.openSupportRequest)
-	me.POST("/push-tokens", h.registerPush)
-	me.DELETE("/push-tokens", h.deregisterPush)
-	// Active brand config for the messenger surfaces (web widget + SDK), §8/§9.
-	me.GET("/brand", h.getMyBrand)
-
-	// Admin auth (no session yet), §4.3.
-	adminAuth := v1.Group("/admin/auth")
-	adminAuth.GET("/google", h.adminGoogleLogin)
-	adminAuth.GET("/google/callback", h.adminGoogleCallback)
-	adminAuth.POST("/password", h.adminPasswordLogin) // email/password login
-	if h.authn.IsStub() && h.cfg.Env != "production" {
-		adminAuth.GET("/google/dev", h.adminDevLogin)
+	for _, r := range routeManifest() {
+		if r.Enabled != nil && !r.Enabled(h) {
+			continue
+		}
+		chain := make([]gin.HandlerFunc, 0, 5)
+		chain = append(chain, middleware.BodyLimit(r.bodyLimit()))
+		// Publish the declared set so a handler picking its action at runtime —
+		// create_support vs create_peer, claim vs close — cannot pick one this route
+		// does not declare.
+		chain = append(chain, apiutil.DeclareActions(r.Actions))
+		if lim, ok := limiters[r.Rate]; ok {
+			chain = append(chain, lim)
+		}
+		chain = append(chain, h.authChain(r)...)
+		handler := r.Handler
+		chain = append(chain, func(c *gin.Context) { handler(h, c) })
+		e.Handle(r.Method, r.Path, chain...)
 	}
-	adminAuth.POST("/logout", h.adminLogout)
+}
 
-	// Admin session (inbox), §4.3.
-	admin := v1.Group("/admin", h.mw.Admin())
-	admin.GET("/me", h.adminMe)
-	admin.GET("/realtime/token", h.realtimeToken)
-	admin.GET("/assignments", h.listAssignments)
-	admin.POST("/support-requests", h.adminOpenSupportRequest)
-	admin.POST("/assignments/:id/claim", h.claimAssignment)
-	admin.POST("/assignments/:id/close", h.closeAssignmentAdmin)
-	admin.GET("/contacts/conversations", h.listContactConversations)
-	admin.GET("/peer-conversations", h.listPeerConversations)
-	admin.POST("/peer-conversations/:id/messages", h.postPeerMessage)
-	admin.GET("/search", h.adminSearch)
+// authChain is the credential guard a descriptor implies. Derived, never
+// declared separately: the manifest says who may call the route, and this is the
+// only translation of that into middleware.
+func (h *Handler) authChain(r routeSpec) []gin.HandlerFunc {
+	switch r.Class {
+	case classInfrastructure, classSignedIngress:
+		// No principal: infrastructure serves no tenant data, and signed ingress
+		// is gated by a signature the handler verifies.
+		return nil
 
-	// Admin owner/admin only, §7.
-	priv := v1.Group("/admin", h.mw.Admin(), middleware.RequireRole(models.PlatformOwner, models.PlatformAdmin))
-	priv.POST("/api-keys", h.createAPIKey)
-	priv.GET("/api-keys", h.listAPIKeys)
-	priv.DELETE("/api-keys/:id", h.revokeAPIKey)
-	priv.POST("/webhooks", h.createWebhook)
-	priv.GET("/webhooks", h.listWebhooks)
-	priv.PATCH("/webhooks/:id", h.updateWebhook)
-	priv.DELETE("/webhooks/:id", h.deleteWebhook)
-	priv.GET("/webhooks/:id/deliveries", h.listDeliveries)
-	priv.GET("/channels/email", h.getEmailChannel)
-	priv.PATCH("/channels/email", h.updateEmailChannel)
-	priv.GET("/brands", h.listBrands)
-	priv.PUT("/brands", h.saveBrands)
-	priv.GET("/team", h.listTeam)
-	priv.POST("/team", h.inviteAgent)
-	priv.PATCH("/team/:id", h.updateAgent)
-	priv.POST("/team/:id/password", h.setAgentPassword)
+	case classPublic:
+		// Credential acquisition takes none. A public route that still ACTS on a
+		// principal when one is present (the app-id-keyed brand read) resolves it
+		// optionally — and 401s an invalid one rather than downgrading.
+		if len(r.Actions) == 0 {
+			return nil
+		}
+		return []gin.HandlerFunc{h.mw.OptionalAuth()}
+	}
+
+	if slices.Equal(r.Principals, signedOnly) {
+		return nil // the signature is the credential; the handler verifies it
+	}
+	guard := []gin.HandlerFunc{h.credentialGuard(r.Principals)}
+	if r.privilegedOnly() {
+		guard = append(guard, middleware.RequireRole(models.PlatformOwner, models.PlatformAdmin))
+	}
+	return guard
+}
+
+// credentialGuard maps the declared principal kinds onto the middleware that
+// admits exactly those.
+func (h *Handler) credentialGuard(kinds []principal.Kind) gin.HandlerFunc {
+	switch {
+	case slices.Equal(kinds, anyPrincipal):
+		return h.mw.Any()
+	case slices.Equal(kinds, keyOnly):
+		return h.mw.APIKey()
+	case slices.Equal(kinds, userOnly):
+		return h.mw.UserJWT()
+	case slices.Equal(kinds, adminOnly):
+		return h.mw.Admin()
+	}
+	// An undeclarable combination must not fall through to "no guard".
+	panic(fmt.Sprintf("no credential guard for principal set %v", kinds))
+}
+
+func (r routeSpec) bodyLimit() int64 {
+	if r.BodyLimit != 0 {
+		return r.BodyLimit
+	}
+	return middleware.BodyLimitJSON
+}
+
+func (r routeSpec) successStatus() int {
+	if r.Success != 0 {
+		return r.Success
+	}
+	return http.StatusOK
+}
+
+// devLoginAvailable gates the stub Google login on a non-production deployment.
+func (h *Handler) devLoginAvailable() bool {
+	return h.authn.IsStub() && h.cfg.Env != "production"
+}
+
+// localStorageServed reports whether attachment bytes are served by this process.
+// GCS/S3 issue direct-to-bucket signed URLs and don't mount the local routes.
+func (h *Handler) localStorageServed() bool {
+	return h.cfg.Storage.Backend == "local" || h.cfg.Storage.Backend == ""
+}
+
+// widgetBundle serves the web drop-in (§9), embedded at build time so the binary
+// is self-contained. CORS is engine-wide, so customer sites can load it
+// cross-origin; front it with a CDN in production.
+func (h *Handler) widgetBundle(c *gin.Context) {
+	js, ok := webasset.Widget()
+	if !ok {
+		// Serving empty JavaScript would look like a working install with a silently
+		// missing launcher.
+		httpx.Error(c, http.StatusServiceUnavailable, "widget_not_built",
+			"the web drop-in was not built into this binary: run `make build`")
+		return
+	}
+	c.Header("Cache-Control", "public, max-age=300")
+	c.Data(http.StatusOK, "application/javascript; charset=utf-8", js)
 }

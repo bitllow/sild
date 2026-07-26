@@ -39,10 +39,10 @@ export async function riderPostsAndAgentObserves(
 // the admin API and closes it out-of-band — a host/back-office action the inbox
 // peer view has no button for, so the observer never took the close themselves.
 export async function closePeerConversation(request: APIRequestContext, externalUserId: string): Promise<void> {
-  const list = (await (await request.get("/v1/admin/peer-conversations")).json()) as {
-    conversations: { id: string; members: { external_user_id?: string }[] }[];
+  const list = (await (await request.get("/v1/conversations?kind=peer")).json()) as {
+    items: { id: string; members: { external_user_id?: string }[] }[];
   };
-  const convId = list.conversations.find((c) =>
+  const convId = list.items.find((c) =>
     c.members.some((m) => m.external_user_id === externalUserId)
   )?.id;
   expect(convId, "found the peer conversation to close").toBeTruthy();

@@ -37,17 +37,22 @@ func TestListAssignmentsSortAndOpenCount(t *testing.T) {
 	}
 
 	var resp struct {
-		Items     []map[string]any `json:"items"`
-		OpenCount int              `json:"open_count"`
+		Items  []map[string]any `json:"items"`
+		Counts struct {
+			Open       int `json:"open"`
+			You        int `json:"you"`
+			Unassigned int `json:"unassigned"`
+			Closed     int `json:"closed"`
+		} `json:"counts"`
 	}
-	w := h.Request("GET", "/v1/admin/assignments?sort=waiting_since&order=asc&limit=50").
+	w := h.Request("GET", "/v1/conversations?kind=support&sort=waiting_since&order=asc&limit=50").
 		Cookie("sild_admin", owner).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", w.Code, w.Body)
 	}
 	testutil.DecodeJSON(t, w, &resp)
-	if resp.OpenCount != 2 {
-		t.Fatalf("open_count = %d, want 2 (closed conversation excluded)", resp.OpenCount)
+	if resp.Counts.Open != 2 {
+		t.Fatalf("open_count = %d, want 2 (closed conversation excluded)", resp.Counts.Open)
 	}
 	// All three conversations carry an assignment, so the queue lists all three.
 	if len(resp.Items) != 3 {

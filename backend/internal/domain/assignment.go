@@ -97,12 +97,22 @@ func (s *Service) CountQueue(ctx context.Context, tenantID, actorID string) (sto
 	return s.store.Assignments().CountQueue(ctx, tenantID, actorID)
 }
 
+// AssignmentConversation returns the conversation an assignment belongs to, so a
+// caller can authorize against the conversation rather than the assignment id.
+func (s *Service) AssignmentConversation(ctx context.Context, tenantID, assignmentID string) (string, error) {
+	a, err := s.store.Assignments().Get(ctx, tenantID, assignmentID)
+	if err != nil {
+		return "", mapStoreErr(err)
+	}
+	return a.ConversationID, nil
+}
+
 // ClaimAssignment assigns a queued assignment to the calling agent (§4.3).
 // State: queued → assigned.
 func (s *Service) ClaimAssignment(ctx context.Context, tenantID, assignmentID, agentActorID string) (*models.Assignment, error) {
 	return s.transition(ctx, tenantID, assignmentID, func(a *models.Assignment) error {
 		if a.Status == models.AssignmentClosed {
-			return ErrConflict
+			return conflict(CodeAssignmentAlreadyClosed, "assignment is already closed")
 		}
 		a.Status = models.AssignmentAssigned
 		a.AssigneeActorID = &agentActorID
@@ -127,7 +137,7 @@ func (s *Service) CloseAssignment(ctx context.Context, tenantID, assignmentID st
 func (s *Service) ReturnToQueue(ctx context.Context, tenantID, assignmentID string) (*models.Assignment, error) {
 	return s.transition(ctx, tenantID, assignmentID, func(a *models.Assignment) error {
 		if a.Status != models.AssignmentAssigned {
-			return ErrConflict
+			return conflict(CodeAssignmentAlreadyClosed, "assignment is not currently assigned")
 		}
 		a.Status = models.AssignmentQueued
 		a.AssigneeActorID = nil

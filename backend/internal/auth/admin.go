@@ -33,7 +33,9 @@ func NewAdminAuthenticator(cfg *config.Config) AdminAuthenticator {
 // handler must refuse to mount it in production.
 type devAuthenticator struct{}
 
-func (devAuthenticator) LoginURL(state string) string { return "/v1/admin/auth/google/dev?state=" + state }
+func (devAuthenticator) LoginURL(state string) string {
+	return "/v1/admin/auth/google/dev?state=" + state
+}
 func (devAuthenticator) Resolve(_ context.Context, code string) (string, error) {
 	if code == "" {
 		return "", ErrInvalidToken

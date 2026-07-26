@@ -143,6 +143,28 @@ func (r *emailRepo) Get(ctx context.Context, tenantID, convID string) (*models.E
 	return &t, nil
 }
 
+// Subjects batch-loads subjects for a page of conversations.
+func (r *emailRepo) Subjects(ctx context.Context, tenantID string, convIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(convIDs))
+	if len(convIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ConversationID string
+		Subject        string
+	}
+	if err := r.db.WithContext(ctx).Model(&models.EmailThread{}).
+		Select("conversation_id, subject").
+		Where("tenant_id = ? AND conversation_id IN ?", tenantID, convIDs).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ConversationID] = row.Subject
+	}
+	return out, nil
+}
+
 func (r *emailRepo) Update(ctx context.Context, t *models.EmailThread) error {
 	return r.db.WithContext(ctx).Save(t).Error
 }

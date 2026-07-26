@@ -74,6 +74,11 @@ type Storage struct {
 	Region    string `env:"STORAGE_REGION"`
 	LocalDir  string `env:"STORAGE_LOCAL_DIR" envDefault:"./.uploads"`
 	PublicURL string `env:"STORAGE_PUBLIC_URL" envDefault:"http://localhost:8080"`
+	// SigningKey signs local upload URLs (§11). Without it a signed URL is a
+	// permanent bearer token for any object key. Generated per-process when
+	// unset, which is fine for a single dev node and wrong for a fleet — set it
+	// in any deployment running more than one replica.
+	SigningKey string `env:"STORAGE_SIGNING_KEY"`
 }
 
 // Archive selects the cold-storage sink (§12).

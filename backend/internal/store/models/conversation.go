@@ -29,6 +29,15 @@ type Conversation struct {
 	LastMessageAt      *time.Time `gorm:"index:idx_conv_last_activity"`
 	LastMessagePreview string     `gorm:"size:512"`
 
+	// ArchivedAt marks a conversation whose MESSAGE BULK has been moved to the
+	// archive sink (§12). The conversation and its members are retained: they are
+	// one row and a handful, while message history is unbounded, so keeping the
+	// small part costs almost nothing and keeps membership queryable. Contacts
+	// depend on that — a directory that forgets people on a retention job is not
+	// a directory — and archived-conversation authorization reads real rows
+	// instead of rehydrating the tombstone's membership snapshot.
+	ArchivedAt *time.Time `gorm:"index:idx_conv_archived"`
+
 	Members    []ConversationMember `gorm:"constraint:OnDelete:CASCADE"`
 	Assignment *Assignment          `gorm:"-"` // loaded explicitly when needed
 }

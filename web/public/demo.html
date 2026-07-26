@@ -152,17 +152,27 @@
         }
 
         var widget;
+        // appId is required on the anonymous brand read, so the launcher needs it
+        // before first paint. A real host page hardcodes it (Settings → Installation);
+        // the demo reads it from the dev server so it works on a fresh clone.
+        var appIdPromise = fetch(BASE + "/v1/dev/app-id")
+          .then(function (r) { return r.json(); })
+          .then(function (d) { return d.app_id; })
+          .catch(function () { return ""; });
+
         if (mode === "guest") {
           // Guest = single thread (§9): ensure a conversation exists (carrying the
           // metadata), then open the widget directly to it.
-          ensureGuestConversation().then(function (convId) {
-            widget = window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, conversationId: convId, metadata: metadata, userId: uid });
+          Promise.all([ensureGuestConversation(), appIdPromise]).then(function (r) {
+            widget = window.Sild.init({ baseUrl: BASE, appId: r[1], tokenProvider: tokenProvider, conversationId: r[0], metadata: metadata, userId: uid });
           });
         } else {
           // Real user = conversation list; metadata is attached when they open a
           // new request from the widget. userId lets the widget tell the visitor's
           // own messages from the other party's in a peer (driver) chat.
-          widget = window.Sild.init({ baseUrl: BASE, tokenProvider: tokenProvider, metadata: metadata, userId: uid });
+          appIdPromise.then(function (appId) {
+            widget = window.Sild.init({ baseUrl: BASE, appId: appId, tokenProvider: tokenProvider, metadata: metadata, userId: uid });
+          });
         }
 
         // "Your driver is on the way" card — peer chat entry point (user mode only:
@@ -194,7 +204,7 @@
           if (existing) return Promise.resolve(existing);
           return tokenProvider()
             .then(function (token) {
-              return fetch(BASE + "/v1/me/support-requests", {
+              return fetch(BASE + "/v1/conversations", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
                 body: JSON.stringify({ metadata: metadata }),

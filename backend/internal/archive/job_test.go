@@ -2,13 +2,11 @@ package archive_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/domain"
-	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/testutil"
 )
@@ -49,9 +47,18 @@ func TestArchiveWriteThenDelete(t *testing.T) {
 		t.Fatalf("archive: n=%d err=%v", n, err)
 	}
 
-	// hot rows are gone
-	if _, err := h.Store.Conversations().Get(ctx, tenant.ID, conv.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("expected hot conversation deleted, got %v", err)
+	// The conversation and its members are RETAINED, marked archived. Archival
+	// reclaims unbounded message history, not the handful of rows describing who
+	// took part — deleting those is what made contacts vanish on a retention job.
+	got, err := h.Store.Conversations().Get(ctx, tenant.ID, conv.ID)
+	if err != nil {
+		t.Fatalf("archival must retain the conversation row, got %v", err)
+	}
+	if got.ArchivedAt == nil {
+		t.Fatal("archived conversation is not marked archived_at")
+	}
+	if members, err := h.Store.Members().ListActive(ctx, tenant.ID, conv.ID); err != nil || len(members) == 0 {
+		t.Fatalf("archival must retain membership: n=%d err=%v", len(members), err)
 	}
 	// tombstone exists with the membership snapshot + message count
 	tomb, err := h.Store.Archives().GetTombstone(ctx, tenant.ID, conv.ID)

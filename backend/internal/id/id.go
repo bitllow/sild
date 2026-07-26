@@ -31,6 +31,7 @@ const (
 	ReadReceipt  = "rr"
 	Outbox       = "evt"
 	Brand        = "br"
+	Request      = "req"
 )
 
 // New returns a fresh prefixed ULID, e.g. New(Conversation) -> "c_01J9...".

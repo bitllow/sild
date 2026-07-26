@@ -42,8 +42,17 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	if in.External == nil && in.Internal == nil {
 		return nil, invalid("a sender identity is required")
 	}
+	// Checked before the internal gate below, which only recognises the exact
+	// value: an unknown one would slip past it and become a record no participant
+	// can read but webhooks still fire for.
+	if !in.Visibility.Valid() {
+		return nil, invalid("visibility must be participants or internal")
+	}
 	if in.Visibility == "" {
 		in.Visibility = models.VisibilityParticipants
+	}
+	if !in.Channel.Valid() {
+		return nil, invalid("channel must be app or email")
 	}
 	if in.Channel == "" {
 		in.Channel = models.ChannelApp
@@ -167,11 +176,6 @@ func (s *Service) ListMessagesBefore(ctx context.Context, tenantID, convID, befo
 	return s.store.Messages().ListBefore(ctx, tenantID, convID, before, limit, includeInternal)
 }
 
-// ListMessagesAfter returns reconnect catch-up messages (§4.2, §5.4).
-func (s *Service) ListMessagesAfter(ctx context.Context, tenantID, convID, after string, includeInternal bool) ([]models.Message, error) {
-	return s.store.Messages().ListAfter(ctx, tenantID, convID, after, includeInternal)
-}
-
 // attachmentURLFunc returns a resolver that mints short-lived download URLs.
 func (s *Service) attachmentURLFunc() views.URLFunc {
 	return func(objectKey string) string {
@@ -184,4 +188,21 @@ func (s *Service) attachmentURLFunc() views.URLFunc {
 		}
 		return u
 	}
+}
+
+// CatchUpMessages returns messages after an id, oldest-first, bounded. hasMore
+// tells the caller to re-issue with the last id received — without it a client
+// that missed more than one page loses the remainder silently.
+func (s *Service) CatchUpMessages(ctx context.Context, tenantID, convID, since string, limit int, includeInternal bool) ([]models.Message, bool, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	msgs, err := s.store.Messages().ListAfter(ctx, tenantID, convID, since, limit+1, includeInternal)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(msgs) > limit {
+		return msgs[:limit], true, nil
+	}
+	return msgs, false, nil
 }

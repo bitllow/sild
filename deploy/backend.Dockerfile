@@ -29,7 +29,7 @@ WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-COPY --from=web /web/dist/widget.js   ./internal/webasset/widget.js
+COPY --from=web /web/dist/widget.js   ./internal/webasset/dist/widget.js
 COPY --from=web /web/public/demo.html ./internal/webasset/demo.html
 ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH
 RUN go build -o /out/sild-api     ./cmd/sild-api     && \

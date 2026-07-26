@@ -206,30 +206,25 @@ func (s *Service) ActiveBrand(ctx context.Context, tenantID string) (Brand, erro
 
 // PublicBrand returns a tenant's active brand for the unauthenticated widget
 // load path (§9), keyed by the host-embedded app id (= tenant id). No token, no
-// user/session record — branding is public. In single-tenant dev the app id may
-// be omitted.
+// user/session record — branding is public.
+//
+// The app id names the tenant outright; the caller rejects an empty one, so this
+// never guesses from how many tenants happen to exist.
 func (s *Service) PublicBrand(ctx context.Context, appID string) (Brand, error) {
-	tenantID := appID
-	if tenantID == "" {
-		ids, err := s.store.Tenants().AllIDs(ctx)
-		if err != nil {
-			return Brand{}, err
-		}
-		if len(ids) != 1 {
-			return Brand{}, ErrNotFound // app_id is required when multiple tenants exist
-		}
-		tenantID = ids[0]
-	} else if _, err := s.store.Tenants().Get(ctx, tenantID); err != nil {
+	if appID == "" {
+		return Brand{}, ErrNotFound
+	}
+	if _, err := s.store.Tenants().Get(ctx, appID); err != nil {
 		return Brand{}, mapStoreErr(err)
 	}
-	return s.ActiveBrand(ctx, tenantID)
+	return s.ActiveBrand(ctx, appID)
 }
 
 // SaveBrands replaces the tenant's whole brand set with the staged edits from
 // the Appearance UI. activeID selects the active brand (falls back to the first).
 // Every config is normalized; empty input is rejected so a tenant always has at
 // least one brand.
-func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Brand, activeID string) ([]Brand, error) {
+func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Brand, activeID, expectVersion string) ([]Brand, error) {
 	if len(brands) == 0 {
 		return nil, invalid("at least one brand is required")
 	}
@@ -267,7 +262,18 @@ func (s *Service) SaveBrands(ctx context.Context, tenantID string, brands []Bran
 	if !activeSet {
 		rows[0].Active = true // activeID matched nothing — default to the first
 	}
-	if err := s.store.Brands().Replace(ctx, tenantID, rows); err != nil {
+	// Verify and write in one transaction: checking outside it leaves a window
+	// where two writes from the same version both pass.
+	if err := s.store.Tx(ctx, func(tx store.Store) error {
+		current, err := tx.Brands().List(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if !versionMatches(expectVersion, brandsVersion(toBrands(current))) {
+			return conflict(CodeStaleVersion, "the brand set changed since you read it")
+		}
+		return tx.Brands().Replace(ctx, tenantID, rows)
+	}); err != nil {
 		return nil, err
 	}
 	// Promote any newly-referenced asset uploads from pending → completed so they
@@ -308,3 +314,40 @@ func (s *Service) seedDefaultBrand(ctx context.Context, tenantID string) (Brand,
 	}
 	return toBrand(row), nil
 }
+
+// brandsVersion is the version of a brand set — one definition, used by the read
+// and by the in-transaction precondition, so the two cannot disagree. Computed
+// over identity and ordering only: resolved asset URLs are signed per request
+// and would make the version change on every read.
+func brandsVersion(brands []Brand) string {
+	out := make([]map[string]any, 0, len(brands))
+	for _, b := range brands {
+		out = append(out, map[string]any{"id": b.ID, "name": b.Name, "active": b.Active})
+	}
+	return Version(out)
+}
+
+// toBrands maps rows for versioning — Active/ID/Name only, so no asset
+// resolution is needed.
+func toBrands(rows []models.Brand) []Brand {
+	out := make([]Brand, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toBrand(r))
+	}
+	return out
+}
+
+// ListBrandsVersioned returns the brand set and the version OF THAT SNAPSHOT.
+// A version from a second read could stamp a body it does not correspond to,
+// and an edit quoting it would overwrite the intervening write.
+func (s *Service) ListBrandsVersioned(ctx context.Context, tenantID string) ([]Brand, string, error) {
+	brands, err := s.ListBrands(ctx, tenantID)
+	if err != nil {
+		return nil, "", err
+	}
+	return brands, brandsVersion(brands), nil
+}
+
+// BrandsVersionOf is the version of a brand set already in hand — used to stamp
+// a write response from the snapshot it returned.
+func (s *Service) BrandsVersionOf(brands []Brand) string { return brandsVersion(brands) }

@@ -276,7 +276,7 @@ func TestBackfillLastActivity(t *testing.T) {
 				}
 			}
 			mk("hello", 1, models.SenderUser, models.VisibilityParticipants)
-			mk("world", 2, models.SenderUser, models.VisibilityParticipants) // latest qualifying
+			mk("world", 2, models.SenderUser, models.VisibilityParticipants)                 // latest qualifying
 			mk("conversation closed", 3, models.SenderSystem, models.VisibilityParticipants) // newer but system → ignored
 
 			pre, _ := st.Conversations().Get(ctx, tenant, conv.ID)

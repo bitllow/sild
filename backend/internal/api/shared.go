@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 	"time"
 
@@ -9,6 +8,9 @@ import (
 	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/policy"
+	"github.com/bitllow/sild/backend/internal/principal"
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
 	"github.com/gin-gonic/gin"
@@ -17,26 +19,22 @@ import (
 // getConversation: GET /v1/conversations/:id (§4.1/§4.2 shared).
 func (h *Handler) getConversation(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.ConversationsRead, convID) {
 		return
 	}
 	conv, members, assignment, err := h.svc.GetConversation(c.Request.Context(), apiutil.Tenant(c), convID)
-	if errors.Is(err, domain.ErrNotFound) {
-		// §12 read fallback: hot rows gone → read from the archive sink.
-		if view, archived, aerr := h.svc.ArchivedConversation(c.Request.Context(), apiutil.Tenant(c), convID); archived {
-			if aerr != nil {
-				apiutil.Fail(c, aerr)
-				return
-			}
-			c.JSON(http.StatusOK, view)
-			return
-		}
-	}
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
 	view := views.Conversation(conv, members, assignment)
+	view["kind"] = conv.Kind
+	// Archival keeps the conversation and its members, so the view is served from
+	// live rows; only the message history moved to the sink. The flag tells a
+	// client its history comes from cold storage.
+	if conv.ArchivedAt != nil {
+		view["archived"] = true
+	}
 	// Email conversations carry a subject (the inbox renders it instead of the
 	// opaque conversation id); app conversations have none.
 	if subject := h.svc.EmailSubject(c.Request.Context(), apiutil.Tenant(c), convID); subject != "" {
@@ -48,15 +46,16 @@ func (h *Handler) getConversation(c *gin.Context) {
 // postMessage: POST /v1/conversations/:id/messages (ingress §4.1, send §4.2).
 func (h *Handler) postMessage(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesSend, convID) {
 		return
 	}
-	// Read once: it decides the guard below and is reused as in.Conv by SendMessage.
+	// Read once: it selects the send path below and is reused as in.Conv.
 	conv, _ := h.svc.Conversation(c.Request.Context(), apiutil.Tenant(c), convID)
-	// Operators must use the peer route — only PeerAgentSend does the implicit join.
-	if p := middleware.Get(c); p != nil && p.Kind == middleware.KindAdmin &&
+	// An operator sending into a peer conversation implicitly joins it. That is a
+	// property of the data, not of the URL, so it fires on the shared route.
+	if p := middleware.Get(c); p != nil && p.Kind == principal.KindAdmin &&
 		conv != nil && conv.Kind == models.KindPeer {
-		httpx.Forbidden(c, "use POST /v1/admin/peer-conversations/:id/messages for peer conversations")
+		h.postPeerMessage(c)
 		return
 	}
 	var req struct {
@@ -72,9 +71,20 @@ func (h *Handler) postMessage(c *gin.Context) {
 			Disposition models.Disposition `json:"disposition"`
 		} `json:"attachments"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
+	}
+	// A shared URL is not a shared body: only an API key may name the sender.
+	// Dropping these silently is how a client comes to believe it posted as an
+	// agent when it did not.
+	if p := middleware.Get(c); p != nil && p.Kind != principal.KindAPIKey {
+		if !httpx.RejectFields(c, map[string]bool{
+			"sender_kind":       req.SenderKind != "",
+			"internal_actor_id": req.InternalActorID != "",
+			"external_user_id":  req.ExternalUserID != "",
+		}, "sender_kind", "internal_actor_id", "external_user_id") {
+			return
+		}
 	}
 
 	in := domain.SendInput{
@@ -86,11 +96,11 @@ func (h *Handler) postMessage(c *gin.Context) {
 	}
 	p := middleware.Get(c)
 	switch p.Kind {
-	case middleware.KindUser:
+	case principal.KindUser:
 		in.SenderKind = models.SenderUser
 		uid := p.Subject
 		in.External = &uid
-	case middleware.KindAdmin:
+	case principal.KindAdmin:
 		in.SenderKind = models.SenderAgent
 		aid := p.AdminID
 		in.Internal = &aid
@@ -129,55 +139,140 @@ func (h *Handler) postMessage(c *gin.Context) {
 	c.JSON(http.StatusCreated, out)
 }
 
-// listMessages: GET /v1/conversations/:id/messages?before=&after=&limit= (§4.2).
+// listMessages: GET /v1/conversations/:id/messages
+//
+//	?cursor=  pagination — newest-first, bounded by limit
+//	?since=   catch-up   — oldest-first, everything after a message id (§5.4)
+//
+// ?since= is a sync read, not a page: continuation is the last message id
+// received, because the id IS the position.
 func (h *Handler) listMessages(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesRead, convID) {
 		return
 	}
 	includeInternal := apiutil.IsAgent(c)
 	urlFn := h.attachmentURL(c)
+	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
 
-	// §12 read fallback: if the conversation has been archived, read from the
-	// sink (hot rows are gone). Rare — the inbox only touches open conversations.
-	if msgs, archived, err := h.svc.ArchivedMessages(c.Request.Context(), apiutil.Tenant(c), convID, includeInternal); archived {
+	page, ok := apiutil.PageParams(c, apiutil.PageDefaults{
+		Resource:   resourceMessages,
+		Limit:      50,
+		Sort:       store.SortID,
+		Order:      store.OrderDesc,
+		FixedOrder: true,
+	})
+	if !ok {
+		return
+	}
+
+	// §12 read fallback: an archived conversation's history lives in the sink, and
+	// pages through the same wire contract.
+	if msgs, archived, err := h.svc.ArchivedMessages(ctx, tenant, convID, includeInternal); archived {
 		if err != nil {
 			apiutil.Fail(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"messages": msgs, "has_more": false})
+		if since := c.Query("since"); since != "" {
+			apiutil.RespondCatchUp(c, archivedSince(msgs, since, page.Limit))
+			return
+		}
+		apiutil.RespondPage(c, resourceMessages, archivedBefore(msgs, cursorID(page), page.Limit))
 		return
 	}
 
-	if after := c.Query("after"); after != "" {
-		msgs, err := h.svc.ListMessagesAfter(c.Request.Context(), apiutil.Tenant(c), convID, after, includeInternal)
+	if since := c.Query("since"); since != "" {
+		msgs, hasMore, err := h.svc.CatchUpMessages(ctx, tenant, convID, since, page.Limit, includeInternal)
 		if err != nil {
 			apiutil.Fail(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"messages": h.renderMessagesAuthored(c, msgs, urlFn)})
+		apiutil.RespondCatchUp(c, store.Page[map[string]any]{
+			Items:   h.renderMessagesAuthored(c, msgs, urlFn),
+			HasMore: hasMore,
+		})
 		return
 	}
-	limit := atoiDefault(c.Query("limit"), 50)
-	page, err := h.svc.ListMessagesBefore(c.Request.Context(), apiutil.Tenant(c), convID, c.Query("before"), limit, includeInternal)
+
+	res, err := h.svc.ListMessagesBefore(ctx, tenant, convID, cursorID(page), page.Limit, includeInternal)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messages": h.renderMessagesAuthored(c, page.Messages, urlFn), "has_more": page.HasMore})
+	rendered := h.renderMessagesAuthored(c, res.Messages, urlFn)
+	out := store.Page[map[string]any]{Items: rendered, HasMore: res.HasMore}
+	if res.HasMore && len(res.Messages) > 0 {
+		out.NextCursor = &store.Cursor{
+			Key: store.SortID, Order: page.Order, ID: res.Messages[0].ID,
+		}
+	}
+	apiutil.RespondPage(c, resourceMessages, out)
+}
+
+// cursorID is the keyset position ("" on the first page).
+func cursorID(p store.PageParams) string {
+	if p.Cursor == nil {
+		return ""
+	}
+	return p.Cursor.ID
+}
+
+// archivedBefore mirrors messageRepo.ListBefore over a rehydrated archive. The
+// sink stores messages ascending, so store.SlicePage would read the wrong end.
+func archivedBefore(msgs []map[string]any, before string, limit int) store.Page[map[string]any] {
+	end := len(msgs)
+	if before != "" {
+		end = 0
+		for i := range msgs {
+			if mapID(&msgs[i]) >= before {
+				break
+			}
+			end = i + 1
+		}
+	}
+	window := msgs[:end]
+
+	page := store.Page[map[string]any]{}
+	if len(window) > limit {
+		page.HasMore = true
+		window = window[len(window)-limit:]
+	}
+	page.Items = window
+	if page.HasMore && len(window) > 0 {
+		page.NextCursor = &store.Cursor{
+			Key: store.SortID, Order: store.OrderDesc, ID: mapID(&window[0]),
+		}
+	}
+	return page
+}
+
+// archivedSince is the catch-up read over a rehydrated archive.
+func archivedSince(msgs []map[string]any, since string, limit int) store.Page[map[string]any] {
+	out := make([]map[string]any, 0, limit)
+	for i := range msgs {
+		if mapID(&msgs[i]) > since {
+			out = append(out, msgs[i])
+		}
+	}
+	page := store.Page[map[string]any]{}
+	if len(out) > limit {
+		page.HasMore = true
+		out = out[:limit]
+	}
+	page.Items = out
+	return page
 }
 
 // markRead: POST /v1/conversations/:id/read (§4.2).
 func (h *Handler) markRead(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.ReceiptsWrite, convID) {
 		return
 	}
 	var req struct {
 		LastReadMessageID string `json:"last_read_message_id"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	if err := h.svc.MarkRead(c.Request.Context(), apiutil.Tenant(c), convID, apiutil.CallerParticipant(c), req.LastReadMessageID); err != nil {
@@ -190,7 +285,7 @@ func (h *Handler) markRead(c *gin.Context) {
 // typing: POST /v1/conversations/:id/typing (§4.2).
 func (h *Handler) typing(c *gin.Context) {
 	convID := c.Param("id")
-	if !apiutil.AuthorizeConversation(c, h.svc, convID) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.TypingWrite, convID) {
 		return
 	}
 	p := middleware.Get(c)
@@ -209,7 +304,7 @@ func (h *Handler) closeConversation(c *gin.Context) {
 		return
 	}
 	// Being an agent isn't enough — closing needs the same scope check as reading.
-	if !apiutil.AuthorizeConversation(c, h.svc, c.Param("id")) {
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.ConversationsClose, c.Param("id")) {
 		return
 	}
 	if err := h.svc.CloseConversation(c.Request.Context(), apiutil.Tenant(c), c.Param("id")); err != nil {
@@ -226,8 +321,7 @@ func (h *Handler) issueUpload(c *gin.Context) {
 		SizeBytes int64  `json:"size_bytes"`
 		Filename  string `json:"filename"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	signed, err := h.svc.IssueUpload(c.Request.Context(), apiutil.Tenant(c), domain.IssueUploadInput{
@@ -288,21 +382,4 @@ func (h *Handler) renderMessagesAuthored(c *gin.Context, msgs []models.Message, 
 		}
 	}
 	return out
-}
-
-func atoiDefault(s string, def int) int {
-	if s == "" {
-		return def
-	}
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return def
-		}
-		n = n*10 + int(r-'0')
-	}
-	if n == 0 {
-		return def
-	}
-	return n
 }

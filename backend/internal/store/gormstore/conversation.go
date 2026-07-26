@@ -140,7 +140,10 @@ func (r *conversationRepo) ListArchivable(ctx context.Context, tenantID, idleBef
 	// (ULIDs sort by time, so an id below the cutoff == older than the cutoff).
 	var cs []models.Conversation
 	q := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND status = ?", tenantID, models.ConversationClosed)
+		Where("tenant_id = ? AND status = ?", tenantID, models.ConversationClosed).
+		// Already archived: the row is retained now, so without this the job would
+		// re-archive it every run and overwrite the sink object with an empty one.
+		Where("archived_at IS NULL")
 	if idleBeforeMsgID != "" {
 		q = q.Where(`NOT EXISTS (SELECT 1 FROM messages msg
 			WHERE msg.conversation_id = conversations.id AND msg.id > ?)`, idleBeforeMsgID)

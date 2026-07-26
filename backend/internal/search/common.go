@@ -22,21 +22,26 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 	op := likeOpFor(dialect)
 	b := db.Table("conversations c").Where("c.tenant_id = ?", tenantID)
 
-	if q.PeerOnly {
-		// The peer surface's search spans every peer-kind conversation, open OR
-		// closed — reading a closed peer conversation's history is authorized (only
-		// WRITING is gated on open status, in PeerAgentSend), so it must stay
-		// findable rather than vanishing the moment it closes. A status: filter in
-		// the query still narrows it. Mirrors support search, which likewise spans
-		// closed conversations.
-		b = b.Where("c.kind = ?", "peer")
-	} else {
-		// Default (support) search must EXCLUDE peer conversations — otherwise a
-		// non-peer-access agent could recover peer message/metadata content via the
-		// shared search even though the peer list + message endpoints are gated.
-		// Reads the stored kind, so a CLOSED peer conversation (still kind='peer')
-		// does not leak here regardless of status.
-		b = b.Where("c.kind = ?", "support")
+	// The kind restriction comes from the policy scope, not from a flag decided
+	// here. It is a security boundary: without it a non-peer-access agent could
+	// recover peer message and metadata content through the shared search even
+	// though the peer list and message endpoints are gated. Reading the stored
+	// kind means a CLOSED peer conversation does not leak regardless of status.
+	// Search spans open AND closed conversations; a status: token still narrows.
+	if len(q.Kinds) > 0 {
+		b = b.Where("c.kind IN ?", q.Kinds)
+	}
+	// The rest of the authorization ceiling. Applied here, not after hydration:
+	// filtering a page of already-limited ids yields sparse pages and hides later
+	// matches.
+	if q.Participant != "" {
+		b = b.Where(`EXISTS (SELECT 1 FROM conversation_members pm
+			WHERE pm.conversation_id = c.id AND pm.left_at IS NULL
+			  AND pm.external_user_id = ?)`, q.Participant)
+	}
+	if q.RequiresAssignment {
+		b = b.Where(`c.kind <> 'support' OR c.archived_at IS NOT NULL
+			OR EXISTS (SELECT 1 FROM assignments ra WHERE ra.conversation_id = c.id)`)
 	}
 	if q.Status != nil {
 		b = b.Where("c.status = ?", *q.Status)
@@ -60,10 +65,17 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 		// A keyword matches a message body, OR — for any active member — the
 		// materialized member search text (the tenant's configured searchable
 		// metadata keys) or the participant's external id.
+		bodyCond := existsLike("messages", "msg", "msg.body", op)
+		if !q.IncludeInternal {
+			// A note the caller cannot read must not be findable either (§5.6).
+			bodyCond = `EXISTS (SELECT 1 FROM messages msg
+				WHERE msg.conversation_id = c.id AND msg.visibility <> 'internal'
+				  AND ` + wrap("msg.body", op) + " " + op + " ?)"
+		}
 		memberInner := wrap("m.member_search_text", op) + " " + op + " ? OR " +
 			wrap("m.external_user_id", op) + " " + op + " ?"
 		args := []any{like(kw), like(kw), like(kw)} // body, member_search_text, external_user_id
-		if q.PeerOnly {
+		if q.MatchRawMetadata {
 			// Peer participants are end users the operator is stepping in to help,
 			// so peer search additionally matches the raw metadata as text — any
 			// value (name, phone, plate) is findable even without configured keys.
@@ -73,7 +85,7 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 			args = []any{like(kw), like(kw), like(kw), like(kw)} // + raw metadata
 		}
 		memberCond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" + memberInner + "))"
-		cond := "(" + existsLike("messages", "msg", "msg.body", op) + " OR " + memberCond + ")"
+		cond := "(" + bodyCond + " OR " + memberCond + ")"
 		b = b.Where(cond, args...)
 	}
 	return b
@@ -139,14 +151,17 @@ func collectHits(ctx context.Context, db, filtered *gorm.DB, q Query, dialect co
 		filtered = filtered.Where("c.id < ?", q.Before)
 	}
 	var ids []string
-	if err := filtered.Order("c.created_at DESC").Limit(q.Limit).Pluck("c.id", &ids).Error; err != nil {
+	// Order by the same column the keyset predicate above filters on. ULIDs are
+	// chronological, so this is still newest-first, but ordering by created_at
+	// while paging on id would let rows sharing a timestamp be skipped.
+	if err := filtered.Order("c.id DESC").Limit(q.Limit).Pluck("c.id", &ids).Error; err != nil {
 		return Results{}, err
 	}
 	res := Results{Conversations: make([]ConversationHit, 0, len(ids))}
 	for _, id := range ids {
 		hit := ConversationHit{ConversationID: id}
 		if len(q.Keywords) > 0 {
-			hit.Snippet = snippet(ctx, db, id, q.Keywords[0], op)
+			hit.Snippet = snippet(ctx, db, id, q.Keywords[0], op, q.IncludeInternal)
 		}
 		res.Conversations = append(res.Conversations, hit)
 	}
@@ -154,10 +169,13 @@ func collectHits(ctx context.Context, db, filtered *gorm.DB, q Query, dialect co
 }
 
 // snippet returns one matching message body for the result row.
-func snippet(ctx context.Context, db *gorm.DB, convID, kw, op string) string {
+func snippet(ctx context.Context, db *gorm.DB, convID, kw, op string, includeInternal bool) string {
 	var body string
-	db.WithContext(ctx).Table("messages").
-		Where("conversation_id = ? AND "+wrap("body", op)+" "+op+" ?", convID, like(kw)).
-		Order("id DESC").Limit(1).Pluck("body", &body)
+	q := db.WithContext(ctx).Table("messages").
+		Where("conversation_id = ? AND "+wrap("body", op)+" "+op+" ?", convID, like(kw))
+	if !includeInternal {
+		q = q.Where("visibility <> ?", "internal")
+	}
+	q.Order("id DESC").Limit(1).Pluck("body", &body)
 	return body
 }

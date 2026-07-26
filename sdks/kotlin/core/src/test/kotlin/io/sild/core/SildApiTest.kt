@@ -37,8 +37,8 @@ class SildApiTest {
     }
 
     @Test fun cachesTheTokenAcrossCalls() = runBlocking {
-        server.enqueue(MockResponse().setBody("[]"))
-        server.enqueue(MockResponse().setBody("[]"))
+        server.enqueue(MockResponse().setBody(EMPTY_PAGE))
+        server.enqueue(MockResponse().setBody(EMPTY_PAGE))
         val api = api()
         api.listConversations()
         api.listConversations()
@@ -49,7 +49,7 @@ class SildApiTest {
 
     @Test fun refreshesOnceAndRetriesOn401() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":{"message":"token expired"}}"""))
-        server.enqueue(MockResponse().setBody("""[{"id":"c1"}]"""))
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"c1"}],"next_cursor":null,"has_more":false}"""))
         val convs = api().listConversations()
         assertEquals(listOf("c1"), convs.map { it.id }, "the retry's result is returned")
         assertEquals(2, minted.size, "the 401 forces exactly one refresh")
@@ -137,6 +137,29 @@ class SildApiTest {
         assertEquals("Acme", res.name)
         assertEquals("${base()}/v1/uploads/local/logo.png", res.config.logoUrl)
     }
+
+    // ?since= is a sync read, not a page: the caller resumes from the last id it got
+    // and repeats while has_more, so a gap longer than one limit is not truncated.
+    @Test fun catchUpDrainsEveryMissedMessageAcrossPages() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"m2"},{"id":"m3"}],"next_cursor":null,"has_more":true}"""))
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"m4"}],"next_cursor":null,"has_more":false}"""))
+        val api = api()
+
+        val first = api.catchUpMessages("c1", "m1")
+        assertEquals(listOf("m2", "m3"), first.items.map { it.id })
+        assertTrue(first.hasMore, "has_more survives decoding — without it the drain stops early")
+
+        val second = api.catchUpMessages("c1", first.items.last().id)
+        assertEquals(listOf("m4"), second.items.map { it.id })
+        assertTrue(!second.hasMore)
+
+        val a = server.takeRequest()
+        assertEquals("/v1/conversations/c1/messages?since=m1&limit=100", a.path)
+        val b = server.takeRequest()
+        assertEquals("/v1/conversations/c1/messages?since=m3&limit=100", b.path,
+            "the second call resumes from the last id received, not from the original")
+    }
+
 }
 
 // Local-dev storage is rewritten onto our base (an emulator reaches the host at
@@ -158,3 +181,6 @@ class RebaseLocalUrlTest {
         assertEquals(null, rebaseLocalUrl("http://10.0.2.2:8080", null))
     }
 }
+
+/** The list envelope every collection endpoint returns. */
+private const val EMPTY_PAGE = """{"items":[],"next_cursor":null,"has_more":false}"""

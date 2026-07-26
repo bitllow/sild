@@ -44,11 +44,12 @@ func brandsView(brands []domain.Brand) gin.H {
 // listBrands returns the tenant's brands + which one is active (owner/admin, §7).
 // Seeds a default brand on first access.
 func (h *Handler) listBrands(c *gin.Context) {
-	brands, err := h.svc.ListBrands(c.Request.Context(), apiutil.Tenant(c))
+	brands, version, err := h.svc.ListBrandsVersioned(c.Request.Context(), apiutil.Tenant(c))
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
+	c.Header("ETag", version)
 	c.JSON(http.StatusOK, brandsView(brands))
 }
 
@@ -59,45 +60,70 @@ func (h *Handler) saveBrands(c *gin.Context) {
 		Brands        []brandBody `json:"brands"`
 		ActiveBrandID string      `json:"active_brand_id"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(c, "invalid body")
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	// PUT replaces the whole set, so a concurrent edit would be discarded silently
+	// without a precondition. The comparison happens inside SaveBrands' write
+	// transaction; this only insists the client named a version.
+	expect, ok := apiutil.RequireIfMatch(c)
+	if !ok {
 		return
 	}
 	brands := make([]domain.Brand, 0, len(req.Brands))
 	for _, b := range req.Brands {
 		brands = append(brands, domain.Brand{ID: b.ID, Name: b.Name, Config: b.Config})
 	}
-	saved, err := h.svc.SaveBrands(c.Request.Context(), apiutil.Tenant(c), brands, req.ActiveBrandID)
+	saved, err := h.svc.SaveBrands(c.Request.Context(), apiutil.Tenant(c), brands, req.ActiveBrandID, expect)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
+	c.Header("ETag", h.svc.BrandsVersionOf(saved))
 	c.JSON(http.StatusOK, brandsView(saved))
 }
 
-// getPublicBrand returns a tenant's active brand for the web drop-in's load path
-// — unauthenticated, keyed by the host-embedded app id (= tenant id). Branding is
-// public, so this mints no token and records no user/session; the launcher can be
-// styled on first paint without side effects. Cacheable for a short window.
-func (h *Handler) getPublicBrand(c *gin.Context) {
-	b, err := h.svc.PublicBrand(c.Request.Context(), c.Query("app_id"))
+// getActiveBrand: GET /v1/brands/active — the active brand for any messenger
+// surface.
+//
+// Public when keyed by app_id (the drop-in's first paint, before a token exists),
+// tenant-scoped with a credential. An invalid credential never reaches here:
+// OptionalAuth 401s rather than downgrading, so an expired session cannot become
+// a silent tenant switch.
+func (h *Handler) getActiveBrand(c *gin.Context) {
+	// Credential first: an authenticated caller's app_id is ignored, so the public
+	// path cannot read another tenant's brand.
+	if tenant := apiutil.Tenant(c); tenant != "" {
+		b, err := h.svc.ActiveBrand(c.Request.Context(), tenant)
+		if err != nil {
+			apiutil.Fail(c, err)
+			return
+		}
+		// Private: an authenticated response must never populate a shared cache
+		// that an anonymous request could then be served from.
+		c.Header("Cache-Control", "private, no-store")
+		c.Header("Vary", "Authorization, Cookie")
+		c.JSON(http.StatusOK, gin.H{"name": b.Name, "config": b.Config})
+		return
+	}
+
+	// app_id is REQUIRED without a credential. Resolving a sole tenant instead
+	// would make the response depend on how many tenants the deployment happens to
+	// hold, and let an anonymous caller read tenant data without naming the
+	// application it belongs to.
+	appID := c.Query("app_id")
+	if appID == "" {
+		httpx.FieldError(c, http.StatusBadRequest, httpx.CodeBadRequest,
+			"app_id is required without a credential",
+			map[string]string{"app_id": "the tenant's app id; find it in Settings → Installation"})
+		return
+	}
+	b, err := h.svc.PublicBrand(c.Request.Context(), appID)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
 	c.Header("Cache-Control", "public, max-age=60")
-	c.JSON(http.StatusOK, gin.H{"name": b.Name, "config": b.Config})
-}
-
-// getMyBrand returns the active brand (name + config) to a messenger surface (web
-// widget / native SDK) at load. Available to any user JWT — guest or real — since
-// branding is not sensitive and both surfaces authenticate the same way. The name
-// backs the header fallback when no logo is set.
-func (h *Handler) getMyBrand(c *gin.Context) {
-	b, err := h.svc.ActiveBrand(c.Request.Context(), apiutil.Tenant(c))
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
+	c.Header("Vary", "Authorization, Cookie")
 	c.JSON(http.StatusOK, gin.H{"name": b.Name, "config": b.Config})
 }

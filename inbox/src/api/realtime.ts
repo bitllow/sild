@@ -27,7 +27,7 @@ const WS_URL = process.env.NEXT_PUBLIC_SILD_WS_URL || "ws://localhost:8080/v1/ws
 export function createRealtime(handlers: RealtimeHandlers): Centrifuge {
   const client = new Centrifuge(WS_URL, {
     getToken: async () => {
-      const r = await fetch("/v1/admin/realtime/token", { credentials: "include" });
+      const r = await fetch("/v1/realtime/token", { credentials: "include" });
       if (!r.ok) throw new Error("realtime token request failed");
       const d = (await r.json()) as { token: string };
       return d.token;

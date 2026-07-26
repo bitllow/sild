@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/policy"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/testutil"
 )
@@ -48,7 +50,7 @@ func TestAdminSearch(t *testing.T) {
 		{"refund status:closed", false}, // AND of keyword + filter
 	}
 	for _, tc := range cases {
-		res, err := h.Search.Search(ctx, tenant.ID, tc.q, "", "", 25, false)
+		res, err := h.Search.Search(ctx, tenant.ID, supportScope(), domain.SearchInput{Query: tc.q, Limit: 25})
 		if err != nil {
 			t.Fatalf("search %q: %v", tc.q, err)
 		}
@@ -78,7 +80,7 @@ func TestAdminSearchLiveJSONFallback(t *testing.T) {
 
 	// "city" is not materialized into member_search_text, but the live-JSON
 	// fallback finds it.
-	res, err := h.Search.Search(ctx, tenant.ID, "meta.city:tallinn", "", "", 25, false)
+	res, err := h.Search.Search(ctx, tenant.ID, supportScope(), domain.SearchInput{Query: "meta.city:tallinn", Limit: 25})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +111,7 @@ func TestSupportKeywordDoesNotMatchUnindexedMetadata(t *testing.T) {
 	}
 
 	// A bare keyword matching only the unindexed "city" value must NOT hit.
-	res, err := h.Search.Search(ctx, tenant.ID, "Tallinn", "", "", 25, false)
+	res, err := h.Search.Search(ctx, tenant.ID, supportScope(), domain.SearchInput{Query: "Tallinn", Limit: 25})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +120,13 @@ func TestSupportKeywordDoesNotMatchUnindexedMetadata(t *testing.T) {
 	}
 
 	// The configured key still matches, so search isn't simply broken.
-	if res, err := h.Search.Search(ctx, tenant.ID, "5512", "", "", 25, false); err != nil || len(res.Conversations) != 1 {
+	if res, err := h.Search.Search(ctx, tenant.ID, supportScope(), domain.SearchInput{Query: "5512", Limit: 25}); err != nil || len(res.Conversations) != 1 {
 		t.Fatalf("configured key search: hits=%d err=%v, want 1/nil", len(res.Conversations), err)
 	}
+}
+
+// supportScope is an operator without peer_access: support conversations only.
+func supportScope() policy.ResourceScope {
+	return policy.Scope(&principal.Principal{TenantID: "t", Kind: principal.KindAdmin,
+		AdminID: "a", Role: models.PlatformOwner}, policy.ConversationsList)
 }

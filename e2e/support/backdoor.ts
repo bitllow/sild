@@ -22,16 +22,16 @@ export async function closeAssignmentForConversation(
     assignment?: { id: string };
   };
   expect(conv.assignment?.id, "conversation has an assignment").toBeTruthy();
-  const res = await admin.post(`/v1/admin/assignments/${conv.assignment!.id}/close`);
+  const res = await admin.patch(`/v1/assignments/${conv.assignment!.id}`, { data: { status: "closed" } });
   expect(res.ok(), "close assignment").toBeTruthy();
 }
 
 export async function createWebhook(admin: APIRequestContext, url: string, events: string[]): Promise<void> {
-  const res = await admin.post("/v1/admin/webhooks", { data: { url, events } });
+  const res = await admin.post("/v1/webhooks", { data: { url, events } });
   expect(res.ok(), "create webhook").toBeTruthy();
 }
 
 export async function deleteAllWebhooks(admin: APIRequestContext): Promise<void> {
-  const list = (await (await admin.get("/v1/admin/webhooks")).json()) as { id: string }[];
-  for (const w of list) await admin.delete(`/v1/admin/webhooks/${w.id}`);
+  const list = (await (await admin.get("/v1/webhooks")).json()) as { items: { id: string }[] };
+  for (const w of list.items) await admin.delete(`/v1/webhooks/${w.id}`);
 }

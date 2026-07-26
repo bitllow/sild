@@ -17,6 +17,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/search"
 	"github.com/bitllow/sild/backend/internal/server"
 	"github.com/bitllow/sild/backend/internal/storage"
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/gormstore"
 	"go.uber.org/dig"
 )
@@ -38,7 +39,7 @@ func New() (*dig.Container, error) {
 		realtime.NewNode,           // *realtime.Node (ws serves it; api publishes through it)
 		provideRealtimePublisher,   // realtime.Publisher
 
-		domain.New,         // *domain.Service
+		newService,         // *domain.Service (search attached)
 		domain.NewSearch,   // *domain.SearchService
 		middleware.NewAuth, // *middleware.Auth
 		api.New,            // *api.Handler
@@ -96,4 +97,16 @@ func Provide(c *dig.Container, providers ...any) error {
 		}
 	}
 	return nil
+}
+
+// newService builds the domain service and attaches search. Search is wired
+// here rather than in domain.New because both are dig providers over the same
+// store, and a constructor dependency between them would be cyclic.
+func newService(
+	st store.Store, pub realtime.Publisher, km *auth.KeyManager, bucket storage.Bucket,
+	mailer mail.Mailer, sink archive.Sink, cfg *config.Config, ss *domain.SearchService,
+) *domain.Service {
+	svc := domain.New(st, pub, km, bucket, mailer, sink, cfg)
+	svc.UseSearch(ss)
+	return svc
 }

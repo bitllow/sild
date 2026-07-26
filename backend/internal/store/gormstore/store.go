@@ -34,6 +34,7 @@ func (s *Store) APIKeys() store.APIKeyRepo             { return &apiKeyRepo{s.db
 func (s *Store) Admins() store.AdminRepo               { return &adminRepo{s.db} }
 func (s *Store) SigningKeys() store.SigningKeyRepo     { return &signingKeyRepo{s.db} }
 func (s *Store) Conversations() store.ConversationRepo { return &conversationRepo{s.db} }
+func (s *Store) Contacts() store.ContactRepo           { return &contactRepo{s.db} }
 func (s *Store) Members() store.MemberRepo             { return &memberRepo{s.db} }
 func (s *Store) Assignments() store.AssignmentRepo     { return &assignmentRepo{s.db} }
 func (s *Store) Messages() store.MessageRepo           { return &messageRepo{s.db} }

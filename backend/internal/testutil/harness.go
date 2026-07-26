@@ -169,6 +169,7 @@ func NewWithConfig(t *testing.T, cfg *config.Config) *Harness {
 	}
 	svc := domain.New(st, pub, km, bucket, mailer, sink, cfg)
 	searchSvc := domain.NewSearch(st, search.New(db))
+	svc.UseSearch(searchSvc)                 // GET /v1/conversations?q= runs search through the service
 	authn := auth.NewAdminAuthenticator(cfg) // dev stub (no Google configured)
 	mw := middleware.NewAuth(st, km)
 	h := api.New(svc, searchSvc, mw, km, authn, bucket, cfg)

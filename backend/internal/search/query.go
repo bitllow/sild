@@ -3,7 +3,11 @@
 // trigram implementation and a portable LIKE fallback (capability tiers).
 package search
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/bitllow/sild/backend/internal/store/models"
+)
 
 // Query is a parsed search bar string.
 type Query struct {
@@ -14,10 +18,24 @@ type Query struct {
 	Meta     map[string]string // member-metadata filters (phone, app_version, meta.<key>)
 	Keywords []string          // free text → partial match on body + member text
 
-	// PeerOnly restricts results to peer conversations — open, no assignment (the
-	// peer surface's search, GET /admin/search?peer=true). Set by the handler, not
-	// parsed from the bar.
-	PeerOnly bool
+	// Kinds is the scope's allowed conversation kinds; empty means every kind. The
+	// support/peer split is a scope decision, passed in rather than re-derived.
+	Kinds []models.ConversationKind
+	// MatchRawMetadata widens keyword matching to the raw member metadata blob,
+	// beyond the tenant's searchable_metadata_keys allowlist. Peer search sets it
+	// so an operator stepping into someone else's chat can find them by any value.
+	MatchRawMetadata bool
+	// IncludeInternal allows internal notes to match and to be quoted as a
+	// snippet. False for a user principal: a note they cannot read must not be
+	// findable through search either (§5.6).
+	IncludeInternal bool
+	// Participant restricts to conversations this external user belongs to — the
+	// user-JWT ceiling. Applied inside the query so pagination sees only rows the
+	// caller may see.
+	Participant string
+	// RequiresAssignment restricts support conversations to those carrying an
+	// assignment — the plain-agent ceiling.
+	RequiresAssignment bool
 
 	Before string
 	Limit  int

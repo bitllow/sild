@@ -1,0 +1,68 @@
+package middleware
+
+import (
+	"net"
+	"sync"
+	"time"
+
+	"github.com/bitllow/sild/backend/internal/httpx"
+	"github.com/gin-gonic/gin"
+)
+
+// Applied where it is a security control: credential acquisition and
+// unauthenticated ingress, both reachable by anyone. General per-route limits on
+// authenticated endpoints are separate work.
+
+// Rate-limit classes.
+const (
+	rateAuthPerMinute    = 10
+	rateIngressPerMinute = 120
+)
+
+// RateLimitAuth guards credential acquisition.
+func (a *Auth) RateLimitAuth() gin.HandlerFunc { return rateLimit(rateAuthPerMinute) }
+
+// RateLimitIngress guards unauthenticated write ingress.
+func (a *Auth) RateLimitIngress() gin.HandlerFunc { return rateLimit(rateIngressPerMinute) }
+
+// rateLimit is a fixed-window per-IP counter, in-process and so per-replica: it
+// blunts brute force, it is not a distributed quota.
+func rateLimit(perMinute int) gin.HandlerFunc {
+	var (
+		mu      sync.Mutex
+		window  time.Time
+		counter = map[string]int{}
+	)
+	return func(c *gin.Context) {
+		now := time.Now().Truncate(time.Minute)
+		key := limiterKey(c)
+
+		mu.Lock()
+		if now.After(window) {
+			window = now
+			counter = map[string]int{}
+		}
+		counter[key]++
+		over := counter[key] > perMinute
+		mu.Unlock()
+
+		if over {
+			c.Header("Retry-After", "60")
+			httpx.Error(c, 429, httpx.CodeRateLimited, "too many requests")
+			return
+		}
+		c.Next()
+	}
+}
+
+// limiterKey is the socket peer address, NOT ClientIP(): gin honours
+// X-Forwarded-For from any peer unless trusted proxies are configured, so a
+// key derived from it is attacker-chosen and the limit is trivially bypassed.
+// Behind a real proxy this collapses to the proxy — a coarser but honest bucket.
+func limiterKey(c *gin.Context) string {
+	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	if err != nil {
+		return c.Request.RemoteAddr
+	}
+	return host
+}
