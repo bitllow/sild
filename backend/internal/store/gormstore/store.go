@@ -46,6 +46,7 @@ func (s *Store) Outbox() store.OutboxRepo              { return &outboxRepo{s.db
 func (s *Store) Email() store.EmailRepo                { return &emailRepo{s.db} }
 func (s *Store) Archives() store.ArchiveRepo           { return &archiveRepo{s.db} }
 func (s *Store) Brands() store.BrandRepo               { return &brandRepo{s.db} }
+func (s *Store) Leases() store.LeaseRepo               { return &leaseRepo{s.db} }
 
 // translateErr maps GORM's not-found to the store sentinel.
 func translateErr(err error) error {

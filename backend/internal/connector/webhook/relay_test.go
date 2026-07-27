@@ -96,7 +96,7 @@ func TestWebhookRetryOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The outbox row should be pending again (rescheduled), not delivered.
-	due, _ := h.Store.Outbox().ClaimDue(context.Background(), 10)
+	due, _, _ := h.Store.Outbox().ClaimDue(context.Background(), 10)
 	// available_at was pushed into the future, so it is NOT immediately due.
 	if len(due) != 0 {
 		t.Fatalf("expected the failed event to be rescheduled to the future, got %d due", len(due))

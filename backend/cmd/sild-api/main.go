@@ -12,8 +12,6 @@ import (
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/di"
 	"github.com/bitllow/sild/backend/internal/server"
-	"github.com/bitllow/sild/backend/internal/store/gormstore"
-	"gorm.io/gorm"
 )
 
 func main() {
@@ -25,12 +23,7 @@ func main() {
 		log.Fatalf("di: %v", err)
 	}
 
-	err = c.Invoke(func(cfg *config.Config, db *gorm.DB, km *auth.KeyManager, srv *server.Server) error {
-		if cfg.Env != "production" { // dev convenience; prod runs sild-migrate
-			if err := gormstore.Migrate(db); err != nil {
-				return err
-			}
-		}
+	err = c.Invoke(func(cfg *config.Config, km *auth.KeyManager, srv *server.Server) error {
 		if err := km.EnsureActiveKey(ctx); err != nil { // bootstrap JWT signing key
 			return err
 		}

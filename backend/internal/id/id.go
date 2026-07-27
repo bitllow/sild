@@ -32,6 +32,9 @@ const (
 	Outbox       = "evt"
 	Brand        = "br"
 	Request      = "req"
+	// Holder identifies one process's hold on something contended — a job lease,
+	// an outbox claim. Not a row id: it names the owner, not the work.
+	Holder = "own"
 )
 
 // New returns a fresh prefixed ULID, e.g. New(Conversation) -> "c_01J9...".

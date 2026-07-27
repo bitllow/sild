@@ -36,6 +36,28 @@ SILD_TEST_POSTGRES_DSN="host=localhost port=5432 user=sild password=sild dbname=
 | §11 uploads | size cap enforced; ownership record; attachments validated against completed uploads | exercised via `domain.IssueUpload` + `SendMessage` attachment resolution |
 | §12 archival | write-then-delete (verified), tombstone + membership snapshot, sink rehydrate; OPEN never archived | `archive/job_test.go` |
 
+## Horizontal scalability
+
+Guards that only matter with more than one replica, and the test that proves each
+still holds. Every concurrency case runs on SQLite for speed and again on real
+Postgres row contention when `SILD_TEST_POSTGRES_DSN` is set (CI does both).
+
+| Guard | What's asserted | Test |
+|---|---|---|
+| Assignment claim is not a lost update | two agents claim one assignment → exactly one wins; the loser gets 409 `assignment_already_taken`; a closed one gets 409 `assignment_already_closed`; close stays idempotent | `store/gormstore/assignment_guard_test.go`, `api/assignment_claim_test.go` |
+| `client_msg_id` survives a concurrent retry | parallel sends with one key all return the same message, one row | `domain/idempotency_race_test.go: TestConcurrentSendsWithOneClientMsgID` |
+| Outbox events are claimed, not just read | a second relay claims nothing; concurrent relays never overlap; a lapsed lock frees the row for the next pass; a renewed one does not; renewal reports a claim another relay took; reschedule releases. The claim lives in `claim_token`/`locked_until`, not a new `status`, so a relay from the previous release still sees the rows (ARCHITECTURE §4) | `store/gormstore/outbox_claim_test.go`, `connector/webhook/relay_race_test.go` |
+| Job leases are exclusive | one holder at a time; expiry allows takeover; release is owner-scoped; `RunExclusive` bodies never overlap | `store/gormstore/lease_test.go` |
+| The archive sweep has one runner | a worker skips the tick while another holds the lease, and releases it after | `archive/sweep_test.go` |
+| Signing-key bootstrap mints one key | concurrent cold start across replicas → one key; a waiter still runs the work when the lease holder failed; a broken key lookup is an error, not "no key" | `auth/bootstrap_test.go` |
+| Inbound email is deduped | redelivery of one Message-ID does not open a second conversation; a released claim lets a retry through; a claim abandoned by a crashed process goes stale and the retry still lands; an in-flight claim is reported as in-flight (never as done) so the sender is asked to retry; a superseded attempt cannot complete or drop its successor's claim | `domain/email_dedupe_test.go` |
+| Production refuses single-node config | memory broker / SQLite / unsigned local storage rejected at boot; development unaffected | `config/config_test.go` |
+
+Not covered by a test, by decision: the per-IP rate limiter
+(`middleware/ratelimit.go`) is in-process, so N replicas allow N× the configured
+rate. It is a brute-force blunter, not a distributed quota — see
+`tasks/HORIZONTAL-SCALABILITY-PLAN.md`.
+
 ## Conventions
 
 - `internal/testutil` builds an in-process backend (real store + services + gin)

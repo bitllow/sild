@@ -21,6 +21,38 @@ jobs:
         working-directory: backend
         run: go test ./...
 
+  # The concurrency guards (assignment claim, outbox claim, job leases) need real
+  # row-level contention to mean anything — SQLite serializes writers, so the
+  # store suite runs again against Postgres with racing goroutines.
+  backend-tests-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sild
+          POSTGRES_PASSWORD: sild
+          POSTGRES_DB: sild
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sild"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: go test (postgres dialect)
+        working-directory: backend
+        env:
+          SILD_TEST_POSTGRES_DSN: "host=localhost port=5432 user=sild password=sild dbname=sild sslmode=disable"
+        run: go test -race ./internal/store/gormstore/
+
   # Browser behavior tests for the inbox + drop-in widget, run against a real
   # backend. Matrix covers both the zero-infra default (SQLite) and the primary
   # production target (Postgres, with full trigram search). Tuned for the free

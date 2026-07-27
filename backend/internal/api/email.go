@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
+	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/mail"
 	"github.com/gin-gonic/gin"
@@ -25,6 +27,7 @@ func (h *Handler) emailInbound(c *gin.Context) {
 		From      string `json:"from"`
 		Subject   string `json:"subject"`
 		Text      string `json:"text"`
+		MessageID string `json:"message_id"` // RFC-5322 Message-ID, for redelivery dedupe
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		httpx.BadRequest(c, "invalid body")
@@ -33,9 +36,11 @@ func (h *Handler) emailInbound(c *gin.Context) {
 	in := mail.InboundEmail{
 		Recipient: body.Recipient, From: body.From, Subject: body.Subject,
 		TextBody: body.Text, RawBody: raw,
-		Headers: map[string]string{"X-Signature": c.GetHeader("X-Signature")},
+		Headers: map[string]string{"X-Signature": c.GetHeader("X-Signature"), "Message-Id": body.MessageID},
 	}
-	if _, err := h.svc.HandleInbound(c.Request.Context(), in); err != nil {
+	// A provider retrying a delivery we already ingested is a success, not a
+	// failure — answering anything else invites an endless retry loop.
+	if _, err := h.svc.HandleInbound(c.Request.Context(), in); err != nil && !errors.Is(err, domain.ErrAlreadyIngested) {
 		apiutil.Fail(c, err)
 		return
 	}

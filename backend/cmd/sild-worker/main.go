@@ -46,17 +46,14 @@ func main() {
 		}
 		if jobs["archive"] {
 			go loop(ctx, 1*time.Hour, func() {
-				tenants, err := st.Tenants().AllIDs(ctx)
-				if err != nil {
-					log.Printf("archive: list tenants: %v", err)
-					return
-				}
-				for _, t := range tenants {
-					if n, err := job.RunOnce(ctx, t, 100); err != nil {
-						log.Printf("archive %s: %v", t, err)
-					} else if n > 0 {
-						log.Printf("archive %s: archived %d conversations", t, n)
-					}
+				n, ran, err := job.RunSweep(ctx, 100)
+				switch {
+				case err != nil:
+					log.Printf("archive sweep: %v", err)
+				case !ran:
+					log.Printf("archive sweep: another worker holds the lease — skipping")
+				case n > 0:
+					log.Printf("archive sweep: archived %d conversations", n)
 				}
 			})
 		}

@@ -12,7 +12,9 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -45,8 +47,12 @@ func main() {
 		cfg *config.Config, db *gorm.DB, km *auth.KeyManager, svc *domain.Service,
 		srv *server.Server, node *realtime.Node, relay *webhook.Relay, st store.Store,
 	) error {
-		if err := gormstore.Migrate(db); err != nil {
-			return err
+		// Dev-only exception to "only sild-migrate migrates" (ARCHITECTURE §4).
+		// SILD_DEV_MIGRATE=false wherever this shares a database with a deployment.
+		if migrate, err := strconv.ParseBool(os.Getenv("SILD_DEV_MIGRATE")); err != nil || migrate {
+			if err := gormstore.Migrate(db); err != nil {
+				return err
+			}
 		}
 		if err := km.EnsureActiveKey(ctx); err != nil {
 			return err

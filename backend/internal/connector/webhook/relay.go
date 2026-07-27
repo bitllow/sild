@@ -30,22 +30,49 @@ func NewRelay(st store.Store) *Relay {
 	return &Relay{store: st, client: &http.Client{Timeout: 10 * time.Second}}
 }
 
+// renewAfter is when a running batch starts re-locking its rows: early enough to
+// stay well inside the claim, late enough that a normal fast pass never writes.
+const renewAfter = store.OutboxClaimTTL / 2
+
 // ProcessOnce delivers up to `limit` due events. Returns the number processed.
+// Events abandoned by a relay that died need no sweep — ClaimDue treats a lapsed
+// lock as unclaimed.
 func (r *Relay) ProcessOnce(ctx context.Context, limit int) (int, error) {
-	events, err := r.store.Outbox().ClaimDue(ctx, limit)
+	events, token, err := r.store.Outbox().ClaimDue(ctx, limit)
 	if err != nil {
 		return 0, err
 	}
+	renewFrom := time.Now().Add(renewAfter)
+	delivered := 0
 	for i := range events {
-		r.deliver(ctx, &events[i])
+		// A slow batch can outlive its claim: one endpoint can hold an event for
+		// the whole HTTP timeout, and a hundred of those dwarf the lock. Once past
+		// renewFrom, re-lock each row and skip any another relay has taken rather
+		// than deliver it twice.
+		if ours, err := r.holds(ctx, events[i].ID, token, renewFrom); err != nil {
+			return delivered, err
+		} else if !ours {
+			continue
+		}
+		r.deliver(ctx, &events[i], token, renewFrom)
+		delivered++
 	}
-	return len(events), nil
+	return delivered, nil
 }
 
 // deliver attempts every subscribed endpoint for one event. On full success the
 // outbox row is marked delivered; on any failure it is rescheduled (or failed
 // after the schedule is exhausted). Consumers dedupe on X-Sild-Event-Id.
-func (r *Relay) deliver(ctx context.Context, ev *models.Outbox) {
+// holds re-locks a row once the pass has run past renewFrom, reporting whether
+// it is still ours. Before then the claim is fresh and no write is needed.
+func (r *Relay) holds(ctx context.Context, id, token string, renewFrom time.Time) (bool, error) {
+	if time.Now().Before(renewFrom) {
+		return true, nil
+	}
+	return r.store.Outbox().RenewClaim(ctx, id, token)
+}
+
+func (r *Relay) deliver(ctx context.Context, ev *models.Outbox, token string, renewFrom time.Time) {
 	endpoints, err := r.store.Webhooks().ListForEvent(ctx, ev.TenantID, ev.EventType)
 	if err != nil {
 		r.reschedule(ctx, ev)
@@ -57,6 +84,11 @@ func (r *Relay) deliver(ctx context.Context, ev *models.Outbox) {
 	}
 	allOK := true
 	for i := range endpoints {
+		// A single event with many slow endpoints can outlive the claim by itself,
+		// so the lock is pushed out inside this loop too.
+		if ours, err := r.holds(ctx, ev.ID, token, renewFrom); err != nil || !ours {
+			return
+		}
 		ep := &endpoints[i]
 		code, derr := r.post(ctx, ep, ev.Payload, ev.EventID)
 		status := models.DeliveryDelivered

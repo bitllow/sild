@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/bitllow/sild/backend/internal/id"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type webhookRepo struct{ db *gorm.DB }
@@ -76,36 +78,118 @@ func (r *outboxRepo) Enqueue(ctx context.Context, o *models.Outbox) error {
 	return r.db.WithContext(ctx).Create(o).Error
 }
 
-// ClaimDue returns pending events whose backoff has elapsed.
-func (r *outboxRepo) ClaimDue(ctx context.Context, limit int) ([]models.Outbox, error) {
+// unclaimed matches rows no live relay holds: never claimed, or claimed by one
+// that died before its lock lapsed.
+func unclaimed(db *gorm.DB, now time.Time) *gorm.DB {
+	return db.Where("locked_until IS NULL OR locked_until < ?", now)
+}
+
+// ClaimDue returns only the rows this caller's lock won — a second relay's UPDATE
+// matches nothing already locked, so no event is delivered twice. The token is
+// what lets the winner read its own rows back.
+func (r *outboxRepo) ClaimDue(ctx context.Context, limit int) ([]models.Outbox, string, error) {
+	now := time.Now()
+	var ids []string
+	err := unclaimed(r.db.WithContext(ctx).Model(&models.Outbox{}), now).
+		Where("status = ? AND available_at <= ?", models.DeliveryPending, now).
+		Order("available_at").Limit(limit).Pluck("id", &ids).Error
+	if err != nil || len(ids) == 0 {
+		return nil, "", err
+	}
+	token := id.New(id.Holder)
+	res := unclaimed(r.db.WithContext(ctx).Model(&models.Outbox{}), now).
+		Where("id IN ? AND status = ?", ids, models.DeliveryPending).
+		Updates(map[string]any{"claim_token": token, "locked_until": now.Add(store.OutboxClaimTTL)})
+	if res.Error != nil {
+		return nil, "", res.Error
+	}
 	var os []models.Outbox
-	err := r.db.WithContext(ctx).
-		Where("status = ? AND available_at <= ?", models.DeliveryPending, time.Now()).
-		Order("available_at").Limit(limit).Find(&os).Error
-	return os, err
+	err = r.db.WithContext(ctx).Where("claim_token = ?", token).Order("available_at").Find(&os).Error
+	return os, token, err
+}
+
+// RenewClaim pushes this row's lock out while its relay is still working on the
+// batch. False means another relay already took the row — the caller must stop
+// delivering it rather than send an event twice.
+func (r *outboxRepo) RenewClaim(ctx context.Context, id, claimToken string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&models.Outbox{}).
+		Where("id = ? AND claim_token = ?", id, claimToken).
+		Update("locked_until", time.Now().Add(store.OutboxClaimTTL))
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (r *outboxRepo) MarkDelivered(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&models.Outbox{}).Where("id = ?", id).
-		Update("status", models.DeliveryDelivered).Error
+		Updates(map[string]any{"status": models.DeliveryDelivered, "claim_token": nil, "locked_until": nil}).Error
 }
 
 func (r *outboxRepo) Reschedule(ctx context.Context, id string, attempts, availableInSeconds int) error {
 	return r.db.WithContext(ctx).Model(&models.Outbox{}).Where("id = ?", id).Updates(map[string]any{
 		"attempts":     attempts,
 		"available_at": time.Now().Add(time.Duration(availableInSeconds) * time.Second),
+		"claim_token":  nil,
+		"locked_until": nil,
 	}).Error
 }
 
 func (r *outboxRepo) MarkFailed(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&models.Outbox{}).Where("id = ?", id).
-		Update("status", models.DeliveryFailed).Error
+		Updates(map[string]any{"status": models.DeliveryFailed, "claim_token": nil, "locked_until": nil}).Error
 }
 
 type emailRepo struct{ db *gorm.DB }
 
 func (r *emailRepo) CreateThread(ctx context.Context, t *models.EmailThread) error {
 	return r.db.WithContext(ctx).Create(t).Error
+}
+
+// ClaimIngest inserts the (tenant, message-id) pair, letting the primary key
+// decide: the insert that lands is the one delivery that gets to ingest. An
+// existing row may still be claimable — an incomplete claim older than staleAfter
+// belonged to a process that died mid-ingest.
+func (r *emailRepo) ClaimIngest(ctx context.Context, tenantID, messageID string, staleAfter time.Duration) (store.IngestClaim, error) {
+	now := time.Now()
+	owner := id.New(id.Holder)
+	rec := &models.EmailIngest{TenantID: tenantID, MessageID: messageID, Owner: owner, ClaimedAt: now}
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(rec)
+	if res.Error != nil {
+		return store.IngestClaim{}, res.Error
+	}
+	if res.RowsAffected > 0 {
+		return store.IngestClaim{Owner: owner}, nil
+	}
+	res = r.db.WithContext(ctx).Model(&models.EmailIngest{}).
+		Where("tenant_id = ? AND message_id = ? AND completed_at IS NULL AND claimed_at < ?",
+			tenantID, messageID, now.Add(-staleAfter)).
+		Updates(map[string]any{"owner": owner, "claimed_at": now})
+	if res.Error != nil {
+		return store.IngestClaim{}, res.Error
+	}
+	if res.RowsAffected > 0 {
+		return store.IngestClaim{Owner: owner}, nil
+	}
+	var existing models.EmailIngest
+	if err := r.db.WithContext(ctx).
+		First(&existing, "tenant_id = ? AND message_id = ?", tenantID, messageID).Error; err != nil {
+		return store.IngestClaim{}, translateErr(err)
+	}
+	return store.IngestClaim{Done: existing.CompletedAt != nil, InFlight: existing.CompletedAt == nil}, nil
+}
+
+// CompleteIngest closes the claim. Only a completed claim refuses a redelivery.
+func (r *emailRepo) CompleteIngest(ctx context.Context, tenantID, messageID, owner string) error {
+	return r.db.WithContext(ctx).Model(&models.EmailIngest{}).
+		Where("tenant_id = ? AND message_id = ? AND owner = ?", tenantID, messageID, owner).
+		Update("completed_at", time.Now()).Error
+}
+
+func (r *emailRepo) ReleaseIngest(ctx context.Context, tenantID, messageID, owner string) error {
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND message_id = ? AND owner = ?", tenantID, messageID, owner).
+		Delete(&models.EmailIngest{}).Error
 }
 
 func (r *emailRepo) FindOpenByToken(ctx context.Context, tenantID, token string) (*models.EmailThread, error) {

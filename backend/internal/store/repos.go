@@ -102,11 +102,26 @@ type MemberRepo interface {
 	UpdateSearchText(ctx context.Context, tenantID, memberID, text string) error
 }
 
+// LeaseRepo is the cluster-wide named mutex backing work that must have one
+// owner across replicas (schema migration, signing-key bootstrap, periodic jobs).
+type LeaseRepo interface {
+	// Acquire takes or renews the lease, reporting whether this owner holds it.
+	Acquire(ctx context.Context, name, owner string, ttl time.Duration) (bool, error)
+	// Release drops the lease if this owner still holds it.
+	Release(ctx context.Context, name, owner string) error
+	// Held reports whether an unexpired lease exists under this name.
+	Held(ctx context.Context, name string) (bool, error)
+}
+
 type AssignmentRepo interface {
 	Create(ctx context.Context, a *models.Assignment) error
 	Get(ctx context.Context, tenantID, id string) (*models.Assignment, error)
 	GetByConversation(ctx context.Context, tenantID, convID string) (*models.Assignment, error)
-	Update(ctx context.Context, a *models.Assignment) error
+	// Transition applies a guarded state change: the write carries the expected
+	// current status, so two agents racing to claim one assignment resolve in the
+	// database and exactly one is told it won. ok is false when the row had moved
+	// on — the caller re-reads to say why.
+	Transition(ctx context.Context, tenantID, id string, t AssignmentTransition) (ok bool, err error)
 	// ListQueue returns one cursor-paginated, sorted page of inbox assignments
 	// enriched with each conversation + its active members + last activity, so a
 	// queue page renders from a single query (§4.3).
@@ -120,6 +135,17 @@ type AssignmentRepo interface {
 	// over the representative (latest) assignment per conversation, matching
 	// ListQueue's semantics.
 	CountQueue(ctx context.Context, tenantID, actorID string) (QueueCounts, error)
+}
+
+// AssignmentTransition describes one guarded assignment state change: apply To
+// only while the row is still in one of From.
+type AssignmentTransition struct {
+	From []models.AssignmentStatus
+	To   models.AssignmentStatus
+	// Assignee is written when set; ClearAssignee wins over it (return-to-queue).
+	Assignee      *string
+	ClearAssignee bool
+	ClosedAt      *time.Time
 }
 
 // QueueCounts are the inbox scope-tab counters. You = assigned to the calling
@@ -248,14 +274,41 @@ type WebhookRepo interface {
 
 type OutboxRepo interface {
 	Enqueue(ctx context.Context, o *models.Outbox) error
-	ClaimDue(ctx context.Context, limit int) ([]models.Outbox, error)
+	// ClaimDue takes due events for the calling relay and returns only the rows it
+	// won, with the claim token needed to renew them. Concurrent relays therefore
+	// never deliver the same event twice.
+	ClaimDue(ctx context.Context, limit int) (events []models.Outbox, claimToken string, err error)
+	// RenewClaim extends this claim on one row, reporting false when the row is
+	// no longer ours — a delivery pass longer than OutboxClaimTTL must not keep
+	// sending events another relay has since taken.
+	RenewClaim(ctx context.Context, id, claimToken string) (bool, error)
 	MarkDelivered(ctx context.Context, id string) error
 	Reschedule(ctx context.Context, id string, attempts int, availableInSeconds int) error
 	MarkFailed(ctx context.Context, id string) error
 }
 
+// IngestClaim is the outcome of trying to reserve a Message-ID. Exactly one of
+// Owner (we may ingest) / Done (already ingested) / InFlight (another attempt
+// holds it) is meaningful — telling Done from InFlight is what keeps a
+// concurrent redelivery from being acknowledged for work that may still fail.
+type IngestClaim struct {
+	Owner    string
+	Done     bool
+	InFlight bool
+}
+
 type EmailRepo interface {
 	CreateThread(ctx context.Context, t *models.EmailThread) error
+	// ClaimIngest reserves an inbound Message-ID for ingestion (§6.2), returning
+	// the owner token for the completing call. A claim whose ingest never finished
+	// goes stale and is retryable, so a process that died mid-ingest cannot make
+	// the MTA's redelivery look like a duplicate and lose the mail.
+	ClaimIngest(ctx context.Context, tenantID, messageID string, staleAfter time.Duration) (IngestClaim, error)
+	// CompleteIngest marks the claim done — only then does it refuse redeliveries.
+	// Owner-scoped: a superseded attempt must not complete its successor's claim.
+	CompleteIngest(ctx context.Context, tenantID, messageID, owner string) error
+	// ReleaseIngest drops a failed attempt's own claim so a retry can proceed.
+	ReleaseIngest(ctx context.Context, tenantID, messageID, owner string) error
 	// FindOpenByToken resolves a reply that carries the thread token (via the
 	// Reply-To +subaddress) to its OPEN conversation — the precise threading key.
 	FindOpenByToken(ctx context.Context, tenantID, token string) (*models.EmailThread, error)

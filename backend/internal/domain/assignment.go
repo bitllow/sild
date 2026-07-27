@@ -108,56 +108,64 @@ func (s *Service) AssignmentConversation(ctx context.Context, tenantID, assignme
 }
 
 // ClaimAssignment assigns a queued assignment to the calling agent (§4.3).
-// State: queued → assigned.
+// State: queued → assigned. Two agents claiming at once resolve in the database:
+// the loser sees the assignment already taken.
 func (s *Service) ClaimAssignment(ctx context.Context, tenantID, assignmentID, agentActorID string) (*models.Assignment, error) {
-	return s.transition(ctx, tenantID, assignmentID, func(a *models.Assignment) error {
-		if a.Status == models.AssignmentClosed {
+	return s.transition(ctx, tenantID, assignmentID, store.AssignmentTransition{
+		From: []models.AssignmentStatus{models.AssignmentQueued}, To: models.AssignmentAssigned,
+		Assignee: &agentActorID,
+	}, func(current *models.Assignment) error {
+		switch {
+		case current.Status == models.AssignmentClosed:
 			return conflict(CodeAssignmentAlreadyClosed, "assignment is already closed")
+		case current.AssigneeActorID != nil && *current.AssigneeActorID == agentActorID:
+			return nil // this agent already holds it; a retried claim is not a conflict
+		default:
+			return conflict(CodeAssignmentAlreadyTaken, "assignment is already claimed by another agent")
 		}
-		a.Status = models.AssignmentAssigned
-		a.AssigneeActorID = &agentActorID
-		return nil
 	})
 }
 
-// CloseAssignment closes an assignment (terminal, §1).
+// CloseAssignment closes an assignment (terminal, §1). Idempotent: closing an
+// already-closed assignment succeeds without re-emitting.
 func (s *Service) CloseAssignment(ctx context.Context, tenantID, assignmentID string) (*models.Assignment, error) {
-	return s.transition(ctx, tenantID, assignmentID, func(a *models.Assignment) error {
-		if a.Status == models.AssignmentClosed {
-			return nil
-		}
-		now := s.now()
-		a.Status = models.AssignmentClosed
-		a.ClosedAt = &now
-		return nil
-	})
+	now := s.now()
+	return s.transition(ctx, tenantID, assignmentID, store.AssignmentTransition{
+		From: []models.AssignmentStatus{models.AssignmentQueued, models.AssignmentAssigned},
+		To:   models.AssignmentClosed, ClosedAt: &now,
+	}, func(current *models.Assignment) error { return nil })
 }
 
 // ReturnToQueue moves an assigned assignment back to the queue (assigned → queued).
 func (s *Service) ReturnToQueue(ctx context.Context, tenantID, assignmentID string) (*models.Assignment, error) {
-	return s.transition(ctx, tenantID, assignmentID, func(a *models.Assignment) error {
-		if a.Status != models.AssignmentAssigned {
-			return conflict(CodeAssignmentAlreadyClosed, "assignment is not currently assigned")
-		}
-		a.Status = models.AssignmentQueued
-		a.AssigneeActorID = nil
-		return nil
+	return s.transition(ctx, tenantID, assignmentID, store.AssignmentTransition{
+		From: []models.AssignmentStatus{models.AssignmentAssigned}, To: models.AssignmentQueued,
+		ClearAssignee: true,
+	}, func(current *models.Assignment) error {
+		return conflict(CodeAssignmentAlreadyClosed, "assignment is not currently assigned")
 	})
 }
 
-// transition applies a state change and emits the update. Closing the assignment
-// does NOT close the conversation (review finding): conversation close is its own
-// action; archival keys on conversation.status.
-func (s *Service) transition(ctx context.Context, tenantID, assignmentID string, mutate func(*models.Assignment) error) (*models.Assignment, error) {
+// transition applies a guarded state change, emitting only when the write took
+// the row. When the guard rejects it, `lost` decides from the current row whether
+// that is idempotent (nil) or a conflict.
+//
+// Closing the assignment does NOT close the conversation (review finding):
+// conversation close is its own action; archival keys on conversation.status.
+func (s *Service) transition(ctx context.Context, tenantID, assignmentID string, t store.AssignmentTransition, lost func(*models.Assignment) error) (*models.Assignment, error) {
+	ok, err := s.store.Assignments().Transition(ctx, tenantID, assignmentID, t)
+	if err != nil {
+		return nil, err
+	}
 	a, err := s.store.Assignments().Get(ctx, tenantID, assignmentID)
 	if err != nil {
 		return nil, mapStoreErr(err)
 	}
-	if err := mutate(a); err != nil {
-		return nil, err
-	}
-	if err := s.store.Assignments().Update(ctx, a); err != nil {
-		return nil, err
+	if !ok {
+		if err := lost(a); err != nil {
+			return nil, err
+		}
+		return a, nil
 	}
 	data := views.Assignment(a)
 	s.emit(ctx, realtime.Target{Conversation: a.ConversationID}, realtime.EventAssignmentUpdated, a.ConversationID, data)
