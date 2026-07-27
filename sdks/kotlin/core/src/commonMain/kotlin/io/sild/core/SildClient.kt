@@ -5,6 +5,8 @@ import kotlin.uuid.Uuid
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,13 +25,20 @@ import kotlinx.serialization.json.Json
 // `transport` defaults to the platform's socket; where there is none the client is
 // REST-only.
 @OptIn(ExperimentalUuidApi::class)
-class SildClient(
+class SildClient internal constructor(
     private val cfg: SildConfig,
     private val scope: CoroutineScope,
-    private val onChime: () -> Unit = {},
-    transport: RealtimeTransportFactory? = defaultRealtimeTransport(),
+    private val onChime: () -> Unit,
+    transport: RealtimeTransportFactory?,
+    private val api: SildApi,
 ) {
-    private val api = SildApi(cfg)
+    constructor(
+        cfg: SildConfig,
+        scope: CoroutineScope,
+        onChime: () -> Unit = {},
+        transport: RealtimeTransportFactory? = defaultRealtimeTransport(),
+    ) : this(cfg, scope, onChime, transport, SildApi(cfg))
+
     private val json = Json { ignoreUnknownKeys = true }
     private val selfId = cfg.userId
 
@@ -108,7 +117,15 @@ class SildClient(
      *  caller can safely send afterwards without the load clobbering the new message. */
     private suspend fun loadThread(id: String) {
         _state.update { it.copy(activeId = id, loadingThread = true, messages = emptyList()) }
-        runCatching { api.listMessages(id) }
+        // The row lookup and the page are independent; serialising them would put a
+        // second round trip in front of every deep-linked open.
+        val result = coroutineScope {
+            val row = async { ensureConversation(id) }
+            val messages = async { runCatching { api.listMessages(id) } }
+            row.await()
+            messages.await()
+        }
+        result
             .onSuccess { page ->
                 // A newer open() may have superseded this load while it was in flight —
                 // applying it now would render this thread under another's header and
@@ -123,6 +140,27 @@ class SildClient(
                 if (!isActive(id)) return
                 _state.update { it.copy(loadingThread = false, error = e.message) }
             }
+    }
+
+    /** Make sure [id]'s row is in state before its thread renders.
+     *
+     *  The recent list is one bounded page, so a conversation opened directly — a trip's
+     *  driver chat, a deep link — need not be in it. Without its row the header falls
+     *  back to "Support", no member name resolves, and a closed conversation still shows
+     *  a live composer. A miss costs one extra GET; a hit costs nothing.
+     */
+    private suspend fun ensureConversation(id: String) {
+        if (_state.value.conversations.any { it.id == id }) return
+        val row = runCatching { api.getConversation(id) }.getOrElse {
+            if (it is CancellationException) throw it
+            return // the thread still loads; only its metadata is missing
+        }
+        val conv = toConversation(row)
+        _state.update { s ->
+            if (s.conversations.any { it.id == id }) return@update s
+            val convs = s.conversations + conv
+            s.copy(conversations = convs, agentName = convs.firstOrNull { c -> c.agentName != null }?.agentName ?: s.agentName)
+        }
     }
 
     /** Create a support request, open it, then reconnect so its channel is covered.

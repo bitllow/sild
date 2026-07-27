@@ -160,6 +160,15 @@ class SildApiTest {
         assertEquals("$base/v1/uploads/local/logo.png", res.config.logoUrl)
     }
 
+    @Test fun fetchesOneConversationRow() = runBlockingTest {
+        val conv = api(
+            { ok("""{"id":"c1","status":"closed","reference":"trip_1","members":[]}""") },
+        ).getConversation("c1")
+        assertEquals("/v1/conversations/c1", path(0))
+        assertEquals("closed", conv.status)
+        assertEquals("trip_1", conv.reference)
+    }
+
     // ?since= is a sync read, not a page: the caller resumes from the last id it got
     // and repeats while has_more, so a gap longer than one limit is not truncated.
     @Test fun catchUpDrainsEveryMissedMessageAcrossPages() = runBlockingTest {

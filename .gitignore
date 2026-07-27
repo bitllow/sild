@@ -40,3 +40,8 @@ backend/internal/webasset/dist/*
 # npm/yarn failure logs
 npm-debug.log*
 yarn-error.log*
+
+# SwiftPM, from the root Package.swift (the manifest must live here for SPM to find it)
+/.build/
+/Package.resolved
+/.swiftpm/

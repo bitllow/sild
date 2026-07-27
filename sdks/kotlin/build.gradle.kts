@@ -12,5 +12,5 @@ plugins {
 // One source of truth for the published coordinates; keep SDK_VERSION in step.
 allprojects {
     group = "io.sild"
-    version = "0.1.0"
+    version = "0.1.2"
 }
