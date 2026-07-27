@@ -3,9 +3,25 @@ name: android-sdk
 on:
   push:
     branches: [master]
-    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+    paths:
+      - "sdks/kotlin/**"
+      - "sdks/swift/**"
+      - "Package.swift"
+      - "scripts/**"
+      - "backend/**"
+      - ".github/workflows/android-sdk.yml"
+      # Release-workflow edits get PR CI too — its XCFramework build is this job's.
+      - ".github/workflows/sdk-release.yml"
   pull_request:
-    paths: ["sdks/kotlin/**", "backend/**", ".github/workflows/android-sdk.yml"]
+    paths:
+      - "sdks/kotlin/**"
+      - "sdks/swift/**"
+      - "Package.swift"
+      - "scripts/**"
+      - "backend/**"
+      - ".github/workflows/android-sdk.yml"
+      # Release-workflow edits get PR CI too — its XCFramework build is this job's.
+      - ".github/workflows/sdk-release.yml"
 
 jobs:
   # Build the Android SDK (core JAR + ui AAR + sample APK) and run the pure-JVM
@@ -58,14 +74,184 @@ jobs:
       - name: Core tests (against sild-dev)
         env:
           SILD_BASE_URL: http://localhost:8080
-        run: ./gradlew :core:test
+        run: ./gradlew :core:jvmTest
 
       # :sample:assembleRelease is minified (R8) — it validates consumer-rules.pro.
       - name: Assemble SDK (ui AAR + sample APK, debug + minified release)
         run: ./gradlew :ui:assembleRelease :sample:assembleDebug :sample:assembleRelease
 
+      # Only the artifacts this host can produce; the Apple ones are the ios-core job's.
+      # The root (kotlinMultiplatform) publication is what :ui's POM depends on —
+      # without it a consumer of these artifacts cannot resolve sild-ui at all.
       - name: Publish artifacts to Maven local (smoke test packaging)
-        run: ./gradlew :core:publishToMavenLocal :ui:publishToMavenLocal
+        run: |
+          ./gradlew :core:publishKotlinMultiplatformPublicationToMavenLocal \
+            :core:publishJvmPublicationToMavenLocal :ui:publishToMavenLocal
+
+      # The publication above is only useful if sild-ui's own POM can be satisfied,
+      # which is what silently broke: :ui depends on the root sild-core module.
+      - name: The published sild-ui's Sild dependencies resolve
+        run: python3 "$GITHUB_WORKSPACE/scripts/check-maven-local-deps.py" io.sild sild-ui
+
+  # The same shared :core, compiled by Kotlin/Native and run on an iOS simulator:
+  # commonTest holds the whole wire contract, so this covers the REST/auth/upload
+  # logic and the live-backend integration tests on Apple as thoroughly as the sdk
+  # job covers them on the JVM. macOS minutes are free for public repos.
+  ios-core:
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: sdks/kotlin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: true
+
+      # The simulator shares the runner's network, so the tests reach sild-dev on
+      # localhost exactly as the JVM ones do.
+      - name: Start sild-dev
+        working-directory: backend
+        run: |
+          DB_DRIVER=sqlite DB_DSN=/tmp/sild-ios-ci.db SILD_BROKER=memory \
+            STORAGE_BACKEND=local SILD_ENV=development \
+            go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/healthz && { healthy=1; break; }
+            sleep 1
+          done
+          # Fail here, with the log, rather than as a confusing test error later.
+          [ -n "$healthy" ] || {
+            echo "::error::sild-dev did not become healthy within 60s"
+            cat /tmp/sild-dev.log
+            exit 1
+          }
+
+      - name: Core tests on the iOS simulator (against sild-dev)
+        env:
+          SILD_BASE_URL: http://localhost:8080
+        run: ./gradlew :core:iosSimulatorArm64Test
+
+      # The plugin DISABLES the simulator test task when the JDK's architecture does
+      # not match the target's (an x86_64 JDK on an arm64 runner), and the build still
+      # reports success — so assert that tests actually ran.
+      - name: Assert the simulator tests ran
+        run: |
+          count=$(grep -ho 'tests="[0-9]*"' core/build/test-results/iosSimulatorArm64Test/*.xml 2>/dev/null \
+            | grep -o '[0-9]*' | paste -sd+ - | bc)
+          [ "${count:-0}" -gt 0 ] || {
+            echo "::error::no iOS simulator tests ran — the task was skipped"
+            exit 1
+          }
+          echo "$count iOS simulator tests ran"
+
+      # The Apple artifacts, which only a macOS host can build.
+      - name: Publish artifacts to Maven local (smoke test packaging)
+        run: ./gradlew :core:publishToMavenLocal
+
+      # Everything below proves the shipping scheme AND the messenger: the Swift package
+      # consumes the XCFramework exactly as a host app would, and the sample app's
+      # XCUITest drives the real SwiftUI UI against the same live sild-dev.
+      - name: Assemble the XCFramework
+        run: ./gradlew :core:assembleSildCoreReleaseXCFramework
+
+      # The sample app and its UI test need targets SwiftPM cannot express; the spec is
+      # committed as project.yml and the .xcodeproj generated here.
+      - name: Generate the sample Xcode project
+        working-directory: sdks/swift
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # xcodebuild does not forward the job's environment into the simulator, and the
+      # TEST_RUNNER_ prefix does not reach a SwiftPM-generated scheme — so publish the
+      # variable on the booted device's launchd, which apps do inherit.
+      - name: Boot the simulator with SILD_BASE_URL
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available -j \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for v in d.values() for x in v if x['name'].startswith('iPhone')))")
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl spawn "$udid" launchctl setenv SILD_BASE_URL http://localhost:8080
+
+      # Unit tests (transport seams, state bridge, REST smoke) AND the XCUITest that
+      # drives the real messenger UI, including the driver→rider realtime round-trip.
+      - name: Swift tests on the iOS simulator (against sild-dev)
+        working-directory: sdks/swift
+        # Keep in step with SildUnitTests + SildSampleUITests.
+        env:
+          EXPECTED_TESTS: "11"
+        run: |
+          set -o pipefail
+          xcodebuild test -project SildSample.xcodeproj -scheme SildSample \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            | tee /tmp/xcodebuild.log
+          # Counting cases, not the per-bundle summaries: one test skipping (because
+          # SILD_BASE_URL never reached the simulator) must not hide behind another
+          # passing, so pin the count and forbid skips outright.
+          passed=$(grep -c "Test Case .* passed" /tmp/xcodebuild.log || true)
+          skipped=$(grep -c "Test Case .* skipped" /tmp/xcodebuild.log || true)
+          echo "passed=$passed skipped=$skipped"
+          [ "$passed" = "$EXPECTED_TESTS" ] || {
+            echo "::error::expected $EXPECTED_TESTS Swift tests to pass, $passed did"; exit 1
+          }
+          [ "$skipped" = "0" ] || {
+            echo "::error::$skipped Swift test(s) skipped — SILD_BASE_URL did not reach the simulator"
+            exit 1
+          }
+
+      # The same snippet the release compiles against the published tag, here against
+      # this checkout — so a README that stops compiling fails the PR instead of
+      # shipping a release nobody can install.
+      - name: README's consumer snippet compiles
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          mkdir -p "$work/Sources/App"
+          python3 "$GITHUB_WORKSPACE/scripts/extract-consumer-snippet.py" \
+            "$GITHUB_WORKSPACE/sdks/swift/README.md" "$work/Sources/App/App.swift"
+          cat > "$work/Package.swift" <<EOF
+          // swift-tools-version: 5.9
+          import PackageDescription
+          let package = Package(
+              name: "App", platforms: [.iOS(.v17)],
+              products: [.library(name: "App", targets: ["App"])],
+              dependencies: [.package(path: "$GITHUB_WORKSPACE")],
+              targets: [.target(name: "App", dependencies: [.product(name: "Sild", package: "Sild")])]
+          )
+          EOF
+          cd "$work"
+          xcodebuild build -scheme App \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            || { echo "::error::the README's consumer snippet does not compile"; exit 1; }
+
+      # The UI test's report and the simulator log are what you need when a device test
+      # fails, and they are gone once the runner is reclaimed.
+      - name: Upload iOS test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-report
+          path: /tmp/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Dump sild-dev log on failure
+        if: failure()
+        run: cat /tmp/sild-dev.log
 
   # End-to-end on a real emulator: launch the sample app and round-trip a support
   # message through a live sild-dev (SildMessengerE2ETest). Hardware-accelerated

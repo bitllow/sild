@@ -10,17 +10,18 @@ the host backend).
 
 | Module | What it is | Depends on |
 |---|---|---|
-| `:core` | Pure-Kotlin/JVM client — REST (§4.2) + realtime (§5, Centrifuge over WebSocket) + models + brand/theme derivation. No Android types, so it unit-tests on a plain JVM. | — |
+| `:core` | Kotlin Multiplatform client (jvm + iosArm64 + iosSimulatorArm64) — REST (§4.2) + realtime policy (§5) + models + brand/theme derivation. Only the realtime socket and timestamp formatting are per-platform, so it unit-tests on a plain JVM and on the iOS simulator. | — |
 | `:ui` | Jetpack Compose messenger UI, themed from the server `BrandConfig` so it renders like the web widget. | `:core` |
 | `:sample` | "Acme Rides" demo app — the SDK's counterpart to `web/demo.html`. | `:ui` |
 
 ## Install (Gradle)
 
-Published as `io.sild:sild-core` (JAR) and `io.sild:sild-ui` (AAR):
+Published as `io.sild:sild-core` (multiplatform; Gradle picks the `-jvm` artifact for
+Android) and `io.sild:sild-ui` (AAR):
 
 ```kotlin
 dependencies {
-    implementation("io.sild:sild-ui:0.1.0") // pulls in :core
+    implementation("io.sild:sild-ui:0.1.2") // pulls in :core
 }
 ```
 
@@ -84,11 +85,14 @@ messenger in its own navigation.
 ```bash
 cd sdks/kotlin
 
-# Pure-JVM core tests. The REST surface (auth retry, upload grant → PUT) is covered
-# offline with MockWebServer; the wire/realtime tests need a running sild-dev and are
-# skipped without SILD_BASE_URL.
-./gradlew :core:test                                   # logic + offline REST tests
-SILD_BASE_URL=http://localhost:8080 ./gradlew :core:test   # + wire/realtime tests
+# Core tests. commonTest holds the whole suite, so the same assertions run on the JVM
+# and on an iOS simulator; the REST surface (auth retry, upload grant → PUT) is covered
+# offline with a mock engine (plus one JVM test over a real socket, for the headers the
+# signed upload PUT must not gain), and the wire/realtime tests no-op without SILD_BASE_URL.
+./gradlew :core:jvmTest :core:iosSimulatorArm64Test    # logic + offline REST tests
+SILD_BASE_URL=http://localhost:8080 ./gradlew :core:jvmTest :core:iosSimulatorArm64Test
+# The simulator tests need an arm64 JDK: on an x86_64 one the Kotlin plugin disables
+# the task and the build still passes green.
 
 # Build the library + sample APK. :sample:assembleRelease is minified (R8) — it is
 # what validates ui/consumer-rules.pro against the shrinker a real host app runs.
@@ -121,7 +125,8 @@ cd sdks/kotlin
 ./gradlew :sample:connectedDebugAndroidTest
 ```
 
-CI (`.github/workflows/android-sdk.yml`) runs two jobs on every change under
-`sdks/kotlin`: `sdk` boots `sild-dev`, runs the core tests against it, and assembles
-the AAR + sample APK; `e2e` boots `sild-dev` and runs the instrumented test above on
-a hardware-accelerated emulator (free on `ubuntu-latest`).
+CI (`.github/workflows/android-sdk.yml`) runs three jobs on every change under
+`sdks/kotlin`: `sdk` boots `sild-dev`, runs the JVM core tests against it, and
+assembles the AAR + sample APK; `ios-core` does the same on `macos-15`, running the
+identical `commonTest` suite on an iOS simulator; `e2e` boots `sild-dev` and runs the
+instrumented test above on a hardware-accelerated emulator (free on `ubuntu-latest`).
