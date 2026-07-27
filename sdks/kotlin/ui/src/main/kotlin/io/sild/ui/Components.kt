@@ -40,33 +40,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import io.sild.core.Attachment
+import io.sild.core.BrandTheme
 import io.sild.core.Direction
 import io.sild.core.Message
 import io.sild.core.PendingAttachment
-import java.util.Locale
-
-private val AVATAR_PALETTE = listOf(
-    0xFF3D63FF, 0xFFFF7A45, 0xFF18A957, 0xFF7C5CFF, 0xFF0EA5A5, 0xFFE0599B, 0xFFD9881A, 0xFF2440B8,
-)
-
-// A single uppercase initial — the web widget's rowInitial/headInitial (first char).
-// Locale.ROOT so a Turkish device doesn't render a non-Turkish "i" as "İ".
-private fun initials(name: String): String =
-    name.trim().firstOrNull()?.toString()?.uppercase(Locale.ROOT) ?: "?"
-
-private fun colorFor(name: String): Color {
-    var h = 0
-    for (ch in name) h = (h * 31 + ch.code) and 0x7FFFFFFF
-    return Color(AVATAR_PALETTE[h % AVATAR_PALETTE.size])
-}
 
 @Composable
 fun SildAvatar(name: String, size: Int = 36, bg: Color? = null) {
     Box(
-        Modifier.size(size.dp).clip(CircleShape).background(bg ?: colorFor(name)),
+        Modifier.size(size.dp).clip(CircleShape).background(bg ?: parseColor(BrandTheme.avatarColor(name))),
         contentAlignment = Alignment.Center,
     ) {
-        Text(initials(name), color = Color.White, fontSize = (size * 0.38).sp, fontWeight = FontWeight.Bold)
+        Text(BrandTheme.avatarInitial(name), color = Color.White, fontSize = (size * 0.38).sp, fontWeight = FontWeight.Bold)
     }
 }
 

@@ -5,6 +5,8 @@ import kotlin.uuid.Uuid
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -115,8 +117,15 @@ class SildClient internal constructor(
      *  caller can safely send afterwards without the load clobbering the new message. */
     private suspend fun loadThread(id: String) {
         _state.update { it.copy(activeId = id, loadingThread = true, messages = emptyList()) }
-        ensureConversation(id)
-        runCatching { api.listMessages(id) }
+        // The row lookup and the page are independent; serialising them would put a
+        // second round trip in front of every deep-linked open.
+        val result = coroutineScope {
+            val row = async { ensureConversation(id) }
+            val messages = async { runCatching { api.listMessages(id) } }
+            row.await()
+            messages.await()
+        }
+        result
             .onSuccess { page ->
                 // A newer open() may have superseded this load while it was in flight —
                 // applying it now would render this thread under another's header and

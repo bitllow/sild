@@ -15,7 +15,7 @@ public final class CentrifugeRealtimeTransport: NSObject, RealtimeTransport {
 
     private let lock = NSLock()
     private var client: CentrifugeClient?
-    private var tokenTasks: [Task<Void, Never>] = []
+    private var tokenTask: Task<Void, Never>?
 
     public init(
         config: SildConfig,
@@ -55,9 +55,9 @@ public final class CentrifugeRealtimeTransport: NSObject, RealtimeTransport {
                         completion(.failure(error))
                     }
                 }
+                // At most one request is in flight, so the previous handle is spent.
                 self.lock.lock()
-                self.tokenTasks.append(task)
-                self.tokenTasks.removeAll { $0.isCancelled }
+                self.tokenTask = task
                 self.lock.unlock()
             }
         )
@@ -85,11 +85,11 @@ public final class CentrifugeRealtimeTransport: NSObject, RealtimeTransport {
     public func destroy() {
         lock.lock()
         let current = client
-        let tasks = tokenTasks
+        let task = tokenTask
         client = nil
-        tokenTasks = []
+        tokenTask = nil
         lock.unlock()
-        tasks.forEach { $0.cancel() }
+        task?.cancel()
         current?.disconnect()
     }
 }

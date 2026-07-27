@@ -24,11 +24,8 @@ private final class Once<T>: @unchecked Sendable {
     }
 }
 
-/// Couples the cancellation handler to the in-flight `Once`, in either order.
-///
-/// `onCancel` can run before the continuation exists — the task may already be cancelled
-/// when `run` is entered. Recording that fact means the `Once` installed afterwards is
-/// failed immediately instead of waiting for a Kotlin callback that may never come.
+/// Couples the cancellation handler to the in-flight `Once`, in either order —
+/// `onCancel` can run before the continuation exists.
 private final class OnceBox<T>: @unchecked Sendable {
     private let lock = NSLock()
     private var once: Once<T>?

@@ -23,6 +23,7 @@ public final class SildModel {
     @ObservationIgnored private let bridge = CallbackBridge()
     @ObservationIgnored private var session: SildSession?
     @ObservationIgnored private var watch: SildCancellable?
+    @ObservationIgnored private var styleCache: (brand: BrandConfig, dark: Bool, style: SildStyle)?
 
     public init(config: SildConfig, onChime: @escaping () -> Void = {}) {
         self.config = config
@@ -56,6 +57,19 @@ public final class SildModel {
         session?.close()
         session = nil
         bridge.closeAll()
+    }
+
+    /// The theme for the loaded brand, rebuilt only when the config or the scheme
+    /// changes — resolving it crosses a dozen bridge calls, and the view body runs on
+    /// every state change.
+    func style(systemDark: Bool) -> SildStyle {
+        let brand = state.brand
+        if let cached = styleCache, cached.dark == systemDark, cached.brand.isEqual(brand) {
+            return cached.style
+        }
+        let built = SildStyle(config: brand, systemDark: systemDark)
+        styleCache = (brand, systemDark, built)
+        return built
     }
 
     // ── intents (thin pass-throughs; the policy lives in SildClient) ──────────
@@ -103,7 +117,7 @@ public final class SildModel {
     public func upload(bytes: Data, filename: String, mimeType: String) async throws -> PendingAttachment {
         guard let client = session?.client else { throw SildError.closed }
         return try await client.upload(
-            bytes: KotlinByteArray.from(bytes),
+            bytes: InteropKt.byteArray(data: bytes),
             filename: filename,
             mimeType: mimeType
         )
@@ -111,16 +125,5 @@ public final class SildModel {
 
     public var uploadSizeLimitBytes: Int64 {
         session?.client.uploadSizeLimitBytes ?? config.uploadSizeLimitBytes
-    }
-}
-
-extension KotlinByteArray {
-    /// Kotlin/Native has no Data bridge, so copy through the boxed byte array.
-    static func from(_ data: Data) -> KotlinByteArray {
-        let array = KotlinByteArray(size: Int32(data.count))
-        for (i, byte) in data.enumerated() {
-            array.set(index: Int32(i), value: Int8(bitPattern: byte))
-        }
-        return array
     }
 }

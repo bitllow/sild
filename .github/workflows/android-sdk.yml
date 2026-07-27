@@ -7,6 +7,7 @@ on:
       - "sdks/kotlin/**"
       - "sdks/swift/**"
       - "Package.swift"
+      - "scripts/**"
       - "backend/**"
       - ".github/workflows/android-sdk.yml"
       # Release-workflow edits get PR CI too — its XCFramework build is this job's.
@@ -16,6 +17,7 @@ on:
       - "sdks/kotlin/**"
       - "sdks/swift/**"
       - "Package.swift"
+      - "scripts/**"
       - "backend/**"
       - ".github/workflows/android-sdk.yml"
       # Release-workflow edits get PR CI too — its XCFramework build is this job's.
@@ -79,8 +81,17 @@ jobs:
         run: ./gradlew :ui:assembleRelease :sample:assembleDebug :sample:assembleRelease
 
       # Only the artifacts this host can produce; the Apple ones are the ios-core job's.
+      # The root (kotlinMultiplatform) publication is what :ui's POM depends on —
+      # without it a consumer of these artifacts cannot resolve sild-ui at all.
       - name: Publish artifacts to Maven local (smoke test packaging)
-        run: ./gradlew :core:publishJvmPublicationToMavenLocal :ui:publishToMavenLocal
+        run: |
+          ./gradlew :core:publishKotlinMultiplatformPublicationToMavenLocal \
+            :core:publishJvmPublicationToMavenLocal :ui:publishToMavenLocal
+
+      # The publication above is only useful if sild-ui's own POM can be satisfied,
+      # which is what silently broke: :ui depends on the root sild-core module.
+      - name: The published sild-ui's Sild dependencies resolve
+        run: python3 "$GITHUB_WORKSPACE/scripts/check-maven-local-deps.py" io.sild sild-ui
 
   # The same shared :core, compiled by Kotlin/Native and run on an iOS simulator:
   # commonTest holds the whole wire contract, so this covers the REST/auth/upload
@@ -210,16 +221,8 @@ jobs:
           set -euo pipefail
           work=$(mktemp -d)
           mkdir -p "$work/Sources/App"
-          python3 - "$GITHUB_WORKSPACE/sdks/swift/README.md" "$work/Sources/App/App.swift" <<'PY'
-          import re, sys
-          block = re.search(
-              r'<!-- consumer-smoke:start -->\s*```swift\n(.*?)```\s*<!-- consumer-smoke:end -->',
-              open(sys.argv[1]).read(), re.S,
-          )
-          if not block:
-              sys.exit("README.md: consumer-smoke markers not found")
-          open(sys.argv[2], "w").write(block.group(1))
-          PY
+          python3 "$GITHUB_WORKSPACE/scripts/extract-consumer-snippet.py" \
+            "$GITHUB_WORKSPACE/sdks/swift/README.md" "$work/Sources/App/App.swift"
           cat > "$work/Package.swift" <<EOF
           // swift-tools-version: 5.9
           import PackageDescription

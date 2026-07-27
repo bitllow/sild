@@ -5,7 +5,7 @@ import SildCore
 /// The resolved palette the screens read — the brand color plus the light/dark surface
 /// palette, mapped from `BrandConfig` by the shared `BrandTheme`, so iOS, Android and
 /// the web widget derive identical colors from one server config.
-public struct SildColors {
+public struct SildColors: Equatable {
     public let brand: Color
     public let brandHover: Color
     public let onBrand: Color = .white
@@ -52,15 +52,13 @@ public struct SildColors {
 }
 
 /// Corner radii for the brand's radius preset, from the shared `BrandTheme.radii`.
-public struct SildRadii {
-    public let panel: CGFloat
+public struct SildRadii: Equatable {
     public let card: CGFloat
     public let btn: CGFloat
     public let bubble: CGFloat
 
     init(config: BrandConfig) {
         let r = BrandTheme.shared.radii(cfg: config)
-        panel = CGFloat(r.panel)
         card = CGFloat(r.card)
         btn = CGFloat(r.btn)
         bubble = CGFloat(r.bubble)
@@ -68,18 +66,21 @@ public struct SildRadii {
 }
 
 /// The theme resolved for the current brand config and color scheme.
-public struct SildStyle {
+public struct SildStyle: Equatable {
     public let colors: SildColors
     public let radii: SildRadii
     public let fontFamily: String
+    /// Whether the host bundled the tenant's face — resolved once, because `font()`
+    /// runs for every label in the tree.
+    private let hasCustomFont: Bool
+
+    /// The scheme to force, or nil to follow the OS.
+    public let preferredScheme: ColorScheme?
 
     /// The tenant's face at [size], falling back to the system font when the host has
     /// not bundled it — the SDK ships no font binaries, matching the Android `:ui`.
     public func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        guard fontFamily != "system" else { return .system(size: size, weight: weight) }
-        guard UIFont(name: fontFamily, size: size) != nil else {
-            return .system(size: size, weight: weight)
-        }
+        guard hasCustomFont else { return .system(size: size, weight: weight) }
         return .custom(fontFamily, size: size).weight(weight)
     }
 
@@ -87,22 +88,24 @@ public struct SildStyle {
         // theme=auto follows the OS; light/dark force, matching SildTheme.kt.
         let dark: Bool
         switch config.theme {
-        case "dark": dark = true
-        case "auto": dark = systemDark
-        default: dark = false
+        case "dark": dark = true; preferredScheme = .dark
+        case "auto": dark = systemDark; preferredScheme = nil
+        default: dark = false; preferredScheme = .light
         }
         colors = SildColors(config: config, dark: dark)
         radii = SildRadii(config: config)
-        fontFamily = BrandTheme.shared.fontFamily(cfg: config)
+        let family = BrandTheme.shared.fontFamily(cfg: config)
+        fontFamily = family
+        hasCustomFont = family != "system" && UIFont(name: family, size: 12) != nil
     }
 }
 
 /// A brand-filled control that darkens while pressed — the web widget's brand-hover.
-public struct SildBrandButtonStyle: ButtonStyle {
+struct SildBrandButtonStyle: ButtonStyle {
     let colors: SildColors
     let radius: CGFloat
 
-    public func makeBody(configuration: Configuration) -> some View {
+    func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(configuration.isPressed ? colors.brandHover : colors.brand)
             .clipShape(RoundedRectangle(cornerRadius: radius))

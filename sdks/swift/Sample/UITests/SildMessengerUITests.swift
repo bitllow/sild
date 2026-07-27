@@ -16,10 +16,7 @@ import SildCore
 final class SildMessengerUITests: XCTestCase {
     private var app: XCUIApplication!
 
-    private var baseURL: String {
-        ProcessInfo.processInfo.environment["SILD_BASE_URL"].flatMap { $0.isEmpty ? nil : $0 }
-            ?? "http://localhost:8080"
-    }
+    private var baseURL: String { DevBackend.base }
 
     override func setUp() {
         continueAfterFailure = false
@@ -76,13 +73,11 @@ final class SildMessengerUITests: XCTestCase {
     func testDriverReplyArrivesOverRealtime() async throws {
         try await requireBackend()
 
-        // The same fixed reference the sample's card opens, so both sides meet in one
-        // conversation; sild-dev derives the driver id from it.
-        let ref = "trip_ios_9021"
-        let convId = try await ensurePeerConversation(reference: ref)
+        let ref = DevBackend.driverTripRef
+        let convId = try await DevBackend.ensureDriverConversation(ref)
 
         // Bring the driver online first, so it is subscribed before the rider looks.
-        let driver = DriverClient(base: baseURL, userId: "u_driver_\(ref)", conversationId: convId)
+        let driver = DriverClient(userId: DevBackend.driverId(for: ref), conversationId: convId)
         defer { driver.close() }
         try await driver.start()
 
@@ -121,15 +116,6 @@ final class SildMessengerUITests: XCTestCase {
         )
     }
 
-    private func ensurePeerConversation(reference: String) async throws -> String {
-        let url = URL(string: "\(baseURL)/v1/dev/peer-conversation?user_id=u_demo_ios&reference=\(reference)")!
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let id = json?["conversation_id"] as? String else {
-            throw NSError(domain: "UITest", code: 1, userInfo: [NSLocalizedDescriptionKey: "no conversation_id"])
-        }
-        return id
-    }
 }
 
 /// The other party: a real shared client, exactly as the Android E2E uses a driver-side
@@ -138,19 +124,12 @@ final class DriverClient {
     private let session: SildSession
     private let conversationId: String
 
-    init(base: String, userId: String, conversationId: String) {
+    init(userId: String, conversationId: String) {
         self.conversationId = conversationId
-        let config = SildConfig(
-            baseUrl: base,
-            tokenProvider: ClosureTokenProvider {
-                let url = URL(string: "\(base)/v1/dev/widget-token?user_id=\(userId)")!
-                let (data, _) = try await URLSession.shared.data(from: url)
-                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                return json?["token"] as? String ?? ""
-            },
-            userId: userId,
-            metadata: [:],
-            uploadSizeLimitBytes: 10 * 1024 * 1024
+        let config = SildConfig.make(
+            baseUrl: DevBackend.base,
+            token: { try await DevBackend.mintToken(userId) },
+            userId: userId
         )
         session = SildSession(config: config, onChime: {}, transport: centrifugeTransportFactory())
     }

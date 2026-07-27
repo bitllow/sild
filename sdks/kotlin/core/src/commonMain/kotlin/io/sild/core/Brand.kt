@@ -123,4 +123,19 @@ object BrandTheme {
         val v = h.toIntOrNull(16) ?: return null
         return Triple((v shr 16) and 0xFF, (v shr 8) and 0xFF, v and 0xFF)
     }
+
+    private val AVATAR_PALETTE = listOf(
+        "#3D63FF", "#FF7A45", "#18A957", "#7C5CFF", "#0EA5A5", "#E0599B", "#D9881A", "#2440B8",
+    )
+
+    /** A single uppercase initial — the web widget's rowInitial/headInitial. */
+    fun avatarInitial(name: String): String =
+        name.trim().firstOrNull()?.toString()?.uppercase() ?: "?"
+
+    /** The name's stable palette entry, so one person looks the same on every surface. */
+    fun avatarColor(name: String): String {
+        var h = 0
+        for (ch in name) h = (h * 31 + ch.code) and 0x7FFFFFFF
+        return AVATAR_PALETTE[h % AVATAR_PALETTE.size]
+    }
 }

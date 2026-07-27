@@ -16,12 +16,14 @@ struct HomeScreen: View {
     let onClose: () -> Void
 
     var body: some View {
+        // topicList re-splits the config string and bridges a new array on each read.
+        let topics = state.brand.topicList
         VStack(spacing: 0) {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     newConversationCard
-                    ForEach(Array(state.brand.topicList.enumerated()), id: \.offset) { _, topic in
+                    ForEach(Array(topics.enumerated()), id: \.offset) { _, topic in
                         topicRow(topic)
                     }
                     if !state.conversations.isEmpty {
@@ -50,15 +52,12 @@ struct HomeScreen: View {
                 if let logo = state.brand.logoSrc, let url = URL(string: logo) {
                     AsyncImage(url: url) { $0.resizable().scaledToFit() } placeholder: { Color.clear }
                         .frame(height: 28)
-                    Spacer()
                 } else if !state.brandName.isEmpty {
                     Text(state.brandName)
                         .font(style.font(18, .heavy))
                         .foregroundStyle(style.colors.onBrand)
-                    Spacer()
-                } else {
-                    Spacer()
                 }
+                Spacer()
                 SildHeaderControls(soundOn: state.soundOn, onToggleSound: onToggleSound, onClose: onClose)
             }
             if state.brand.showTeam {
@@ -208,7 +207,6 @@ struct ThreadScreen: View {
     @Environment(\.openURL) private var openURL
 
     let model: SildModel
-    let state: SildState
     let draft: Bool
     let onBack: () -> Void
     let onClose: () -> Void
@@ -221,31 +219,29 @@ struct ThreadScreen: View {
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
 
-    private var active: Conversation? {
-        state.conversations.first { $0.id == state.activeId }
+    private func title(_ active: Conversation?) -> String {
+        active?.peer == true ? (active?.title ?? "Direct chat") : (state.agentName ?? "Support")
     }
 
-    private var isPeer: Bool { active?.peer == true }
-
-    private var title: String {
-        isPeer ? (active?.title ?? "Direct chat") : (state.agentName ?? "Support")
-    }
-
-    private var subtitle: String {
-        if isPeer { return active?.subtitle ?? "Direct chat" }
+    private func subtitle(_ active: Conversation?) -> String {
+        if active?.peer == true { return active?.subtitle ?? "Direct chat" }
         if draft { return "Type your message to start" }
         return state.connection == .connected ? "Replies in a few minutes" : "Connecting…"
     }
 
+    private var state: SildState { model.state }
+
     var body: some View {
+        let active = state.conversations.first { $0.id == state.activeId }
         VStack(spacing: 0) {
-            SildHeader(title: title, subtitle: subtitle, onBack: onBack, avatarName: title) {
-                SildHeaderControls(
-                    soundOn: state.soundOn,
-                    onToggleSound: { model.toggleSound() },
-                    onClose: onClose
-                )
-            }
+            SildHeader(
+                title: title(active),
+                subtitle: subtitle(active),
+                onBack: onBack,
+                soundOn: state.soundOn,
+                onToggleSound: { model.toggleSound() },
+                onClose: onClose
+            )
             connectionBanner
             messages
             if active?.closed == true {
@@ -355,17 +351,13 @@ struct ThreadScreen: View {
         }
     }
 
-    private func attach(_ item: PhotosPickerItem) {
+    /// Run one attachment upload, keeping the tray count and the error line in step.
+    private func attaching(_ work: @escaping () async throws -> Void) {
         uploading += 1
         Task {
             defer { uploading -= 1 }
             do {
-                // loadTransferable would buffer the whole asset before we could check
-                // its size; the file representation lets us measure first and skip a
-                // pick that would not fit in memory anyway.
-                guard let file = try await item.loadFileRepresentation() else { return }
-                defer { try? FileManager.default.removeItem(at: file) }
-                try await upload(file, fallbackName: "attachment")
+                try await work()
             } catch is SizeLimitExceeded {
                 attachError = tooLargeMessage
             } catch {
@@ -374,19 +366,22 @@ struct ThreadScreen: View {
         }
     }
 
+    private func attach(_ item: PhotosPickerItem) {
+        attaching {
+            // loadTransferable would buffer the whole asset before we could check its
+            // size; the file representation lets us measure first and skip a pick that
+            // would not fit in memory anyway.
+            guard let file = try await item.loadFileRepresentation() else { return }
+            defer { try? FileManager.default.removeItem(at: file) }
+            try await upload(file, fallbackName: "attachment")
+        }
+    }
+
     private func attachFile(_ url: URL) {
-        uploading += 1
-        Task {
-            defer { uploading -= 1 }
+        attaching {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            do {
-                try await upload(url, fallbackName: url.lastPathComponent)
-            } catch is SizeLimitExceeded {
-                attachError = tooLargeMessage
-            } catch {
-                attachError = "Couldn't attach that file. Please try again."
-            }
+            try await upload(url, fallbackName: url.lastPathComponent)
         }
     }
 

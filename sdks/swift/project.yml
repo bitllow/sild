@@ -1,13 +1,5 @@
-# The sample app + its XCUITest, which SwiftPM alone cannot express (no app targets).
-# Generated, not committed as a .pbxproj:
-#
-#     brew install xcodegen && xcodegen generate
-#
-# It also carries the package's own tests, so one scheme runs every iOS test — the unit
-# suite and the UI suite — in a single command.
-#
-# The library itself (Sild, SildCore) stays a plain SwiftPM package, declared by the
-# manifest at the repository root; this project consumes it as a local dependency.
+# The sample app, its XCUITest and the package's own tests — targets SwiftPM cannot
+# express. Generate the .xcodeproj with `xcodegen generate`; it is not committed.
 name: SildSample
 options:
   bundleIdPrefix: io.sild
@@ -25,7 +17,7 @@ targets:
   SildSample:
     type: application
     platform: iOS
-    sources: [Sample/Sources]
+    sources: [Sample/Sources, Sample/Shared]
     info:
       path: Sample/Info.plist
       properties:
@@ -42,7 +34,9 @@ targets:
   SildSampleUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources: [Sample/UITests]
+    # Sample/Shared carries DevBackend, so the test drives the same dev endpoints and
+    # trip reference the app does rather than restating them.
+    sources: [Sample/UITests, Sample/Shared]
     settings:
       GENERATE_INFOPLIST_FILE: YES
     dependencies:

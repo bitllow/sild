@@ -16,16 +16,6 @@ struct RootView: View {
     @State private var target: SildTarget?
     @State private var driverConversationId: String?
 
-    private var config: SildConfig {
-        SildConfig(
-            baseUrl: DevBackend.base,
-            tokenProvider: DevBackend.tokenProvider(for: DevBackend.userId),
-            userId: DevBackend.userId,
-            metadata: [:],
-            uploadSizeLimitBytes: 10 * 1024 * 1024
-        )
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Acme Rides").font(.system(size: 28, weight: .heavy))
@@ -56,7 +46,7 @@ struct RootView: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .fullScreenCover(item: $target) { t in
-            SildMessenger(config: config, target: t) { target = nil }
+            SildMessenger(config: DevBackend.config, target: t) { target = nil }
         }
     }
 
@@ -83,16 +73,5 @@ struct RootView: View {
         .padding(16)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-}
-
-// fullScreenCover(item:) needs identity; the target itself is the identity.
-extension SildTarget: Identifiable {
-    public var id: String {
-        switch self {
-        case .list: return "list"
-        case .support: return "support"
-        case let .conversation(id): return "conv:\(id)"
-        }
     }
 }

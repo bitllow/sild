@@ -1,22 +1,16 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
-// The Sild iOS SDK. `SildCore` is the Kotlin Multiplatform core shipped as a binary
-// XCFramework; `Sild` is the Swift layer on top of it.
+// The Sild iOS SDK: `SildCore` is the Kotlin Multiplatform core as a binary
+// XCFramework, `Sild` the Swift layer on top. The manifest must sit at the repo root
+// for SPM to find it; the sources stay under sdks/swift/ via `path:`.
 //
-// This manifest lives at the repository root because SPM only reads a manifest there —
-// a consumer's `.package(url: "…/sild.git", from: "…")` resolves this file. The sources
-// themselves stay under sdks/swift/, alongside the Kotlin SDK, via `path:`.
-//
-// On a branch the binary target points at a locally built framework, so a checkout can
-// build and test without a published release:
+// On a branch the binary target points at a locally built framework:
 //
 //     ./gradlew -p sdks/kotlin :core:assembleSildCoreReleaseXCFramework
 //
-// At a `v*` tag the sdk-release workflow rewrites this one target to the release asset
-// (`url:` + `checksum:`) and moves the tag onto that commit, so resolving the tag from
-// SPM gets a real binary package. Keep exactly one local-path binaryTarget here — the
-// rewrite refuses to run otherwise.
+// At a `v*` tag sdk-release rewrites it to the release asset. Keep exactly one
+// local-path binaryTarget — the rewrite refuses to run otherwise.
 let package = Package(
     name: "Sild",
     platforms: [.iOS(.v17)],

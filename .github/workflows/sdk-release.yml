@@ -116,19 +116,8 @@ jobs:
           work=$(mktemp -d)
           mkdir -p "$work/Sources/App"
 
-          # The snippet the README hands consumers, compiled verbatim so the two cannot drift.
-          python3 - "$GITHUB_WORKSPACE/sdks/swift/README.md" "$work/Sources/App/App.swift" <<'PY'
-          import re, sys
-          readme, out = sys.argv[1], sys.argv[2]
-          body = open(readme).read()
-          block = re.search(
-              r'<!-- consumer-smoke:start -->\s*```swift\n(.*?)```\s*<!-- consumer-smoke:end -->',
-              body, re.S,
-          )
-          if not block:
-              sys.exit("README.md: consumer-smoke markers not found")
-          open(out, "w").write(block.group(1))
-          PY
+          python3 "$GITHUB_WORKSPACE/scripts/extract-consumer-snippet.py" \
+            "$GITHUB_WORKSPACE/sdks/swift/README.md" "$work/Sources/App/App.swift"
 
           # SPM derives a URL dependency's identity from the repo name, lowercased.
           identity=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')

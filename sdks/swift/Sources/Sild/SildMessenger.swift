@@ -12,6 +12,17 @@ public enum SildTarget: Equatable {
     case conversation(String)
 }
 
+/// `fullScreenCover(item:)` and `sheet(item:)` need identity; the target is its own.
+extension SildTarget: Identifiable {
+    public var id: String {
+        switch self {
+        case .list: return "list"
+        case .support: return "support"
+        case let .conversation(id): return "conv:\(id)"
+        }
+    }
+}
+
 /// The SDK's SwiftUI entry point: hand it a `SildConfig` and present it.
 ///
 /// ```swift
@@ -38,27 +49,24 @@ public struct SildMessenger: View {
         self.onClose = onClose
     }
 
-    /// A conversation target opens that thread directly (single-thread mode: back
-    /// closes rather than returning to a list that was never shown).
-    private var rootIsHome: Bool {
-        if case .conversation = target { return false }
-        return true
+    /// A conversation target opens that thread directly: back closes rather than
+    /// returning to a list that was never shown.
+    private var isSingleThread: Bool {
+        if case .conversation = target { return true }
+        return false
     }
 
     public var body: some View {
-        let style = SildStyle(config: model.state.brand, systemDark: colorScheme == .dark)
+        let style = model.style(systemDark: colorScheme == .dark)
         Group {
-            if !rootIsHome {
-                ThreadScreen(
-                    model: model, state: model.state, draft: false,
-                    onBack: onClose, onClose: onClose
-                )
+            if isSingleThread {
+                ThreadScreen(model: model, draft: false, onBack: onClose, onClose: onClose)
             } else if model.draft || model.state.activeId != nil {
                 // ONE ThreadScreen for both draft and created states so the composer keeps
                 // its text and attachments across the transition — the first send creates
                 // the conversation while the user's draft is still in the field.
                 ThreadScreen(
-                    model: model, state: model.state, draft: model.draft,
+                    model: model, draft: model.draft,
                     onBack: { model.backToList() }, onClose: onClose
                 )
             } else {
@@ -72,7 +80,7 @@ public struct SildMessenger: View {
             }
         }
         .environment(\.sildStyle, style)
-        .preferredColorScheme(model.state.brand.theme == "auto" ? nil : (model.state.brand.theme == "dark" ? .dark : .light))
+        .preferredColorScheme(style.preferredScheme)
         .onAppear {
             if case let .conversation(id) = target {
                 model.start(conversationId: id)

@@ -5,9 +5,7 @@ import SildCore
 // The transport's pure parts and the state-observation bridge. The rendered realtime
 // round-trip lives in the sample's XCUITest; these cover the seams underneath it.
 final class RealtimeBridgeTests: XCTestCase {
-    private var baseURL: String? {
-        ProcessInfo.processInfo.environment["SILD_BASE_URL"].flatMap { $0.isEmpty ? nil : $0 }
-    }
+    private var baseURL: String? { Dev.baseURL }
 
     // The endpoint and envelope parsing come from shared Kotlin, so iOS and Android
     // cannot drift on either.
@@ -28,13 +26,7 @@ final class RealtimeBridgeTests: XCTestCase {
     // connect() must be idempotent: SildClient.start() can run more than once over a
     // session's life, and a second socket would double every publication.
     func testConnectIsIdempotent() {
-        let config = SildConfig(
-            baseUrl: "http://127.0.0.1:1",
-            tokenProvider: ClosureTokenProvider { "t" },
-            userId: "u",
-            metadata: [:],
-            uploadSizeLimitBytes: 1024
-        )
+        let config = SildConfig.make(baseUrl: "http://127.0.0.1:1", token: { "t" }, userId: "u")
         let transport = CentrifugeRealtimeTransport(config: config, onConnection: { _ in }, onEnvelope: { _ in })
         transport.connect()
         transport.connect()
@@ -47,12 +39,10 @@ final class RealtimeBridgeTests: XCTestCase {
     // arrive immediately and cancelling must stop delivery.
     func testWatchStateDeliversCurrentValueAndStops() async throws {
         guard let base = baseURL else { throw XCTSkip("set SILD_BASE_URL to run this test") }
-        let model = SildModel(config: SildConfig(
+        let model = SildModel(config: .make(
             baseUrl: base,
-            tokenProvider: ClosureTokenProvider { try await self.mintToken(base, "u_swift_watch") },
-            userId: "u_swift_watch",
-            metadata: [:],
-            uploadSizeLimitBytes: 1024
+            token: { try await Dev.mintToken(base, "u_swift_watch") },
+            userId: "u_swift_watch"
         ))
         defer { model.close() }
 
@@ -71,12 +61,5 @@ final class RealtimeBridgeTests: XCTestCase {
         let afterClose = model.state.ready
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(model.state.ready, afterClose, "a cancelled watch must stop updating")
-    }
-
-    private func mintToken(_ base: String, _ userId: String) async throws -> String {
-        let url = URL(string: "\(base)/v1/dev/widget-token?user_id=\(userId)")!
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        return json["token"] as! String
     }
 }

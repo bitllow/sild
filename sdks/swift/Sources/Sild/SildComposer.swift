@@ -21,7 +21,7 @@ struct SildComposer: View {
     @State private var sending = false
 
     private var canSend: Bool {
-        enabled && !sending && uploading == 0 && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pending.isEmpty)
+        enabled && !sending && uploading == 0 && (text.contains { !$0.isWhitespace } || !pending.isEmpty)
     }
 
     var body: some View {

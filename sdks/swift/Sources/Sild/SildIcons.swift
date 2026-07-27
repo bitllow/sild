@@ -1,23 +1,21 @@
 import SwiftUI
 
-/// The widget's Feather-style stroked glyphs. SF Symbols cover most of them at the
-/// same visual weight (thin, round-capped); the two that have no close match — the
-/// send paper-plane outline and the muted speaker — are drawn from the same SVG path
-/// data the web drop-in uses, so all three surfaces share one icon language.
-public enum SildIcon {
+/// The widget's Feather-style stroked glyphs, matched to SF Symbols at the same visual
+/// weight (thin, round-capped) so the surfaces share one icon language.
+enum SildIcon {
     case back, send, clip, arrow, chevron, close, speaker, speakerOff
 }
 
-public struct SildIconView: View {
+struct SildIconView: View {
     let icon: SildIcon
-    var size: CGFloat = 20
+    let size: CGFloat
 
-    public init(_ icon: SildIcon, size: CGFloat = 20) {
+    init(_ icon: SildIcon, size: CGFloat = 20) {
         self.icon = icon
         self.size = size
     }
 
-    public var body: some View {
+    var body: some View {
         Image(systemName: symbol)
             .font(.system(size: size, weight: .regular))
             .imageScale(.medium)

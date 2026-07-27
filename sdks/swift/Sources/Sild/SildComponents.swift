@@ -1,42 +1,18 @@
 import SwiftUI
 import SildCore
 
-private let avatarPalette: [Color] = [
-    0x3D63FF, 0xFF7A45, 0x18A957, 0x7C5CFF, 0x0EA5A5, 0xE0599B, 0xD9881A, 0x2440B8,
-].map { hex in
-    Color(
-        .sRGB,
-        red: Double((hex >> 16) & 0xFF) / 255,
-        green: Double((hex >> 8) & 0xFF) / 255,
-        blue: Double(hex & 0xFF) / 255,
-        opacity: 1
-    )
-}
-
-/// A single uppercase initial — the web widget's rowInitial/headInitial.
-private func initial(_ name: String) -> String {
-    guard let c = name.trimmingCharacters(in: .whitespaces).first else { return "?" }
-    return String(c).uppercased()
-}
-
-private func colorFor(_ name: String) -> Color {
-    var h = 0
-    for ch in name.unicodeScalars { h = (h &* 31 &+ Int(ch.value)) & 0x7FFFFFFF }
-    return avatarPalette[h % avatarPalette.count]
-}
-
-public struct SildAvatar: View {
+struct SildAvatar: View {
     @Environment(\.sildStyle) private var style
     let name: String
     var size: CGFloat = 36
     var background: Color?
 
-    public var body: some View {
+    var body: some View {
         Circle()
-            .fill(background ?? colorFor(name))
+            .fill(background ?? SildColors.parse(BrandTheme.shared.avatarColor(name: name)))
             .frame(width: size, height: size)
             .overlay(
-                Text(initial(name))
+                Text(BrandTheme.shared.avatarInitial(name: name))
                     .font(style.font(size * 0.38, .bold))
                     .foregroundStyle(.white)
             )
@@ -45,13 +21,13 @@ public struct SildAvatar: View {
 
 /// The shared top-right cluster (sound + close), on every screen so the icons never
 /// shift position.
-public struct SildHeaderControls: View {
+struct SildHeaderControls: View {
     @Environment(\.sildStyle) private var style
     let soundOn: Bool
     let onToggleSound: () -> Void
     let onClose: () -> Void
 
-    public var body: some View {
+    var body: some View {
         HStack(spacing: 2) {
             Button(action: onToggleSound) {
                 SildIconView(soundOn ? .speaker : .speakerOff)
@@ -68,31 +44,28 @@ public struct SildHeaderControls: View {
 
 /// The brand-colored thread top bar: back button, avatar, title + subtitle, and the
 /// trailing control cluster.
-public struct SildHeader<Action: View>: View {
+struct SildHeader: View {
     @Environment(\.sildStyle) private var style
     let title: String
-    let subtitle: String?
-    let onBack: (() -> Void)?
-    var avatarName: String?
-    @ViewBuilder let action: () -> Action
+    let subtitle: String
+    let onBack: () -> Void
+    let soundOn: Bool
+    let onToggleSound: () -> Void
+    let onClose: () -> Void
 
-    public var body: some View {
+    var body: some View {
         HStack(spacing: 10) {
-            if let onBack {
-                Button(action: onBack) {
-                    SildIconView(.back).foregroundStyle(style.colors.onBrand)
-                }
-                .accessibilityLabel("Back")
+            Button(action: onBack) {
+                SildIconView(.back).foregroundStyle(style.colors.onBrand)
             }
-            if let avatarName {
-                SildAvatar(name: avatarName, size: 36)
-            }
+            .accessibilityLabel("Back")
+            SildAvatar(name: title, size: 36)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(style.font(16, .bold))
                     .foregroundStyle(style.colors.onBrand)
                     .lineLimit(1)
-                if let subtitle, !subtitle.isEmpty {
+                if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(style.font(12))
                         .foregroundStyle(style.colors.onBrand.opacity(0.8))
@@ -100,7 +73,7 @@ public struct SildHeader<Action: View>: View {
                 }
             }
             Spacer(minLength: 0)
-            action()
+            SildHeaderControls(soundOn: soundOn, onToggleSound: onToggleSound, onClose: onClose)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
@@ -111,12 +84,12 @@ public struct SildHeader<Action: View>: View {
 /// One message: system lines centered; the visitor's own (OUT) messages right-aligned
 /// in brand color; everyone else left-aligned with an author label. Inline images
 /// render above the bubble, other files as tappable chips below it.
-public struct SildMessageBubble: View {
+struct SildMessageBubble: View {
     @Environment(\.sildStyle) private var style
     let message: Message
     let onOpenURL: (String) -> Void
 
-    public var body: some View {
+    var body: some View {
         if message.system {
             HStack {
                 Spacer()
@@ -128,9 +101,12 @@ public struct SildMessageBubble: View {
             }
         } else {
             let out = message.direction == .out
+            // isInlineImage is a bridged getter, so split once rather than filter twice.
+            let images = message.attachments.filter { $0.isInlineImage }
+            let files = message.attachments.filter { !$0.isInlineImage }
             VStack(alignment: out ? .trailing : .leading, spacing: 0) {
                 metaRow(out: out)
-                ForEach(Array(inlineImages.enumerated()), id: \.offset) { _, att in
+                ForEach(Array(images.enumerated()), id: \.offset) { _, att in
                     AsyncImage(url: URL(string: att.url ?? "")) { image in
                         image.resizable().scaledToFill()
                     } placeholder: {
@@ -200,16 +176,14 @@ public struct SildMessageBubble: View {
         .padding(.top, 4)
     }
 
-    private var inlineImages: [Attachment] { message.attachments.filter { $0.isInlineImage } }
-    private var files: [Attachment] { message.attachments.filter { !$0.isInlineImage } }
 }
 
 /// Inline error line shown wherever the client surfaces a failure.
-public struct SildErrorLine: View {
+struct SildErrorLine: View {
     @Environment(\.sildStyle) private var style
     let text: String
 
-    public var body: some View {
+    var body: some View {
         Text(text)
             .font(style.font(12))
             .foregroundStyle(style.colors.tertiary)
