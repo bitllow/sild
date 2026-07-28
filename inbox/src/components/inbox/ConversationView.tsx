@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { Avatar, Badge, Banner, Button, ComposerBar, MessageBubble, PanelIcon, StatusPill } from "@/components/ds";
@@ -11,6 +11,13 @@ export const ConversationView = observer(function ConversationView() {
   const active = store.active;
   const fileRef = useRef<HTMLInputElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const newestId = active?.messages.length ? active.messages[active.messages.length - 1].id : "";
+
+  // Open at the newest message, like PeerView and the widget. Keyed on the newest id,
+  // not the count, so loading older pages does not scroll the reader back down.
+  useEffect(() => {
+    if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+  }, [newestId, active?.id]);
 
   // Scroll-loading upward, mirroring ConversationList's downward pattern (§4.3).
   // Prepending grows the list above the viewport, so hold the distance from the
@@ -114,26 +121,12 @@ export const ConversationView = observer(function ConversationView() {
         style={{ flex: 1, overflowY: "auto", padding: "20px 22px", display: "flex", flexDirection: "column", gap: 14 }}
       >
         {active.olderCursor && (
-          // An explicit control, because the transcript opens at the top of the
-          // loaded page — there is nothing to scroll up from on first open. The
-          // scroll handler above still covers scrolling back up later.
-          <button
-            data-testid="thread-load-older"
-            onClick={() => void store.loadOlderMessages()}
-            disabled={store.loadingOlder}
-            style={{
-              alignSelf: "center",
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              background: "none",
-              border: "1px solid var(--border-default)",
-              borderRadius: 999,
-              padding: "4px 12px",
-              cursor: store.loadingOlder ? "default" : "pointer",
-            }}
+          <div
+            data-testid="thread-older"
+            style={{ alignSelf: "center", fontSize: 12, color: "var(--text-tertiary)" }}
           >
-            {store.loadingOlder ? "Loading earlier messages…" : "Load earlier messages"}
-          </button>
+            {store.loadingOlder ? "Loading earlier messages…" : "Scroll up for earlier messages"}
+          </div>
         )}
         {active.messages.map((m) => (
           <MessageBubble

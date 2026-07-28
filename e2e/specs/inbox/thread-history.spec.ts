@@ -7,53 +7,64 @@ import { uid } from "../../support/env";
 // A thread is fetched with ?limit=100 and the endpoint returns a cursor for the rest.
 // Nothing consumed that cursor, so every conversation past 100 messages was
 // permanently truncated to its newest 100 — on a healthy connection, with no outage
-// involved. This drives the real scroll-up path that fixes it.
+// involved.
+//
+// The thread is deliberately ten pages deep: two would pass on an implementation that
+// pages exactly once, and draining this one only works if the cursor advances every
+// time. The opening message is the anchor because it is the only one whose position is
+// guaranteed — it was sent through the widget before any seeding.
+const PAGE_SIZE = 100;
+const PAGES = 10;
+
 test.describe("inbox · thread history", () => {
-  test("a thread past the first page can be read back to its oldest message", async ({ page, request, browser }) => {
+  test("scrolling up drains a ten-page thread to its first message", async ({
+    page,
+    request,
+    browser,
+  }) => {
+    test.slow(); // seeding a thousand messages, then paging back through them
+
     const label = uid("hist");
-    const conv = await createConversation(browser, { body: `${label} opening` });
+    const opening = `${label} opening`;
+    const conv = await createConversation(browser, { body: opening });
 
     await gotoInbox(page);
-    const id = await conversationIdByText(page, `${label} opening`);
+    const id = await conversationIdByText(page, opening);
+    await seedManyMessages(request, id, PAGE_SIZE * PAGES, label);
 
-    // 100 is the page size, so 110 puts the oldest messages — and the opening one —
-    // beyond the first page.
-    const seeded = await seedManyMessages(request, id, 110, label);
-    const oldestSeeded = seeded[0];
-    const newestSeeded = seeded[seeded.length - 1];
-
-    // By id, not by text: seeding moved the queue row's preview to the newest
-    // message, so the opening body no longer identifies the row.
+    // By id, not by text: seeding moved the queue row's preview off the opening body.
     await page.reload();
     await openConversation(page, id);
 
-    // Scope to the transcript: a body also renders in the queue row's preview.
+    // Scope to the transcript — a body also renders in the queue row's preview.
     const transcript = page.getByTestId("thread-transcript");
-    await expect(transcript.getByText(newestSeeded, { exact: true }), "the newest page renders").toBeVisible();
+    const openingBubble = transcript.getByText(opening, { exact: true });
+    const older = page.getByTestId("thread-older");
 
-    // The truncation itself: the oldest messages are NOT in the first page.
-    await expect(transcript.getByText(oldestSeeded, { exact: true })).toHaveCount(0);
-    const loadOlder = page.getByTestId("thread-load-older");
-    await expect(loadOlder, "the thread offers to load earlier messages").toBeVisible();
+    // The truncation itself: the first message is nowhere near the first page.
+    await expect(older, "earlier messages are offered").toBeVisible();
+    await expect(openingBubble).toHaveCount(0);
 
-    // Each click prepends one page; the control disappears once the thread is whole.
-    for (let i = 0; i < 8; i++) {
-      if (await transcript.getByText(oldestSeeded, { exact: true }).count()) break;
-      if (!(await loadOlder.count())) break;
-      await loadOlder.click();
-      // Settle: the label reverts, or the control disappears because the thread is
-      // now whole. Either way the in-flight page has been applied.
-      await expect(page.getByText("Loading earlier messages…")).toHaveCount(0);
-    }
+    // The thread opens at the newest message, so scrolling up is the real gesture.
+    // Each scroll to the top prepends one page; repeat until the opening message is
+    // reachable, which can only happen if the cursor advanced every time.
+    await expect
+      .poll(
+        async () => {
+          await transcript.evaluate((el) => {
+            el.scrollTop = 0;
+          });
+          return openingBubble.count();
+        },
+        {
+          message: `scrolling up reaches the first of ${PAGE_SIZE * PAGES} messages`,
+          timeout: 120_000,
+        }
+      )
+      .toBeGreaterThan(0);
 
-    await expect(
-      transcript.getByText(oldestSeeded, { exact: true }),
-      "the oldest seeded message is reachable by scrolling up"
-    ).toBeVisible();
-    await expect(
-      transcript.getByText(`${label} opening`, { exact: true }),
-      "and so is the message that opened the conversation"
-    ).toBeVisible();
+    // Nothing older is left — the drain finished rather than stalling mid-thread.
+    await expect(older, "the thread is whole").toHaveCount(0);
 
     await conv.context.close();
   });
