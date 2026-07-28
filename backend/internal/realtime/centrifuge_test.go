@@ -44,13 +44,27 @@ func TestPublishParticipantsChannels(t *testing.T) {
 	}
 }
 
-// §5.6 internal notes go ONLY to the agents-only channel — never the conv
-// channel clients subscribe to.
+// §5.6 internal notes reach agent channels only — never the conv channel clients
+// subscribe to, and never a user channel.
 func TestPublishInternalChannelOnly(t *testing.T) {
 	fn := &fakeNode{}
 	p := &CentrifugePublisher{node: fn}
+	_ = p.Publish(context.Background(),
+		Target{Conversation: "c1", Internal: true, Tenant: "t1"},
+		Envelope{Type: "message.created"})
+	if len(fn.published) != 1 || fn.published[0] != "agents:t1" {
+		t.Fatalf("internal note must publish only to agents:t1, got %v", fn.published)
+	}
+}
+
+// An internal note in a conversation no operator may observe yet reaches nobody
+// live rather than falling back to a channel clients can hear. History is the
+// catch-up path (§5.4).
+func TestPublishInternalWithoutObserversGoesNowhere(t *testing.T) {
+	fn := &fakeNode{}
+	p := &CentrifugePublisher{node: fn}
 	_ = p.Publish(context.Background(), Target{Conversation: "c1", Internal: true}, Envelope{Type: "message.created"})
-	if len(fn.published) != 1 || fn.published[0] != "conv:c1:internal" {
-		t.Fatalf("internal note must publish only to conv:c1:internal, got %v", fn.published)
+	if len(fn.published) != 0 {
+		t.Fatalf("internal note leaked to %v", fn.published)
 	}
 }

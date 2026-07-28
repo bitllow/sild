@@ -57,6 +57,27 @@ func (s *Service) emit(ctx context.Context, t realtime.Target, eventType, convID
 	})
 }
 
+// observers adds the tenant channel the operators who may read this conversation
+// watch, so an agent inbox sees background conversations without subscribing to
+// each one (§5.1). Peer conversations fan out on the peer channel; support
+// conversations on the agents channel, but only once an assignment exists —
+// before that no agent may read the conversation, and the agents channel reaches
+// every one of them.
+//
+// conv may be nil when the caller has not read the row; it is read here then.
+func (s *Service) observers(ctx context.Context, t realtime.Target, tenantID, convID string, conv *models.Conversation) realtime.Target {
+	if conv == nil {
+		conv, _ = s.store.Conversations().Get(ctx, tenantID, convID)
+	}
+	switch {
+	case conv != nil && conv.Kind == models.KindPeer:
+		t.Peer = tenantID
+	case s.HasAssignment(ctx, tenantID, convID):
+		t.Tenant = tenantID
+	}
+	return t
+}
+
 // enqueueWebhook writes a webhook event to the outbox INSIDE the caller's tx, so
 // it commits atomically with the state change (at-least-once, §6.1).
 func (s *Service) enqueueWebhook(ctx context.Context, tx store.Store, tenantID, convID, eventType string, data any) error {

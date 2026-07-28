@@ -516,16 +516,6 @@ export class RootStore {
     }
   };
 
-  private reconnectRealtime = () => {
-    if (!this.rt) return;
-    try {
-      this.rt.disconnect();
-      this.rt.connect();
-    } catch {
-      /* ignore */
-    }
-  };
-
   dispose = () => {
     if (this.safetyTimer) {
       clearInterval(this.safetyTimer);
@@ -548,13 +538,11 @@ export class RootStore {
     });
   };
 
-  // Reload the queue; if the conversation set changed, resubscribe realtime so a
-  // brand-new support request gets its live conv channel (§5.2 — agents aren't
-  // members, so new conversations need a fresh server-side subscription set).
-  // Merge the first page into the loaded list on a tenant-wide queue change —
-  // updating existing rows in place and prepending genuinely new ones — WITHOUT
-  // dropping already scroll-loaded pages or resetting the cursor. If a new
-  // conversation appears, resubscribe so its realtime channel is covered (§5.2).
+  // Reload the queue. Merge the first page into the loaded list on a tenant-wide
+  // queue change — updating existing rows in place and prepending genuinely new
+  // ones — WITHOUT dropping already scroll-loaded pages or resetting the cursor.
+  // No resubscription: the tenant agents channel already covers every support
+  // conversation this operator may read, including ones created after connect.
   private syncQueue = async () => {
     const seq = this.queueSeq; // merge belongs to the current filter generation
     try {
@@ -582,10 +570,7 @@ export class RootStore {
           }
         }
         if (!this.activeId && this.convs.length) this.activeId = this.convs[0].id;
-        if (added) {
-          this.reconnectRealtime();
-          this.chime(); // a new request landed in the queue
-        }
+        if (added) this.chime(); // a new request landed in the queue
       });
     } catch {
       /* transient; the next event or the safety reconcile retries */
@@ -593,9 +578,14 @@ export class RootStore {
   };
 
   private handleEvent = (channel: string, env: RealtimeEnvelope) => {
+    // The tenant agents channel carries every support conversation this operator
+    // may read — the queue and the open thread alike (§5.1). An event for a
+    // conversation the list doesn't have yet is the "new request" nudge.
     if (channel.startsWith("agents:")) {
-      void this.syncQueue(); // tenant-wide queue change (new/updated request)
-      return;
+      if (env.conversation_id && !this.convs.some((c) => c.id === env.conversation_id)) {
+        void this.syncQueue();
+        return;
+      }
     }
     // The tenant peer channel (peer:<tenant>) carries the whole peer surface for
     // peer-access operators: a member.added for a not-yet-loaded conversation is

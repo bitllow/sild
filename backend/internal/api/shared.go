@@ -293,7 +293,7 @@ func (h *Handler) typing(c *gin.Context) {
 	if userID == "" {
 		userID = p.AdminID
 	}
-	h.svc.Typing(c.Request.Context(), convID, userID)
+	h.svc.Typing(c.Request.Context(), p.TenantID, convID, userID)
 	c.Status(http.StatusNoContent)
 }
 

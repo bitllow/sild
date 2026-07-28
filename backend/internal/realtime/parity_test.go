@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/policy"
@@ -8,12 +9,17 @@ import (
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
-// REST/realtime parity. Not set equality: the channel set mixes granularities
-// (agents:<tenant> vs conv:<id>), so what must hold is that an event reaches an
-// operator iff policy would let them read it.
+// REST/realtime parity. Not set equality: an operator subscribes to tenant
+// channels, not to the conversations on them, so what must hold is that an event
+// reaches an operator iff policy would let them read it.
+//
+// This file covers the subscribe side. The publish side — which conversations
+// are put on the agents channel at all — is the other half of the same
+// guarantee and is covered in domain/agent_fanout_test.go, because an
+// unassigned support conversation must never be published there.
 //
 // operatorChannels mirrors agentSubscriptions off the same policy.Scope.
-func operatorChannels(p *principal.Principal, assignedConvIDs []string) map[string]bool {
+func operatorChannels(p *principal.Principal) map[string]bool {
 	scope := policy.Scope(p, policy.ConversationsList)
 	if scope.DenyAll() {
 		return nil
@@ -21,10 +27,6 @@ func operatorChannels(p *principal.Principal, assignedConvIDs []string) map[stri
 	subs := map[string]bool{
 		UserChannel(p.AdminID):    true,
 		AgentsChannel(p.TenantID): true,
-	}
-	for _, cid := range assignedConvIDs {
-		subs[ConvChannel(cid)] = true
-		subs[ConvInternalChannel(cid)] = true
 	}
 	if scope.AllowsKind(models.KindPeer) {
 		subs[PeerChannel(p.TenantID)] = true
@@ -47,7 +49,7 @@ func canRead(p *principal.Principal, kind models.ConversationKind, reachable boo
 }
 
 func TestEventDeliveryMatchesPolicy(t *testing.T) {
-	const tenant, assignedConv, peerConv = "t1", "c_assigned", "c_peer"
+	const tenant = "t1"
 
 	// Where each representative event is published (see publisher.go).
 	events := []struct {
@@ -55,9 +57,9 @@ func TestEventDeliveryMatchesPolicy(t *testing.T) {
 		channel string
 		kind    models.ConversationKind
 	}{
-		{"support message", ConvChannel(assignedConv), models.KindSupport},
+		{"support message", AgentsChannel(tenant), models.KindSupport},
 		{"assignment update", AgentsChannel(tenant), models.KindSupport},
-		{"internal note", ConvInternalChannel(assignedConv), models.KindSupport},
+		{"internal note", AgentsChannel(tenant), models.KindSupport},
 		{"peer message", PeerChannel(tenant), models.KindPeer},
 	}
 
@@ -72,7 +74,7 @@ func TestEventDeliveryMatchesPolicy(t *testing.T) {
 	}
 
 	for _, op := range operators {
-		subs := operatorChannels(op.p, []string{assignedConv})
+		subs := operatorChannels(op.p)
 		for _, ev := range events {
 			t.Run(op.name+"/"+ev.name, func(t *testing.T) {
 				delivered := subs[ev.channel]
@@ -91,7 +93,7 @@ func TestEventDeliveryMatchesPolicy(t *testing.T) {
 // Peer is the operator's own opt-in, whatever their platform role.
 func TestPeerEventNeverReachesNonPeerOperator(t *testing.T) {
 	for _, role := range []models.PlatformRole{models.PlatformAgent, models.PlatformAdmin, models.PlatformOwner} {
-		subs := operatorChannels(operator(role, false), nil)
+		subs := operatorChannels(operator(role, false))
 		if subs[PeerChannel("t1")] {
 			t.Fatalf("role %s without peer_access is subscribed to the peer channel", role)
 		}
@@ -118,10 +120,31 @@ func TestPeerAccessReconciliation(t *testing.T) {
 	}
 }
 
+// The whole point of the tenant channels: an operator's subscription set is
+// fixed, so a tenant with thousands of live assignments costs what an empty one
+// costs and nothing has to be rebuilt when a conversation appears.
+func TestChannelSetDoesNotGrowWithTheQueue(t *testing.T) {
+	for _, peer := range []bool{false, true} {
+		subs := operatorChannels(operator(models.PlatformAgent, peer))
+		want := 2 // user + agents
+		if peer {
+			want++
+		}
+		if len(subs) != want {
+			t.Fatalf("peer_access=%v subscribes to %d channels, want %d: %v", peer, len(subs), want, subs)
+		}
+		for ch := range subs {
+			if strings.HasPrefix(ch, "conv:") {
+				t.Fatalf("per-conversation subscription %q is back — the set now grows with the queue", ch)
+			}
+		}
+	}
+}
+
 // Granting peer_access is the only thing that adds the peer channel.
 func TestChannelSetFollowsScope(t *testing.T) {
-	without := operatorChannels(operator(models.PlatformAgent, false), nil)
-	with := operatorChannels(operator(models.PlatformAgent, true), nil)
+	without := operatorChannels(operator(models.PlatformAgent, false))
+	with := operatorChannels(operator(models.PlatformAgent, true))
 
 	if without[PeerChannel("t1")] {
 		t.Fatal("peer channel present without peer_access")

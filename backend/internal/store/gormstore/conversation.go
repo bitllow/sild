@@ -339,14 +339,6 @@ func (r *assignmentRepo) CountQueue(ctx context.Context, tenantID, actorID strin
 	return out, nil
 }
 
-func (r *assignmentRepo) ConversationIDs(ctx context.Context, tenantID string) ([]string, error) {
-	var ids []string
-	err := r.db.WithContext(ctx).Model(&models.Assignment{}).
-		Where("tenant_id = ?", tenantID).
-		Distinct().Pluck("conversation_id", &ids).Error
-	return ids, err
-}
-
 // convLastActivity mirrors the COALESCE used for ordering: the denormalized last
 // message time, or the creation time when there are no messages yet.
 func convLastActivity(c models.Conversation) time.Time {

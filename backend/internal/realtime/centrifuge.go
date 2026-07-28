@@ -55,17 +55,14 @@ func (p *CentrifugePublisher) Unsubscribe(userID, channel string) error {
 	return p.node.Unsubscribe(userID, channel)
 }
 
-// channelsFor computes the destination channels for a target. Internal notes go
-// ONLY to the agents-only channel — clients are never subscribed there, so the
-// privacy boundary is a subscription fact, not UI logic (§5.6).
+// channelsFor computes the destination channels for a target. An internal note
+// reaches no conversation channel at all — only the tenant channels operators
+// watch, which clients are never subscribed to, so the privacy boundary is a
+// subscription fact rather than UI logic (§5.6).
 func channelsFor(t Target) []string {
 	var channels []string
-	if t.Conversation != "" {
-		if t.Internal {
-			channels = append(channels, ConvInternalChannel(t.Conversation))
-		} else {
-			channels = append(channels, ConvChannel(t.Conversation))
-		}
+	if t.Conversation != "" && !t.Internal {
+		channels = append(channels, ConvChannel(t.Conversation))
 	}
 	for _, u := range t.Users {
 		channels = append(channels, UserChannel(u))
