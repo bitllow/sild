@@ -339,10 +339,13 @@ jobs:
       # match is silently impossible, which is why the emulator survived and the
       # action's own teardown then burned the step's whole budget. The pattern is
       # bracketed so it does not match the `sh -c` running it.
+      # The timeout bounds the WEDGED TEARDOWN, not the work: boot + gradle + tests
+      # is ~2.5 minutes on a warm AVD cache, and the rest is the emulator refusing to
+      # exit. Raising it only lengthens every failure; it is not a work budget.
       - name: Run instrumented E2E
         id: android_e2e
         continue-on-error: true
-        timeout-minutes: 12
+        timeout-minutes: 8
         env:
           ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: "5"
         uses: reactivecircus/android-emulator-runner@v2
@@ -354,6 +357,7 @@ jobs:
           disable-animations: true
           working-directory: sdks/kotlin
           script: |
+            touch /tmp/android-e2e-started
             ./gradlew :sample:connectedDebugAndroidTest && touch /tmp/android-e2e-passed
             pkill -x sild-dev || true
             pkill -9 -f '[q]emu-system-x86_64' || true
@@ -367,7 +371,11 @@ jobs:
           shopt -s globstar nullglob
           xml=(sdks/kotlin/sample/build/outputs/androidTest-results/**/*.xml)
           if [ ${#xml[@]} -eq 0 ]; then
-            echo "no instrumented test results were written — the run did not reach the tests"
+            if [ -f /tmp/android-e2e-started ]; then
+              echo "the tests started but wrote no results — see the gradle output above"
+            else
+              echo "the emulator never reached the tests (boot failure) — no results to print"
+            fi
             exit 0
           fi
           python3 - "${xml[@]}" <<'PY'
@@ -388,12 +396,23 @@ jobs:
           print(f"{total} tests, {failed} failed")
           PY
 
-      # The real gate: teardown flakiness cannot make a red suite look green,
-      # and cannot make a green suite look red.
+      # The real gate: teardown flakiness cannot make a red suite look green, and
+      # cannot make a green suite look red.
+      #
+      # The two failures are reported separately because they were previously
+      # indistinguishable: an emulator that dies BEFORE the tests reaches the same
+      # step timeout as one that wedges in teardown AFTER them, so "12 minutes and a
+      # missing results file" meant either "nothing ran" or "tests failed". The
+      # started marker is written by the script, so only a boot that never reached it
+      # is missing.
       - name: Assert instrumented E2E passed
         run: |
+          if [ ! -f /tmp/android-e2e-started ]; then
+            echo "::error::the emulator never reached the tests — this is a BOOT failure, not a test failure. Look for adb errors above, not at the test results."
+            exit 1
+          fi
           if [ ! -f /tmp/android-e2e-passed ]; then
-            echo "::error::instrumented tests did not pass"
+            echo "::error::the instrumented tests ran and failed — see the results above"
             cat /tmp/sild-dev.log || true
             exit 1
           fi
