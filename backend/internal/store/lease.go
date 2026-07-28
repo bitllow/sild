@@ -26,8 +26,13 @@ const (
 	// it instead of timing out at the same moment the lease lapses.
 	leaseWaitMax = 6 * time.Minute
 	// Renew this often relative to the TTL, so a transient database error still
-	// leaves two attempts before the lease lapses.
+	// leaves two attempts before the lease lapses. Also bounds one renewal: a
+	// database that hangs must not park the heartbeat past the expiry it is
+	// guarding, because the lease lapses on time regardless.
 	leaseRenewDivisor = 3
+	// Releasing deliberately ignores the caller's cancellation, so it needs its
+	// own bound or an unreachable database strands the goroutine.
+	leaseReleaseTimeout = 5 * time.Second
 )
 
 // ErrLeaseLost reports that another replica took the lease while fn was still
@@ -49,7 +54,11 @@ func RunLeased(ctx context.Context, leases LeaseRepo, name string, ttl time.Dura
 		return false, err
 	}
 	// Release is owner-scoped, so this cannot drop a lease someone else has taken.
-	defer func() { _ = leases.Release(context.WithoutCancel(ctx), name, owner) }()
+	defer func() {
+		rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), leaseReleaseTimeout)
+		defer rcancel()
+		_ = leases.Release(rctx, name, owner)
+	}()
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -73,9 +82,12 @@ func RunLeased(ctx context.Context, leases LeaseRepo, name string, ttl time.Dura
 
 // renew heartbeats the lease until the run ends or it is lost, calling onLost
 // once. A failed renewal is only fatal past expires: until then the lease is
-// still ours and a database blip should not abandon the work.
+// still ours and a database blip should not abandon the work. Each attempt is
+// bounded, so a hung database cannot hold the heartbeat past the expiry — the
+// lease lapses on time whether or not this call ever returns.
 func renew(ctx context.Context, leases LeaseRepo, name, owner string, ttl time.Duration, expires time.Time, onLost func()) {
-	t := time.NewTicker(ttl / leaseRenewDivisor)
+	every := ttl / leaseRenewDivisor
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		select {
@@ -84,10 +96,13 @@ func renew(ctx context.Context, leases LeaseRepo, name, owner string, ttl time.D
 		case <-t.C:
 		}
 		at := time.Now()
-		switch held, err := leases.Acquire(ctx, name, owner, ttl); {
+		actx, acancel := context.WithTimeout(ctx, every)
+		held, err := leases.Acquire(actx, name, owner, ttl)
+		acancel()
+		switch {
 		case err == nil && held:
 			expires = at.Add(ttl)
-		case err != nil && at.Before(expires):
+		case err != nil && time.Now().Before(expires):
 		default:
 			onLost()
 			return
@@ -100,10 +115,13 @@ func renew(ctx context.Context, leases LeaseRepo, name, owner string, ttl time.D
 // releases — a holder that FAILED inside fn releases the lease too, so "lease
 // gone" cannot be read as "work done". fn must therefore be idempotent and cheap
 // when there is nothing left to do; it is the postcondition check, not the lease.
-func RunExclusive(ctx context.Context, leases LeaseRepo, name string, fn func() error) error {
+//
+// fn takes the run's context, cancelled if the lease is lost, for the same
+// reason RunLeased does: work that carries on unleased can overlap its successor.
+func RunExclusive(ctx context.Context, leases LeaseRepo, name string, fn func(context.Context) error) error {
 	deadline := time.Now().Add(leaseWaitMax)
 	for {
-		ran, err := RunLeased(ctx, leases, name, leaseTTL, func(context.Context) error { return fn() })
+		ran, err := RunLeased(ctx, leases, name, leaseTTL, fn)
 		if err != nil || ran {
 			return err
 		}

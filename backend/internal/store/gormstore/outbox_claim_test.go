@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/id"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
@@ -91,6 +92,46 @@ func TestConcurrentRelaysPartitionTheOutbox(t *testing.T) {
 			for id, n := range seen {
 				if n > 1 {
 					t.Fatalf("event %s claimed by %d relays at once", id, n)
+				}
+			}
+		})
+	}
+}
+
+// Partitioning is not enough on its own: a relay that picks candidates another
+// relay is already claiming loses its whole page and idles until the next tick,
+// so webhook throughput stops improving as workers are added. Row locks are what
+// make the pages disjoint, so this is a postgres/mysql guarantee only.
+func TestConcurrentRelaysEachGetAPage(t *testing.T) {
+	for _, dbc := range dialects(t) {
+		if dbc.Driver == config.SQLite {
+			continue // no row locks; the single writer serializes the claim
+		}
+		t.Run(string(dbc.Driver), func(t *testing.T) {
+			ctx := context.Background()
+			st, db := storeFor(t, dbc)
+			const relays, page = 4, 5
+			seedOutbox(t, st, db, relays*page*2)
+
+			counts := make([]int, relays)
+			errs := make([]error, relays)
+			var wg sync.WaitGroup
+			for i := 0; i < relays; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					events, _, err := st.Outbox().ClaimDue(ctx, page)
+					counts[i], errs[i] = len(events), err
+				}()
+			}
+			wg.Wait()
+
+			for i, err := range errs {
+				if err != nil {
+					t.Fatalf("relay %d: %v", i, err)
+				}
+				if counts[i] != page {
+					t.Fatalf("relay %d claimed %d of a %d-event page while the queue still had work", i, counts[i], page)
 				}
 			}
 		})

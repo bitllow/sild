@@ -50,7 +50,7 @@ func (m *KeyManager) EnsureActiveKey(ctx context.Context) error {
 	if err != nil || has {
 		return err
 	}
-	return store.RunExclusive(ctx, m.leases, store.LeaseSigningKey, func() error {
+	return store.RunExclusive(ctx, m.leases, store.LeaseSigningKey, func(ctx context.Context) error {
 		// Another replica may have minted one before we took the lease.
 		has, err := m.hasActiveKey(ctx)
 		if err != nil || has {

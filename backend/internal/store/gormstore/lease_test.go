@@ -131,7 +131,7 @@ func TestRunExclusiveNeverOverlaps(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					errs <- store.RunExclusive(ctx, st.Leases(), name, func() error {
+					errs <- store.RunExclusive(ctx, st.Leases(), name, func(context.Context) error {
 						n := inside.Add(1)
 						for {
 							m := maxInside.Load()
@@ -172,7 +172,7 @@ func TestWaiterRunsTheWorkWhenTheHolderFails(t *testing.T) {
 	name := id.New("lease")
 
 	var runs atomic.Int32
-	failing := func() error {
+	failing := func(context.Context) error {
 		runs.Add(1)
 		return errors.New("boom")
 	}
@@ -182,7 +182,7 @@ func TestWaiterRunsTheWorkWhenTheHolderFails(t *testing.T) {
 
 	// The next replica must not treat the released lease as a completed job.
 	var second atomic.Int32
-	if err := store.RunExclusive(ctx, st.Leases(), name, func() error {
+	if err := store.RunExclusive(ctx, st.Leases(), name, func(context.Context) error {
 		second.Add(1)
 		return nil
 	}); err != nil {

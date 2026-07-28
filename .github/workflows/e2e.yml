@@ -23,7 +23,7 @@ jobs:
 
   # The concurrency guards (assignment claim, outbox claim, job leases) need real
   # row-level contention to mean anything — SQLite serializes writers, so the
-  # store suite runs again against Postgres with racing goroutines.
+  # store suite runs again against each production dialect with racing goroutines.
   backend-tests-postgres:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -51,6 +51,39 @@ jobs:
         working-directory: backend
         env:
           SILD_TEST_POSTGRES_DSN: "host=localhost port=5432 user=sild password=sild dbname=sild sslmode=disable"
+        run: go test -race ./internal/store/gormstore/
+
+  # MySQL is the second supported production dialect, and the outbox claim leans
+  # on FOR UPDATE SKIP LOCKED there as much as on Postgres — different engine,
+  # different locking implementation, so it gets its own run.
+  backend-tests-mysql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: sild
+          MYSQL_DATABASE: sild
+          MYSQL_USER: sild
+          MYSQL_PASSWORD: sild
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -usild -psild --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: go test (mysql dialect)
+        working-directory: backend
+        env:
+          SILD_TEST_MYSQL_DSN: "sild:sild@tcp(127.0.0.1:3306)/sild?charset=utf8mb4&parseTime=True&loc=Local"
         run: go test -race ./internal/store/gormstore/
 
   # Browser behavior tests for the inbox + drop-in widget, run against a real
