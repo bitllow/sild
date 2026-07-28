@@ -516,16 +516,6 @@ export class RootStore {
     }
   };
 
-  private reconnectRealtime = () => {
-    if (!this.rt) return;
-    try {
-      this.rt.disconnect();
-      this.rt.connect();
-    } catch {
-      /* ignore */
-    }
-  };
-
   dispose = () => {
     if (this.safetyTimer) {
       clearInterval(this.safetyTimer);
@@ -548,13 +538,8 @@ export class RootStore {
     });
   };
 
-  // Reload the queue; if the conversation set changed, resubscribe realtime so a
-  // brand-new support request gets its live conv channel (§5.2 — agents aren't
-  // members, so new conversations need a fresh server-side subscription set).
-  // Merge the first page into the loaded list on a tenant-wide queue change —
-  // updating existing rows in place and prepending genuinely new ones — WITHOUT
-  // dropping already scroll-loaded pages or resetting the cursor. If a new
-  // conversation appears, resubscribe so its realtime channel is covered (§5.2).
+  // Reload the queue: merge the first page in place — never drop already
+  // scroll-loaded pages, never reset the cursor.
   private syncQueue = async () => {
     const seq = this.queueSeq; // merge belongs to the current filter generation
     try {
@@ -582,10 +567,7 @@ export class RootStore {
           }
         }
         if (!this.activeId && this.convs.length) this.activeId = this.convs[0].id;
-        if (added) {
-          this.reconnectRealtime();
-          this.chime(); // a new request landed in the queue
-        }
+        if (added) this.chime(); // a new request landed in the queue
       });
     } catch {
       /* transient; the next event or the safety reconcile retries */
@@ -593,8 +575,12 @@ export class RootStore {
   };
 
   private handleEvent = (channel: string, env: RealtimeEnvelope) => {
-    if (channel.startsWith("agents:")) {
-      void this.syncQueue(); // tenant-wide queue change (new/updated request)
+    // agents:<tenant> carries every support conversation this operator may read
+    // (§5.1); one for a conversation the list lacks is the new-request nudge.
+    // Typing and receipts can't change the queue, so they never trigger a fetch.
+    const known = !!env.conversation_id && this.convs.some((c) => c.id === env.conversation_id);
+    if (channel.startsWith("agents:") && !known) {
+      if (env.type !== "typing" && env.type !== "message.read") void this.syncQueue();
       return;
     }
     // The tenant peer channel (peer:<tenant>) carries the whole peer surface for
@@ -607,12 +593,6 @@ export class RootStore {
       } else {
         this.peer.onTenantNudge(env.conversation_id); // new/unloaded peer conversation — surface just it
       }
-      return;
-    }
-    // A peer conversation the peer store already owns may also see conv:<id>
-    // events (e.g. legacy subscriptions) — route them to the peer store.
-    if (env.conversation_id && this.peer.owns(env.conversation_id)) {
-      this.peer.onRealtime(env);
       return;
     }
     switch (env.type) {

@@ -47,6 +47,11 @@ func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID stri
 	if err != nil {
 		return AgentAccess{}
 	}
+	return s.classifyConv(ctx, tenantID, conv, needSupport)
+}
+
+// classifyConv is the rule itself, for callers that already hold the row.
+func (s *Service) classifyConv(ctx context.Context, tenantID string, conv *models.Conversation, needSupport bool) AgentAccess {
 	if conv.Kind == models.KindPeer {
 		return AgentAccess{Peer: true}
 	}
@@ -56,7 +61,7 @@ func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID stri
 	if conv.ArchivedAt != nil {
 		return AgentAccess{SupportOK: true}
 	}
-	return AgentAccess{SupportOK: needSupport && s.HasAssignment(ctx, tenantID, convID)}
+	return AgentAccess{SupportOK: needSupport && s.HasAssignment(ctx, tenantID, conv.ID)}
 }
 
 // PeerPage is one keyset-paginated page of peer conversations for the inbox: the

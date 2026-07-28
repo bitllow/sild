@@ -368,12 +368,28 @@ Connect: `wss://chat.sild.io/v1/ws?token=<jwt>`. (SSE is available for the web w
 |---------|-------------|---------|
 | `user:<user_id>`          | that user's connections | user-targeted events (added to conversation, assignment updates) |
 | `conv:<conv_id>`          | all members             | messages, receipts, typing, member changes |
-| `conv:<conv_id>:internal` | agents only             | internal notes (§5.6) |
+| `agents:<tenant_id>`      | every operator          | the same events for every support conversation an assignment makes readable, plus queue changes |
+| `peer:<tenant_id>`        | peer_access operators   | the same events for every peer conversation |
+
+End users subscribe per conversation, which is bounded by their own membership.
+Operators subscribe per **tenant**: an inbox watching one channel per assigned
+conversation would hold thousands of subscriptions and rebuild them on every
+reconnect. The two tenant channels carry what per-conversation channels carry, so
+an operator's subscription set is fixed and a conversation created after connect
+needs no re-subscription.
+
+Which tenant channel a conversation's events reach is decided by the same
+classification REST authorizes with (`ClassifyAgentAccess`): peer conversations go
+to `peer:<tenant_id>`, support conversations to `agents:<tenant_id>`. Both tenant
+channels reach every operator holding them, so a conversation no operator may read
+reaches neither — publishing it would hand out what REST refuses.
 
 ### 5.2 Subscriptions are membership-derived
-On connect the backend validates the JWT, reads the user's memberships from Postgres, and attaches the
-channel set server-side (Centrifuge server-side subscriptions): `user:<id>` plus `conv:<id>` for each
-membership, plus `conv:<id>:internal` if the connection is an agent. The client declares nothing.
+On connect the backend validates the JWT and attaches the channel set server-side (Centrifuge
+server-side subscriptions). The client declares nothing. A user connection gets `user:<id>` plus
+`conv:<id>` for each membership, read from Postgres. An operator connection gets `user:<admin_id>`,
+`agents:<tenant>`, and `peer:<tenant>` when `policy.Scope` admits peer conversations — a fixed set that
+does not depend on the queue.
 Membership changes mid-connection call `node.Subscribe/Unsubscribe(user, channel)` — cluster-wide via
 the Redis broker.
 
@@ -420,10 +436,11 @@ unbounded-looking `after=` did at its hidden 500-row cap.
 - Transport: FCM (Android/web) + APNs (iOS).
 
 ### 5.6 Internal notes — enforced by the channel split
-A `visibility=internal` message is published to `conv:<id>:internal` only. Clients are never subscribed
-to that channel, so an internal note **physically cannot reach them** — the privacy boundary is a
-subscription fact, not UI logic. Internal notes are also never pushed, never emailed, and stripped from
-history/search for non-agent callers.
+A `visibility=internal` message is published only to the tenant channels operators watch, and to no
+client channel at all. Clients are never subscribed there, so an internal note **physically cannot
+reach them** — the privacy boundary is a subscription fact, not UI logic. In a conversation no
+operator may observe yet it reaches nobody live; history is the catch-up path (§5.4). Internal notes
+are also never pushed, never emailed, and stripped from history/search for non-agent callers.
 
 ---
 

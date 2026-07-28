@@ -126,10 +126,6 @@ type AssignmentRepo interface {
 	// enriched with each conversation + its active members + last activity, so a
 	// queue page renders from a single query (§4.3).
 	ListQueue(ctx context.Context, tenantID string, p QueueParams) (QueuePage, error)
-	// ConversationIDs returns every conversation in the tenant that currently
-	// carries an assignment (unpaginated) — used to compute an agent's realtime
-	// channel subscription set (§5.2).
-	ConversationIDs(ctx context.Context, tenantID string) ([]string, error)
 	// CountQueue returns the per-scope queue counts (assigned-to-me / unassigned /
 	// closed) for the inbox scope-tab counters + "Show closed" toggle. Computed
 	// over the representative (latest) assignment per conversation, matching

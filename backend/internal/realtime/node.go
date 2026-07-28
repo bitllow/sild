@@ -78,11 +78,9 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 			return centrifuge.ConnectReply{}, centrifuge.ErrorUnauthorized
 		}
 
-		// Agent (inbox) connection: subscribe to every conversation that
-		// currently carries an assignment — both the conv channel and the
-		// agents-only internal channel (§5.1/§5.6) — plus the tenant agents
-		// channel for new queue items. Resolved live from the queue, not from
-		// membership (agents aren't conversation members).
+		// Agent (inbox) connection: tenant channels, not conversations. Agents
+		// aren't conversation members, and an operator observes the whole queue,
+		// so the set comes from policy rather than membership (§5.1).
 		if claims.Typ == "agent" {
 			subs, err := agentSubscriptions(ctx, st, claims.Tid, claims.Subject)
 			if err != nil {
@@ -95,8 +93,8 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 		}
 
 		// Server-side subscriptions: own user channel + every active conversation.
-		// User tokens are never subscribed to conv:<id>:internal, so internal
-		// notes physically cannot reach a client (§5.6).
+		// User tokens reach no agent channel, so internal notes physically cannot
+		// reach a client (§5.6).
 		subs := map[string]centrifuge.SubscribeOptions{
 			UserChannel(claims.Subject): {},
 		}
@@ -123,9 +121,12 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 }
 
 // agentSubscriptions computes the server-side channel set for an inbox agent
-// connection (§5.2): the agent's user channel, the tenant agents channel (new
-// queue items), and conv:<id> + conv:<id>:internal for every conversation that
-// currently carries an assignment. The agent must be a real admin in the tenant.
+// connection (§5.2): the agent's user channel, the tenant agents channel, and the
+// tenant peer channel for operators whose scope admits peer conversations. The
+// agent must be a real admin in the tenant.
+//
+// The set is fixed per connection — it does not grow with the queue, so a
+// conversation created after connect needs no re-subscription.
 //
 // Visibility is decided by policy.Scope, not re-derived here. REST and the socket
 // therefore cannot disagree about what an operator may see — two implementations
@@ -149,19 +150,8 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 		UserChannel(adminID):    {},
 		AgentsChannel(tenantID): {},
 	}
-	cids, err := st.Assignments().ConversationIDs(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	for _, cid := range cids {
-		subs[ConvChannel(cid)] = centrifuge.SubscribeOptions{}
-		subs[ConvInternalChannel(cid)] = centrifuge.SubscribeOptions{}
-	}
-	// Operators whose scope admits peer conversations observe the peer surface via
-	// the single tenant peer channel (every peer conversation's events fan out
-	// there). Because it's one tenant channel — not a subscription per peer
-	// conversation — a peer conversation created after this connect is still
-	// observed without any per-connection re-subscription.
+	// Operators whose scope admits peer conversations observe the whole peer
+	// surface on the single tenant peer channel.
 	if scope.AllowsKind(models.KindPeer) {
 		subs[PeerChannel(tenantID)] = centrifuge.SubscribeOptions{}
 	}

@@ -57,6 +57,28 @@ func (s *Service) emit(ctx context.Context, t realtime.Target, eventType, convID
 	})
 }
 
+// emitObserved emits to t plus the tenant channel watched by the operators who
+// may read this conversation, so an agent inbox sees background conversations
+// without subscribing to each one (§5.1). Which channel that is comes from
+// ClassifyAgentAccess — the same decision REST authorizes with, so the socket
+// cannot fan out what an endpoint refuses.
+//
+// conv may be nil when the caller has not read the row; it is read here then.
+func (s *Service) emitObserved(ctx context.Context, t realtime.Target, tenantID string, conv *models.Conversation, eventType string, data any) {
+	if conv == nil {
+		conv, _ = s.store.Conversations().Get(ctx, tenantID, t.Conversation)
+	}
+	if conv != nil {
+		switch access := s.classifyConv(ctx, tenantID, conv, true); {
+		case access.Peer:
+			t.Peer = tenantID
+		case access.SupportOK:
+			t.Tenant = tenantID
+		}
+	}
+	s.emit(ctx, t, eventType, t.Conversation, data)
+}
+
 // enqueueWebhook writes a webhook event to the outbox INSIDE the caller's tx, so
 // it commits atomically with the state change (at-least-once, §6.1).
 func (s *Service) enqueueWebhook(ctx context.Context, tx store.Store, tenantID, convID, eventType string, data any) error {

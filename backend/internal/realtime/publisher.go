@@ -18,14 +18,13 @@ const (
 
 // Channel naming (§5.1). Clients never choose channels; subscriptions are
 // derived from membership server-side (§5.2).
-func UserChannel(userID string) string         { return "user:" + userID }
-func ConvChannel(convID string) string         { return "conv:" + convID }
-func ConvInternalChannel(convID string) string { return "conv:" + convID + ":internal" }
+func UserChannel(userID string) string { return "user:" + userID }
+func ConvChannel(convID string) string { return "conv:" + convID }
 
-// AgentsChannel carries tenant-wide queue events to every connected agent
-// (inbox). Agents subscribe to it on connect so a brand-new support request
-// surfaces in the queue immediately (§8). Only agent connections are ever
-// subscribed here — end-user clients are not.
+// AgentsChannel carries every event in every support conversation an assignment
+// makes readable, plus queue changes, to every connected agent (inbox) — the
+// whole queue without a subscription per conversation (§5.1). Only agent
+// connections are ever subscribed here, never end-user clients.
 func AgentsChannel(tenantID string) string { return "agents:" + tenantID }
 
 // PeerChannel carries every peer-conversation event (new-conversation nudges and
@@ -48,8 +47,8 @@ type Envelope struct {
 
 // Target selects which channels an envelope fans out to.
 type Target struct {
-	Conversation string   // conv:<id> (or conv:<id>:internal when Internal)
-	Internal     bool     // route to the agents-only internal channel (§5.6)
+	Conversation string   // conv:<id>
+	Internal     bool     // agents-only: suppresses every client channel (§5.6)
 	Users        []string // also push to user:<id> channels
 	Tenant       string   // also push to agents:<tenant> (queue-wide agent fan-out)
 	Peer         string   // also push to peer:<tenant> (peer-access operator fan-out)

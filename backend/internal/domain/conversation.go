@@ -166,7 +166,8 @@ func (s *Service) GetConversation(ctx context.Context, tenantID, convID string) 
 
 // AddMember adds a member to an existing conversation (§4.1, API key).
 func (s *Service) AddMember(ctx context.Context, tenantID, convID string, mi MemberInput) (*models.ConversationMember, error) {
-	if _, err := s.store.Conversations().Get(ctx, tenantID, convID); err != nil {
+	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
+	if err != nil {
 		return nil, mapStoreErr(err)
 	}
 	m, err := s.buildMember(ctx, tenantID, convID, mi)
@@ -177,8 +178,8 @@ func (s *Service) AddMember(ctx context.Context, tenantID, convID string, mi Mem
 		return nil, err
 	}
 	uid := derefStr(m.ExternalUserID)
-	s.emit(ctx, realtime.Target{Conversation: convID, Users: []string{uid}},
-		realtime.EventMemberAdded, convID, map[string]any{"user_id": uid, "conv_role": m.ConvRole})
+	s.emitObserved(ctx, realtime.Target{Conversation: convID, Users: []string{uid}}, tenantID, conv,
+		realtime.EventMemberAdded, map[string]any{"user_id": uid, "conv_role": m.ConvRole})
 	_ = s.fireWebhook(ctx, tenantID, convID, "member.added", map[string]any{"user_id": uid, "conv_role": m.ConvRole})
 	return m, nil
 }
@@ -203,8 +204,8 @@ func (s *Service) RemoveMember(ctx context.Context, tenantID, convID, userID str
 	if err := s.store.Members().RemoveExternal(ctx, tenantID, convID, userID); err != nil {
 		return mapStoreErr(err)
 	}
-	s.emit(ctx, realtime.Target{Conversation: convID, Users: []string{userID}},
-		realtime.EventMemberRemoved, convID, map[string]any{"user_id": userID})
+	s.emitObserved(ctx, realtime.Target{Conversation: convID, Users: []string{userID}}, tenantID, conv,
+		realtime.EventMemberRemoved, map[string]any{"user_id": userID})
 	_ = s.fireWebhook(ctx, tenantID, convID, "member.removed", map[string]any{"user_id": userID})
 	return nil
 }
@@ -221,13 +222,8 @@ func (s *Service) CloseConversation(ctx context.Context, tenantID, convID string
 	if err := s.store.Conversations().UpdateStatus(ctx, tenantID, convID, models.ConversationClosed); err != nil {
 		return err
 	}
-	tgt := realtime.Target{Conversation: convID}
-	// A peer conversation close must also reach observing operators (non-members)
-	// on the peer channel so they drop it from the peer inbox.
-	if conv.Kind == models.KindPeer {
-		tgt.Peer = tenantID
-	}
-	s.emit(ctx, tgt, realtime.EventConversationClosed, convID, map[string]any{})
+	s.emitObserved(ctx, realtime.Target{Conversation: convID}, tenantID, conv,
+		realtime.EventConversationClosed, map[string]any{})
 	_ = s.fireWebhook(ctx, tenantID, convID, "conversation.closed", map[string]any{})
 	return nil
 }
@@ -243,8 +239,8 @@ func (s *Service) Remap(ctx context.Context, tenantID, convID, fromUserID, toUse
 	if err := s.store.Members().Remap(ctx, tenantID, convID, fromUserID, toUserID); err != nil {
 		return mapStoreErr(err)
 	}
-	s.emit(ctx, realtime.Target{Conversation: convID, Users: []string{toUserID}},
-		realtime.EventMemberAdded, convID, map[string]any{"user_id": toUserID})
+	s.emitObserved(ctx, realtime.Target{Conversation: convID, Users: []string{toUserID}}, tenantID, nil,
+		realtime.EventMemberAdded, map[string]any{"user_id": toUserID})
 	return nil
 }
 

@@ -23,14 +23,14 @@ func (s *Service) MarkRead(ctx context.Context, tenantID, convID string, p store
 		return err
 	}
 	user := derefStr(p.ExternalUserID)
-	s.emit(ctx, realtime.Target{Conversation: convID}, realtime.EventMessageRead, convID,
+	s.emitObserved(ctx, realtime.Target{Conversation: convID}, tenantID, nil, realtime.EventMessageRead,
 		map[string]any{"user_id": user, "last_read_message_id": lastReadMessageID})
 	return nil
 }
 
 // Typing fans out a transient typing event (§4.2, §5.3). Throttling is enforced
 // at the realtime layer.
-func (s *Service) Typing(ctx context.Context, convID, userID string) {
-	s.emit(ctx, realtime.Target{Conversation: convID}, realtime.EventTyping, convID,
-		map[string]any{"user_id": userID})
+func (s *Service) Typing(ctx context.Context, tenantID, convID, userID string) {
+	s.emitObserved(ctx, realtime.Target{Conversation: convID}, tenantID, nil,
+		realtime.EventTyping, map[string]any{"user_id": userID})
 }

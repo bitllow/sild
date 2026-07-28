@@ -106,17 +106,11 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 			data["author_name"] = name
 		}
 	}
-	if in.Visibility == models.VisibilityInternal {
-		// internal notes go ONLY to the agents-only channel (§5.6) — never
-		// webhooked/pushed/emailed.
-		s.emit(ctx, realtime.Target{Conversation: convID, Internal: true}, realtime.EventMessageCreated, convID, data)
-	} else {
-		tgt := realtime.Target{Conversation: convID}
-		// peer_access operators observe this channel; they aren't conversation members.
-		if conv != nil && conv.Kind == models.KindPeer {
-			tgt.Peer = tenantID
-		}
-		s.emit(ctx, tgt, realtime.EventMessageCreated, convID, data)
+	// internal notes go ONLY to agent channels (§5.6) — never webhooked/pushed/emailed.
+	internal := in.Visibility == models.VisibilityInternal
+	s.emitObserved(ctx, realtime.Target{Conversation: convID, Internal: internal},
+		tenantID, conv, realtime.EventMessageCreated, data)
+	if !internal {
 		_ = s.fireWebhook(ctx, tenantID, convID, "message.created", data)
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}

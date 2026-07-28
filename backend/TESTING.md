@@ -28,7 +28,8 @@ SILD_TEST_MYSQL_DSN="sild:sild@tcp(127.0.0.1:3307)/sild?charset=utf8mb4&parseTim
 | §4.2 pagination | `before=`/`limit` with `has_more` | `api/messages_test.go: TestPaginationBeforeHasMore` |
 | §5.4 catch-up | `after=` returns messages missed while offline | `api/flow_test.go` |
 | §5.1 channel split | participants → conv + user channels | `realtime/centrifuge_test.go: TestPublishParticipantsChannels` |
-| §5.6 internal notes | published only to `conv:<id>:internal`; stripped from client history; user can't set internal | `realtime/…: TestPublishInternalChannelOnly`, `api/messages_test.go: TestInternalNoteIsolation`, `TestUserCannotPostInternal` |
+| §5.1 operator fan-out | an operator's subscription set is fixed (never per-conversation); a support conversation reaches the agents channel, a peer one only the peer channel | `realtime/parity_test.go: TestChannelSetDoesNotGrowWithTheQueue`, `domain/agent_fanout_test.go` |
+| §5.6 internal notes | published only to agent tenant channels, never a conversation or user channel, and nowhere at all when no operator may observe the conversation; stripped from client history; user can't set internal | `realtime/…: TestPublishInternalChannelOnly`, `TestPublishInternalWithoutObserversGoesNowhere`, `api/messages_test.go: TestInternalNoteIsolation`, `TestUserCannotPostInternal` |
 | §5.5 push fan-out | only offline members, never the sender | `push/fanout_test.go` |
 | §6.1 webhooks | HMAC `X-Signature`, stable `X-Sild-Event-Id`, delivery log, backoff retry on failure | `connector/webhook/relay_test.go` |
 | §6.2 email | inbound creates/threads by token; agent reply emails out; signature gate | `domain/email_test.go` |

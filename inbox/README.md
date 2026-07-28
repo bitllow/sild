@@ -34,11 +34,13 @@ The browser opens a Centrifuge connection straight to the node
 (`NEXT_PUBLIC_SILD_WS_URL`, default `ws://localhost:8080/v1/ws`) — a cross-origin
 WebSocket the cookie can't ride, so it authenticates with a short-lived **agent
 token** minted at `GET /v1/admin/realtime/token` (cookie-authed). Channels are
-attached server-side: an agent connection subscribes to `conv:<id>` and
-`conv:<id>:internal` for every conversation in the queue, plus `agents:<tenant>`
-for new requests. Messages, assignment changes, conversation close, and typing
-arrive live; on (re)connect the client runs a REST catch-up (§5.4). New support
-requests trigger a resubscribe so their conv channel is covered.
+attached server-side: an agent connection subscribes to `user:<admin>` and
+`agents:<tenant>`, plus `peer:<tenant>` with peer access — never per conversation.
+The tenant channel carries every event in every support conversation this operator
+may read, so the subscription set is the same size whether the queue holds ten
+conversations or five thousand, and a conversation created after connect needs no
+resubscribe. Messages, assignment changes, conversation close, and typing arrive
+live; on (re)connect the client runs a REST catch-up (§5.4).
 
 ### Search (§4.3)
 
