@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -68,11 +69,26 @@ func (b *localBucket) Signer() *LocalSigner { return b.signer }
 // Put writes bytes to the on-disk object store, under the same objects/ root the
 // local PUT/GET routes use (so a server-side write is readable via SignGet).
 func (b *localBucket) Put(_ context.Context, objectKey string, data []byte, _ string) error {
-	full := filepath.Join(b.dir, "objects", filepath.Clean("/"+objectKey))
+	full := b.objectPath(objectKey)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(full, data, 0o644)
+}
+
+// objectPath is the on-disk location of a key, under the same objects/ root the
+// local PUT/GET routes serve.
+func (b *localBucket) objectPath(objectKey string) string {
+	return filepath.Join(b.dir, "objects", filepath.Clean("/"+objectKey))
+}
+
+// Get reads bytes back from the on-disk object store.
+func (b *localBucket) Get(_ context.Context, objectKey string) ([]byte, error) {
+	data, err := os.ReadFile(b.objectPath(objectKey))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrObjectNotFound
+	}
+	return data, err
 }
 
 // LocalDir exposes the storage dir so the local PUT/GET route can read/write it.

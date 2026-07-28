@@ -35,7 +35,7 @@ func TestArchiveWriteThenDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sink, err := archive.New(h.Cfg)
+	sink, err := archive.New(h.Cfg, h.Bucket)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestArchiveSkipsOpen(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sink, _ := archive.New(h.Cfg)
+	sink, _ := archive.New(h.Cfg, h.Bucket)
 	job := archive.NewJob(h.Store, sink, h.Cfg)
 	job.SetClock(func() time.Time { return time.Now().Add(60 * 24 * time.Hour) })
 	n, err := job.RunOnce(ctx, tenant.ID, 100)

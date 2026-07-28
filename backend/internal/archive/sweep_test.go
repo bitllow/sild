@@ -11,7 +11,7 @@ import (
 
 func newJob(t *testing.T, h *testutil.Harness) *archive.Job {
 	t.Helper()
-	sink, err := archive.New(h.Cfg)
+	sink, err := archive.New(h.Cfg, h.Bucket)
 	if err != nil {
 		t.Fatalf("sink: %v", err)
 	}

@@ -5,6 +5,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -27,4 +28,12 @@ type Bucket interface {
 	// SignPut (§11); this is for ingestion paths that already hold the bytes —
 	// the email forwarding daemon writing inbound attachments (§6.2).
 	Put(ctx context.Context, objectKey string, data []byte, mimeType string) error
+	// Get reads object bytes server-side, for the paths that consume an object
+	// rather than hand it to a client — the archive sink rehydrating a
+	// conversation (§12). ErrObjectNotFound when the key holds nothing.
+	Get(ctx context.Context, objectKey string) ([]byte, error)
 }
+
+// ErrObjectNotFound reports a key with no object behind it, so callers can tell
+// "archived conversation is gone" from "storage is unreachable".
+var ErrObjectNotFound = errors.New("object not found")

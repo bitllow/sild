@@ -55,6 +55,42 @@ reproducible and a rollback is a revision switch. The inbox is a second image
 `SILD_API_URL` and `NEXT_PUBLIC_*` at build time, so it is rebuilt per environment,
 not reconfigured.
 
+## The bucket
+
+Attachments (§11) and archived conversations (§12) both go to one bucket, so every
+process reads what any other wrote. Two grants and one CORS policy are all it needs:
+
+```sh
+gcloud storage buckets create gs://BUCKET --location=REGION --uniform-bucket-level-access
+
+# The workload writes and reads objects...
+gcloud storage buckets add-iam-policy-binding gs://BUCKET \
+  --member=serviceAccount:SA@PROJECT.iam.gserviceaccount.com --role=roles/storage.objectAdmin
+
+# ...and signs URLs as itself through the IAM SignBlob API, so no key file is
+# needed. Without this binding every signed URL fails to be produced at all.
+gcloud iam service-accounts add-iam-policy-binding SA@PROJECT.iam.gserviceaccount.com \
+  --member=serviceAccount:SA@PROJECT.iam.gserviceaccount.com \
+  --role=roles/iam.serviceAccountTokenCreator
+```
+
+Browsers upload direct to the bucket, so the bucket — not Sild — answers the
+preflight. Without a CORS policy naming your inbox and host-page origins, signed
+uploads are issued correctly and then rejected by the browser:
+
+```sh
+cat > cors.json <<'JSON'
+[{"origin": ["https://inbox.example.com", "https://app.example.com"],
+  "method": ["GET", "PUT"],
+  "responseHeader": ["Content-Type"],
+  "maxAgeSeconds": 3600}]
+JSON
+gcloud storage buckets update gs://BUCKET --cors-file=cors.json
+```
+
+`Content-Type` is in the signature, so it must be an allowed request header; a
+missing entry shows up as a failed preflight, not as a 403 from Sild.
+
 ## Tiers
 
 | Tier | What runs | Store | Broker | Scales to |
@@ -136,8 +172,11 @@ gcloud run deploy sild \
   timeout, Cloud Run cuts long-lived connections at the request deadline. Clients
   reconnect and catch up (§5.4), but affinity keeps a reconnect on the instance
   that already holds the subscription state.
-- **`STORAGE_BACKEND=gcs` is mandatory above one instance.** The local backend
-  writes to the container filesystem, which no other instance can read.
+- **`STORAGE_BACKEND=gcs` is mandatory above one instance**, and needs
+  `STORAGE_BUCKET`. The local backend writes to the container filesystem, which no
+  other instance can read. See [The bucket](#the-bucket) for the IAM and CORS it
+  needs — a bucket with valid signed URLs but no CORS policy still fails every
+  browser upload.
 - **Cloud SQL** through the connector socket DSN
   (`host=/cloudsql/PROJECT:REGION:INSTANCE user=… dbname=…`), and **Memorystore**
   for Redis via a VPC connector.
@@ -154,7 +193,7 @@ gcloud run jobs create sild-jobs \
   --command /usr/local/bin/sild-worker \
   --args=--once \
   --set-cloudsql-instances PROJECT:REGION:INSTANCE \
-  --set-env-vars "SILD_ENV=production,DB_DRIVER=postgres,SILD_BROKER=redis,STORAGE_BACKEND=gcs" \
+  --set-env-vars "SILD_ENV=production,DB_DRIVER=postgres,SILD_BROKER=redis,STORAGE_BACKEND=gcs,STORAGE_BUCKET=sild-uploads" \
   --set-secrets "DB_DSN=sild-db-dsn:latest,SILD_REDIS_URL=sild-redis-url:latest"
 ```
 
@@ -246,9 +285,11 @@ mechanism.
 | `SILD_WS_ADDR` | — | ignored | ignored | `:8081` (`sild-ws`) |
 | `SILD_JOBS` | — | `webhook,archive` | `""` + a Job | — (`sild-worker`) |
 | `SILD_SMTP_INGEST` | — | `false` | `false` | — (`sild-mail`) |
-| `STORAGE_BACKEND` | `local` | `local` (shared volume) or `gcs` | `gcs` | `gcs`/`s3` |
+| `STORAGE_BACKEND` | `local` | `local` (one shared volume) or `gcs` | `gcs` | `gcs` |
+| `STORAGE_BUCKET` | — | required with `gcs` | required | required with `gcs` |
 | `STORAGE_SIGNING_KEY` | — | required with `local` | — | required with `local` |
-| `STORAGE_LOCAL_SHARED` | — | `true` (one volume) | — | `true` |
+| `STORAGE_LOCAL_SHARED` | — | `true` (one volume) | — | — |
+| `ARCHIVE_SINK` | `gcs_json` | `gcs_json` | `gcs_json` | `gcs_json` |
 
 Full list with defaults: [`backend/.env.example`](../backend/.env.example).
 
