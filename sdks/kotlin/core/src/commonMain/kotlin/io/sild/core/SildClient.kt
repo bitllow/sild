@@ -108,6 +108,40 @@ class SildClient internal constructor(
         _state.update { it.copy(conversations = convs, agentName = named ?: it.agentName) }
     }
 
+    /** Prepend the next page of OLDER messages to the open thread. Without it a
+     *  conversation past the first page is truncated to its newest 100 — the cursor
+     *  the endpoint returns had no consumer. */
+    fun loadOlder() {
+        scope.launch {
+            val s = _state.value
+            val id = s.activeId ?: return@launch
+            val cursor = s.olderCursor ?: return@launch
+            if (s.loadingOlder) return@launch
+            _state.update { it.copy(loadingOlder = true) }
+            runCatching { api.listMessages(id, cursor) }
+                .onSuccess { page ->
+                    if (!isActive(id)) return@launch
+                    val names = namesOf(id)
+                    _state.update { cur ->
+                        val have = cur.messages.map { m -> m.id }.toSet()
+                        val older = page.items
+                            .filterNot { m -> m.id in have }
+                            .sortedBy { m -> m.createdAt }
+                            .map { m -> mapMessage(m, names) }
+                        cur.copy(
+                            messages = older + cur.messages,
+                            olderCursor = if (page.hasMore) page.nextCursor else null,
+                            loadingOlder = false,
+                        )
+                    }
+                }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _state.update { cur -> cur.copy(loadingOlder = false) } // retry by scrolling again
+                }
+        }
+    }
+
     /** Open a conversation and load its (last 100) messages. */
     fun openConversation(id: String) {
         scope.launch { loadThread(id) }
@@ -133,7 +167,14 @@ class SildClient internal constructor(
                 if (!isActive(id)) return
                 val names = namesOf(id)
                 val msgs = page.items.sortedBy { it.createdAt }.map { mapMessage(it, names) }
-                _state.update { it.copy(messages = msgs, loadingThread = false, agentName = agentNameOf(msgs) ?: it.agentName) }
+                _state.update {
+                    it.copy(
+                        messages = msgs,
+                        loadingThread = false,
+                        olderCursor = if (page.hasMore) page.nextCursor else null,
+                        agentName = agentNameOf(msgs) ?: it.agentName,
+                    )
+                }
             }
             .onFailure { e ->
                 if (e is CancellationException) throw e // cancelled (left the draft) — not an error

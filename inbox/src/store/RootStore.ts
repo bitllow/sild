@@ -161,6 +161,7 @@ export class RootStore {
   nextCursor: string | null = null;
   hasMore = false;
   loadingMore = false;
+  loadingOlder = false;
   convError: string | null = null;
   // Generation token: bumped on every fresh queue load (filter change / reload)
   // so a slow in-flight request for a previous filter can't overwrite newer state.
@@ -466,6 +467,41 @@ export class RootStore {
       }
     } catch {
       /* the next reconnect resumes from the same id */
+    }
+  };
+
+  // Prepend the next page of OLDER messages to the open thread. Without this a
+  // conversation past the first page is permanently truncated — the cursor the
+  // server returns had no consumer.
+  loadOlderMessages = async () => {
+    const conv = this.active;
+    if (!conv || this.loadingOlder || !conv.olderCursor) return;
+    const id = conv.id;
+    const cursor = conv.olderCursor;
+    runInAction(() => {
+      this.loadingOlder = true;
+    });
+    try {
+      const page = await adminApi.listMessages(id, cursor);
+      runInAction(() => {
+        // Re-find the thread: it may have been rebuilt while this was in flight.
+        for (const list of [this.convs, this.searchResults, this.contactHistory]) {
+          const target = list?.find((c) => c.id === id);
+          if (!target || target.olderCursor !== cursor) continue;
+          const have = new Set(target.messages.map((m) => m.id));
+          const older = page.items
+            .filter((m) => !have.has(m.id))
+            .map((m) => mapRealtimeMessage(m, target));
+          target.messages.unshift(...older);
+          target.olderCursor = page.has_more ? page.next_cursor : null;
+        }
+      });
+    } catch {
+      /* transient; scrolling up again retries */
+    } finally {
+      runInAction(() => {
+        this.loadingOlder = false;
+      });
     }
   };
 

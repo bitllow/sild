@@ -18,6 +18,8 @@ export interface WidgetClient {
   subscribe(fn: () => void): () => void;
   start(conversationId?: string): void | Promise<void>;
   openConversation(id: string): void | Promise<void>;
+  /** Prepend the next page of older messages to the open thread. */
+  loadOlder(): void | Promise<void>;
   openSupportRequest(): void | Promise<string>;
   send(text: string, attachments?: PendingAttachment[]): void | Promise<void>;
   backToList(): void;
@@ -226,6 +228,8 @@ export class SildClient implements WidgetClient {
     connection: "idle",
     conversations: [],
     activeId: null,
+    olderCursor: null,
+    loadingOlder: false,
     messages: [],
     loadingThread: false,
     soundOn: initialSoundOn(),
@@ -466,9 +470,42 @@ export class SildClient implements WidgetClient {
         .slice()
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .map((m) => mapMessage(m, this.selfId, this.activeNames));
-      this.patch({ messages, loadingThread: false, agentName: agentNameOf(messages) });
+      this.patch({
+        messages,
+        loadingThread: false,
+        agentName: agentNameOf(messages),
+        olderCursor: page.has_more ? page.next_cursor : null,
+      });
     } catch (e) {
       this.patch({ loadingThread: false, error: e instanceof Error ? e.message : "Failed to load" });
+    }
+  }
+
+  // loadOlder prepends the next page of OLDER messages. The thread endpoint has
+  // always returned a cursor for this; nothing consumed it, so a conversation past
+  // the first page was truncated to its newest 100 on every surface.
+  async loadOlder(): Promise<void> {
+    const cursor = this.state.olderCursor;
+    const id = this.state.activeId;
+    if (!cursor || this.state.loadingOlder || !id) return;
+    this.patch({ loadingOlder: true });
+    try {
+      const page = await this.api<ApiPage<ApiMessage>>(
+        "GET",
+        `/conversations/${id}/messages?limit=100&cursor=${encodeURIComponent(cursor)}`
+      );
+      const have = new Set(this.state.messages.map((m) => m.id));
+      const older = (page.items || [])
+        .filter((m) => !have.has(m.id))
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .map((m) => mapMessage(m, this.selfId, this.activeNames));
+      this.patch({
+        messages: [...older, ...this.state.messages],
+        olderCursor: page.has_more ? page.next_cursor : null,
+        loadingOlder: false,
+      });
+    } catch {
+      this.patch({ loadingOlder: false }); // scrolling up again retries
     }
   }
 
@@ -570,6 +607,8 @@ export class PreviewClient implements WidgetClient {
     connection: "connected",
     conversations: [],
     activeId: "preview",
+    olderCursor: null,
+    loadingOlder: false,
     loadingThread: false,
     soundOn: true,
     agentName: "Eva",
@@ -586,6 +625,7 @@ export class PreviewClient implements WidgetClient {
   }
   start(): void {}
   openConversation(): void {}
+  loadOlder(): void {} // the preview thread is a fixed sample; nothing older exists
   openSupportRequest(): void {}
   send(): void {}
   backToList(): void {}

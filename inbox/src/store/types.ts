@@ -59,6 +59,8 @@ export interface Conversation {
   preview: string;
   members: Member[];
   messages: Message[];
+  /** Cursor for the next page of OLDER messages; null when the thread is whole. */
+  olderCursor?: string | null;
 }
 
 export interface ApiKey {

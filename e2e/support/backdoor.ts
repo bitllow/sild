@@ -14,6 +14,27 @@ import { expect } from "@playwright/test";
 // `admin` is the authenticated agent request context (carries the session cookie
 // via storageState), i.e. the same credentials the inbox uses.
 
+// 3. Bulk thread history — a thread long enough to page needs >100 messages, and
+//    the only UI path is typing them one at a time. Sending 120 through the widget
+//    would take minutes per test; this posts them as the agent instead.
+export async function seedManyMessages(
+  admin: APIRequestContext,
+  conversationId: string,
+  count: number,
+  label: string
+): Promise<string[]> {
+  const bodies: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const body = `${label} #${i}`;
+    const res = await admin.post(`/v1/conversations/${conversationId}/messages`, {
+      data: { body, client_msg_id: `${label}-${i}` },
+    });
+    expect(res.ok(), `seed message ${i}`).toBeTruthy();
+    bodies.push(body);
+  }
+  return bodies;
+}
+
 export async function closeAssignmentForConversation(
   admin: APIRequestContext,
   conversationId: string
