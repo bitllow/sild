@@ -11,6 +11,7 @@
     "test:inbox": "playwright test --project=inbox",
     "test:widget": "playwright test --project=widget",
     "test:cross": "playwright test --project=cross",
+    "test:standalone": "SILD_E2E_STANDALONE=1 playwright test --project=standalone",
     "report": "playwright show-report",
     "test:coverage": "E2E_COVERAGE=1 playwright test --project=inbox --workers=1",
     "coverage:report": "open coverage/index.html",

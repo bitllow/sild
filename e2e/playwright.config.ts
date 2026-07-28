@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
+import { STANDALONE_ENV } from "./support/standalone";
 
 // The two product surfaces both talk to one zero-infra `sild-dev` backend.
 export const INBOX_URL = process.env.SILD_E2E_INBOX_URL || "http://localhost:3000";
@@ -22,6 +23,12 @@ process.env.SILD_E2E_DB_DRIVER = DB_DRIVER;
 const isCI = !!process.env.CI;
 // Opt-in browser-code coverage (inbox client JS) via monocart. See fixtures.
 const COVERAGE = process.env.E2E_COVERAGE === "1";
+
+// Opt-in: run the deployment suite against `sild-standalone` instead of the
+// product suites against `sild-dev`. Separate because the binary is a production
+// one — it requires Postgres AND Redis, refuses to start without them, and has no
+// dev seed. Needs both services running; CI gives it its own job.
+const STANDALONE = process.env.SILD_E2E_STANDALONE === "1";
 
 // The widget bundle is embedded into the Go backend at COMPILE time
 // (`//go:embed widget.js`), so it must be rebuilt BEFORE `go run` compiles.
@@ -79,7 +86,15 @@ export default defineConfig({
     actionTimeout: 15_000,
   },
 
-  projects: [
+  projects: STANDALONE
+    ? [
+        {
+          name: "standalone",
+          testDir: "./specs/standalone",
+          use: { ...devices["Desktop Chrome"], baseURL: BACKEND_URL },
+        },
+      ]
+    : [
     // Logs the admin in once and saves the session cookie for the inbox/cross
     // projects. Runs first via `dependencies`.
     { name: "setup", testDir: "./setup", testMatch: /admin\.setup\.ts/ },
@@ -105,7 +120,27 @@ export default defineConfig({
     },
   ],
 
-  webServer: [
+  webServer: STANDALONE
+    ? [
+        {
+          // sild-migrate owns the schema, always and everywhere (§4) — standalone
+          // refuses to migrate, so it has to run first. The widget bundle is built
+          // ahead of `go run` for the same reason as below (it is embedded at
+          // compile time). No inbox here: this project asserts the deployment
+          // shape, not the UI.
+          command:
+            (SKIP_BUILD ? "" : "(cd ../web && node build.mjs) && ") +
+            "go run ./cmd/sild-migrate && go run ./cmd/sild-standalone",
+          cwd: "../backend",
+          url: `${BACKEND_URL}/healthz`,
+          reuseExistingServer: !isCI,
+          timeout: 180_000,
+          stdout: "pipe",
+          stderr: "pipe",
+          env: { ...process.env, ...STANDALONE_ENV },
+        },
+      ]
+    : [
     {
       // Zero-infra dev backend: SQLite (fresh temp file) + in-memory broker +
       // in-process worker/SMTP. NOT `make dev` (that uses Postgres/Redis).

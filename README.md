@@ -40,14 +40,42 @@ docker compose up -d        # postgres + redis + api + ws + worker + migrate
 # REST → http://localhost:8080   WS → ws://localhost:8081/v1/ws
 ```
 
-## Services (four binaries)
+## Services
 
 | Binary | Role |
 |---|---|
 | `sild-api` | REST API (§4), stateless |
 | `sild-ws` | Centrifuge WS/SSE egress (§5), holds connections |
-| `sild-worker` | webhook relay, archival, (push/email) — `--jobs` selects |
+| `sild-worker` | webhook relay, archival — `--jobs` / `SILD_JOBS` selects; `--once` for cron |
+| `sild-mail` | forwarded-mail SMTP ingest (§6.2) |
 | `sild-migrate` | AutoMigrate + dialect index hook, then exits — the **only** thing that changes the schema (ARCHITECTURE §4) |
+| `sild-standalone` | all serving roles in one process on one port — a packaging choice, still scales to N replicas |
+| `sild-admin` | operator CLI: create tenants, operators, API keys |
+
+## Deploy
+
+One image, one schema, several topologies — you move between them with env vars
+and a replica count, not a rebuild. Full guide:
+[`docs/deployment.md`](docs/deployment.md).
+
+| Tier | What runs | Store | Broker | Scales to |
+|---|---|---|---|---|
+| **Dev** | `sild-dev` | SQLite | memory | 1, dev only |
+| **One container** | `sild-standalone` + Postgres + Redis (+ inbox) | Postgres | Redis | N |
+| **Cloud Run / PaaS** | same image, N revisions + a jobs runner | Cloud SQL | Memorystore | N |
+| **Split** | `api` / `ws` / `worker` / `mail` | Postgres | Redis | each on its own axis |
+
+```bash
+docker compose -f deploy/standalone/compose.yaml up --build   # → localhost:3000
+# add a replica — nothing else changes:
+docker compose -f deploy/standalone/compose.yaml up -d --scale sild=3
+```
+
+Then create the first tenant (there is no HTTP provisioning API by design):
+
+```bash
+sild-admin tenant create --name "Acme" --admin-email you@acme.com
+```
 
 ## Tests
 

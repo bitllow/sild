@@ -23,6 +23,7 @@ type TenantRepo interface {
 	Create(ctx context.Context, t *models.Tenant) error
 	Get(ctx context.Context, id string) (*models.Tenant, error)
 	AllIDs(ctx context.Context) ([]string, error)
+	List(ctx context.Context) ([]models.Tenant, error)
 	SearchableKeys(ctx context.Context, tenantID string) ([]string, error)
 	SetSearchableKeys(ctx context.Context, tenantID string, keys []string) error
 	GetEmailConfig(ctx context.Context, tenantID string) (*models.TenantEmailConfig, error)

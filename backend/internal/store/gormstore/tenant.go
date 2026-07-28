@@ -29,6 +29,12 @@ func (r *tenantRepo) AllIDs(ctx context.Context) ([]string, error) {
 	return ids, err
 }
 
+func (r *tenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
+	var ts []models.Tenant
+	err := r.db.WithContext(ctx).Order("created_at, id").Find(&ts).Error
+	return ts, err
+}
+
 func (r *tenantRepo) SearchableKeys(ctx context.Context, tenantID string) ([]string, error) {
 	var keys []string
 	err := r.db.WithContext(ctx).Model(&models.TenantSearchableKey{}).
