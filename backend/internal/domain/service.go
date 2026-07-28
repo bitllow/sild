@@ -57,25 +57,26 @@ func (s *Service) emit(ctx context.Context, t realtime.Target, eventType, convID
 	})
 }
 
-// observers adds the tenant channel the operators who may read this conversation
-// watch, so an agent inbox sees background conversations without subscribing to
-// each one (§5.1). Peer conversations fan out on the peer channel; support
-// conversations on the agents channel, but only once an assignment exists —
-// before that no agent may read the conversation, and the agents channel reaches
-// every one of them.
+// emitObserved emits to t plus the tenant channel watched by the operators who
+// may read this conversation, so an agent inbox sees background conversations
+// without subscribing to each one (§5.1). Which channel that is comes from
+// ClassifyAgentAccess — the same decision REST authorizes with, so the socket
+// cannot fan out what an endpoint refuses.
 //
 // conv may be nil when the caller has not read the row; it is read here then.
-func (s *Service) observers(ctx context.Context, t realtime.Target, tenantID, convID string, conv *models.Conversation) realtime.Target {
+func (s *Service) emitObserved(ctx context.Context, t realtime.Target, tenantID string, conv *models.Conversation, eventType string, data any) {
 	if conv == nil {
-		conv, _ = s.store.Conversations().Get(ctx, tenantID, convID)
+		conv, _ = s.store.Conversations().Get(ctx, tenantID, t.Conversation)
 	}
-	switch {
-	case conv != nil && conv.Kind == models.KindPeer:
-		t.Peer = tenantID
-	case s.HasAssignment(ctx, tenantID, convID):
-		t.Tenant = tenantID
+	if conv != nil {
+		switch access := s.classifyConv(ctx, tenantID, conv, true); {
+		case access.Peer:
+			t.Peer = tenantID
+		case access.SupportOK:
+			t.Tenant = tenantID
+		}
 	}
-	return t
+	s.emit(ctx, t, eventType, t.Conversation, data)
 }
 
 // enqueueWebhook writes a webhook event to the outbox INSIDE the caller's tx, so

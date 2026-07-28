@@ -106,16 +106,11 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 			data["author_name"] = name
 		}
 	}
-	if in.Visibility == models.VisibilityInternal {
-		// internal notes go ONLY to agent channels (§5.6) — never
-		// webhooked/pushed/emailed. In a conversation no operator may observe yet
-		// that is no channel at all: history is the catch-up path (§5.4), and
-		// falling back to a client channel would be the leak this prevents.
-		tgt := s.observers(ctx, realtime.Target{Conversation: convID, Internal: true}, tenantID, convID, conv)
-		s.emit(ctx, tgt, realtime.EventMessageCreated, convID, data)
-	} else {
-		tgt := s.observers(ctx, realtime.Target{Conversation: convID}, tenantID, convID, conv)
-		s.emit(ctx, tgt, realtime.EventMessageCreated, convID, data)
+	// internal notes go ONLY to agent channels (§5.6) — never webhooked/pushed/emailed.
+	internal := in.Visibility == models.VisibilityInternal
+	s.emitObserved(ctx, realtime.Target{Conversation: convID, Internal: internal},
+		tenantID, conv, realtime.EventMessageCreated, data)
+	if !internal {
 		_ = s.fireWebhook(ctx, tenantID, convID, "message.created", data)
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}

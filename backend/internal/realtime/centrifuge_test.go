@@ -50,7 +50,7 @@ func TestPublishInternalChannelOnly(t *testing.T) {
 	fn := &fakeNode{}
 	p := &CentrifugePublisher{node: fn}
 	_ = p.Publish(context.Background(),
-		Target{Conversation: "c1", Internal: true, Tenant: "t1"},
+		Target{Conversation: "c1", Internal: true, Users: []string{"u1"}, Tenant: "t1"},
 		Envelope{Type: "message.created"})
 	if len(fn.published) != 1 || fn.published[0] != "agents:t1" {
 		t.Fatalf("internal note must publish only to agents:t1, got %v", fn.published)

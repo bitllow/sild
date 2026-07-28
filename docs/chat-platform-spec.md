@@ -378,10 +378,11 @@ reconnect. The two tenant channels carry what per-conversation channels carry, s
 an operator's subscription set is fixed and a conversation created after connect
 needs no re-subscription.
 
-A support conversation reaches `agents:<tenant_id>` only once an assignment
-exists — that is exactly when policy makes it readable by an agent (§7), and the
-channel reaches every operator, so publishing earlier would hand out a
-conversation REST refuses.
+Which tenant channel a conversation's events reach is decided by the same
+classification REST authorizes with (`ClassifyAgentAccess`): peer conversations go
+to `peer:<tenant_id>`, support conversations to `agents:<tenant_id>`. Both tenant
+channels reach every operator holding them, so a conversation no operator may read
+reaches neither — publishing it would hand out what REST refuses.
 
 ### 5.2 Subscriptions are membership-derived
 On connect the backend validates the JWT and attaches the channel set server-side (Centrifuge
@@ -436,10 +437,10 @@ unbounded-looking `after=` did at its hidden 500-row cap.
 
 ### 5.6 Internal notes — enforced by the channel split
 A `visibility=internal` message is published only to the tenant channels operators watch, and to no
-conversation channel at all. Clients are never subscribed there, so an internal note **physically
-cannot reach them** — the privacy boundary is a subscription fact, not UI logic. In a conversation no
-operator may observe yet it reaches nobody live; history is the catch-up path (§5.4). Internal notes are also never pushed, never emailed, and stripped from
-history/search for non-agent callers.
+client channel at all. Clients are never subscribed there, so an internal note **physically cannot
+reach them** — the privacy boundary is a subscription fact, not UI logic. In a conversation no
+operator may observe yet it reaches nobody live; history is the catch-up path (§5.4). Internal notes
+are also never pushed, never emailed, and stripped from history/search for non-agent callers.
 
 ---
 

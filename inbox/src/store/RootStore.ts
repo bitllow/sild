@@ -538,11 +538,8 @@ export class RootStore {
     });
   };
 
-  // Reload the queue. Merge the first page into the loaded list on a tenant-wide
-  // queue change — updating existing rows in place and prepending genuinely new
-  // ones — WITHOUT dropping already scroll-loaded pages or resetting the cursor.
-  // No resubscription: the tenant agents channel already covers every support
-  // conversation this operator may read, including ones created after connect.
+  // Reload the queue: merge the first page in place — never drop already
+  // scroll-loaded pages, never reset the cursor.
   private syncQueue = async () => {
     const seq = this.queueSeq; // merge belongs to the current filter generation
     try {
@@ -578,14 +575,13 @@ export class RootStore {
   };
 
   private handleEvent = (channel: string, env: RealtimeEnvelope) => {
-    // The tenant agents channel carries every support conversation this operator
-    // may read — the queue and the open thread alike (§5.1). An event for a
-    // conversation the list doesn't have yet is the "new request" nudge.
-    if (channel.startsWith("agents:")) {
-      if (env.conversation_id && !this.convs.some((c) => c.id === env.conversation_id)) {
-        void this.syncQueue();
-        return;
-      }
+    // agents:<tenant> carries every support conversation this operator may read
+    // (§5.1); one for a conversation the list lacks is the new-request nudge.
+    // Typing and receipts can't change the queue, so they never trigger a fetch.
+    const known = !!env.conversation_id && this.convs.some((c) => c.id === env.conversation_id);
+    if (channel.startsWith("agents:") && !known) {
+      if (env.type !== "typing" && env.type !== "message.read") void this.syncQueue();
+      return;
     }
     // The tenant peer channel (peer:<tenant>) carries the whole peer surface for
     // peer-access operators: a member.added for a not-yet-loaded conversation is
@@ -597,12 +593,6 @@ export class RootStore {
       } else {
         this.peer.onTenantNudge(env.conversation_id); // new/unloaded peer conversation — surface just it
       }
-      return;
-    }
-    // A peer conversation the peer store already owns may also see conv:<id>
-    // events (e.g. legacy subscriptions) — route them to the peer store.
-    if (env.conversation_id && this.peer.owns(env.conversation_id)) {
-      this.peer.onRealtime(env);
       return;
     }
     switch (env.type) {

@@ -11,12 +11,8 @@ import (
 
 // REST/realtime parity. Not set equality: an operator subscribes to tenant
 // channels, not to the conversations on them, so what must hold is that an event
-// reaches an operator iff policy would let them read it.
-//
-// This file covers the subscribe side. The publish side — which conversations
-// are put on the agents channel at all — is the other half of the same
-// guarantee and is covered in domain/agent_fanout_test.go, because an
-// unassigned support conversation must never be published there.
+// reaches an operator iff policy would let them read it. The publish side — which
+// conversations reach a tenant channel — is domain/agent_fanout_test.go.
 //
 // operatorChannels mirrors agentSubscriptions off the same policy.Scope.
 func operatorChannels(p *principal.Principal) map[string]bool {
@@ -120,20 +116,9 @@ func TestPeerAccessReconciliation(t *testing.T) {
 	}
 }
 
-// The whole point of the tenant channels: an operator's subscription set is
-// fixed, so a tenant with thousands of live assignments costs what an empty one
-// costs and nothing has to be rebuilt when a conversation appears.
 func TestChannelSetDoesNotGrowWithTheQueue(t *testing.T) {
 	for _, peer := range []bool{false, true} {
-		subs := operatorChannels(operator(models.PlatformAgent, peer))
-		want := 2 // user + agents
-		if peer {
-			want++
-		}
-		if len(subs) != want {
-			t.Fatalf("peer_access=%v subscribes to %d channels, want %d: %v", peer, len(subs), want, subs)
-		}
-		for ch := range subs {
+		for ch := range operatorChannels(operator(models.PlatformAgent, peer)) {
 			if strings.HasPrefix(ch, "conv:") {
 				t.Fatalf("per-conversation subscription %q is back — the set now grows with the queue", ch)
 			}

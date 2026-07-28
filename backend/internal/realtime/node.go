@@ -93,9 +93,8 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 		}
 
 		// Server-side subscriptions: own user channel + every active conversation.
-		// Bounded by the user's own membership, unlike an operator's tenant-wide
-		// view. User tokens reach no agent channel, so internal notes physically
-		// cannot reach a client (§5.6).
+		// User tokens reach no agent channel, so internal notes physically cannot
+		// reach a client (§5.6).
 		subs := map[string]centrifuge.SubscribeOptions{
 			UserChannel(claims.Subject): {},
 		}
@@ -126,11 +125,8 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 // tenant peer channel for operators whose scope admits peer conversations. The
 // agent must be a real admin in the tenant.
 //
-// The set is fixed per connection — it does not grow with the queue. Every
-// conversation an operator may observe fans out on one of the two tenant
-// channels, so a tenant with thousands of live assignments costs the same three
-// subscriptions as an empty one, and a conversation created after connect needs
-// no re-subscription.
+// The set is fixed per connection — it does not grow with the queue, so a
+// conversation created after connect needs no re-subscription.
 //
 // Visibility is decided by policy.Scope, not re-derived here. REST and the socket
 // therefore cannot disagree about what an operator may see — two implementations
@@ -154,11 +150,8 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 		UserChannel(adminID):    {},
 		AgentsChannel(tenantID): {},
 	}
-	// Operators whose scope admits peer conversations observe the peer surface via
-	// the single tenant peer channel (every peer conversation's events fan out
-	// there). Because it's one tenant channel — not a subscription per peer
-	// conversation — a peer conversation created after this connect is still
-	// observed without any per-connection re-subscription.
+	// Operators whose scope admits peer conversations observe the whole peer
+	// surface on the single tenant peer channel.
 	if scope.AllowsKind(models.KindPeer) {
 		subs[PeerChannel(tenantID)] = centrifuge.SubscribeOptions{}
 	}

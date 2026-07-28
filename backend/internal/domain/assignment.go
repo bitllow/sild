@@ -168,8 +168,10 @@ func (s *Service) transition(ctx context.Context, tenantID, assignmentID string,
 		return a, nil
 	}
 	data := views.Assignment(a)
-	tgt := s.observers(ctx, realtime.Target{Conversation: a.ConversationID}, tenantID, a.ConversationID, nil)
-	s.emit(ctx, tgt, realtime.EventAssignmentUpdated, a.ConversationID, data)
+	// An assignment exists, so this is a support conversation: the agents channel
+	// without a lookup to rediscover it.
+	s.emit(ctx, realtime.Target{Conversation: a.ConversationID, Tenant: tenantID},
+		realtime.EventAssignmentUpdated, a.ConversationID, data)
 	_ = s.fireWebhook(ctx, tenantID, a.ConversationID, "assignment.updated", data)
 	return a, nil
 }

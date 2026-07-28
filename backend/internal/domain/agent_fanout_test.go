@@ -10,7 +10,6 @@ import (
 	"github.com/bitllow/sild/backend/internal/testutil"
 )
 
-// send posts one participant message and returns the targets it fanned out to.
 func sendAndCapture(t *testing.T, h *testutil.Harness, tenantID, convID string, in domain.SendInput) []realtime.Target {
 	t.Helper()
 	h.Pub.Reset()
@@ -27,10 +26,11 @@ func sendAndCapture(t *testing.T, h *testutil.Harness, tenantID, convID string, 
 	return out
 }
 
-func newConversation(t *testing.T, h *testutil.Harness, tenantID string, assigned bool) string {
+// support opens an assignment, which is what classifies the conversation (§1).
+func newConversation(t *testing.T, h *testutil.Harness, tenantID string, support bool) string {
 	t.Helper()
 	conv, err := h.Svc.CreateConversation(context.Background(), tenantID, domain.CreateConversationInput{
-		OpenAssignment: assigned,
+		OpenAssignment: support,
 		Members:        []domain.MemberInput{{UserID: "u_rider", ConvRole: models.RoleClient}},
 	})
 	if err != nil {
@@ -39,10 +39,16 @@ func newConversation(t *testing.T, h *testutil.Harness, tenantID string, assigne
 	return conv.ID
 }
 
-// Agents observe background conversations on the tenant channel rather than one
-// subscription per conversation, so a message in an assigned support conversation
-// has to fan out there — otherwise an inbox that is not looking at that thread
-// never learns it moved.
+func reachedAgents(targets []realtime.Target, tenantID string) bool {
+	for _, tg := range targets {
+		if tg.Tenant == tenantID {
+			return true
+		}
+	}
+	return false
+}
+
+// Otherwise an inbox not looking at that thread never learns it moved.
 func TestSupportMessageReachesTheAgentsChannel(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -53,22 +59,14 @@ func TestSupportMessageReachesTheAgentsChannel(t *testing.T) {
 		SenderKind: models.SenderUser, External: &ext, Body: "where is my driver",
 	})
 
-	agents := false
-	for _, tg := range targets {
-		if tg.Tenant == tenant.ID {
-			agents = true
-		}
-	}
-	if !agents {
+	if !reachedAgents(targets, tenant.ID) {
 		t.Fatalf("no agents-channel fan-out for an assigned support conversation: %+v", targets)
 	}
 }
 
-// The agents channel reaches EVERY operator, and an unassigned support
-// conversation is one no agent may read (policy: support_only needs an
-// assignment). Publishing it there would hand every operator a conversation REST
-// refuses them.
-func TestUnassignedSupportConversationDoesNotReachAgents(t *testing.T) {
+// The agents channel reaches every operator; peer conversations are gated on
+// peer_access, so they belong on the peer channel and nowhere else.
+func TestPeerConversationDoesNotReachAgents(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	convID := newConversation(t, h, tenant.ID, false)
@@ -78,19 +76,16 @@ func TestUnassignedSupportConversationDoesNotReachAgents(t *testing.T) {
 		SenderKind: models.SenderUser, External: &ext, Body: "nobody owns this yet",
 	})
 
+	if reachedAgents(targets, tenant.ID) {
+		t.Fatalf("a peer conversation fanned out to every operator: %+v", targets)
+	}
 	for _, tg := range targets {
-		if tg.Tenant != "" {
-			t.Fatalf("an unassigned support conversation fanned out to every operator: %+v", tg)
-		}
-		if tg.Conversation != convID {
-			t.Fatalf("message left its own conversation channel: %+v", tg)
+		if tg.Peer != tenant.ID {
+			t.Fatalf("peer conversation missed the peer channel: %+v", tg)
 		}
 	}
 }
 
-// Internal notes are agent-only (§5.6). They must reach the agents channel now
-// that agents no longer subscribe per conversation — and must never appear on the
-// participants channel, which end users are subscribed to.
 func TestInternalNoteReachesAgentsAndNotParticipants(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -102,16 +97,12 @@ func TestInternalNoteReachesAgentsAndNotParticipants(t *testing.T) {
 		Visibility: models.VisibilityInternal, AllowInternal: true,
 	})
 
-	agents := false
 	for _, tg := range targets {
 		if !tg.Internal {
 			t.Fatalf("an internal note was published on a participants target: %+v", tg)
 		}
-		if tg.Tenant == tenant.ID {
-			agents = true
-		}
 	}
-	if !agents {
+	if !reachedAgents(targets, tenant.ID) {
 		t.Fatal("internal note never reached the agents channel, so no inbox sees it")
 	}
 }

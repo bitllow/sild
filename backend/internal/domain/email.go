@@ -290,8 +290,8 @@ func (s *Service) appendInbound(ctx context.Context, tenantID string, thread *mo
 	_ = s.store.Email().Update(ctx, thread)
 
 	data := views.Message(msg, s.attachmentURLFunc())
-	tgt := s.observers(ctx, realtime.Target{Conversation: thread.ConversationID}, tenantID, thread.ConversationID, nil)
-	s.emit(ctx, tgt, realtime.EventMessageCreated, thread.ConversationID, data)
+	s.emitObserved(ctx, realtime.Target{Conversation: thread.ConversationID}, tenantID, nil,
+		realtime.EventMessageCreated, data)
 	_ = s.fireWebhook(ctx, tenantID, thread.ConversationID, "message.created", data)
 	return msg, nil
 }
