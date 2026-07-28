@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -59,14 +60,21 @@ func (s *Service) CreateSessionWithPassword(ctx context.Context, email, password
 	return "", time.Time{}, ErrForbidden // no matching credential
 }
 
-// MinPasswordLen is the shortest accepted admin password. Exported so a caller
-// that must validate before it starts writing can apply the same rule.
-const MinPasswordLen = 8
+const minPasswordLen = 8
+
+// ValidatePassword applies the password rule. Exported for callers that must
+// check before they start writing, so the rule and its wording have one home.
+func ValidatePassword(password string) error {
+	if len(password) < minPasswordLen {
+		return invalid(fmt.Sprintf("password must be at least %d characters", minPasswordLen))
+	}
+	return nil
+}
 
 // SetAdminPassword sets/updates an admin's password (Settings → Team).
 func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, password string) error {
-	if len(password) < MinPasswordLen {
-		return invalid("password must be at least 8 characters")
+	if err := ValidatePassword(password); err != nil {
+		return err
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
@@ -95,9 +103,8 @@ func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, ro
 	return mapStoreErr(s.store.Admins().SetRole(ctx, tenantID, adminID, role))
 }
 
-// validPlatformRole rejects a role outside the §7 set. Unchecked, an invite could
-// store a role no permission check ever matches — an operator who appears on the
-// team list and can do nothing.
+// validPlatformRole rejects a role outside the §7 set: one no permission check
+// matches would store an operator who can do nothing.
 func validPlatformRole(role models.PlatformRole) error {
 	switch role {
 	case models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent:

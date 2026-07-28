@@ -25,8 +25,8 @@ const (
 type Config struct {
 	Env      string `env:"SILD_ENV" envDefault:"development"`
 	HTTPAddr string `env:"SILD_HTTP_ADDR" envDefault:":8080"`
-	// Port is the injected listener port on PaaS platforms (Cloud Run, Heroku,
-	// Fly). It wins over HTTPAddr — the platform, not the operator, owns it.
+	// Port is injected by PaaS platforms and wins over HTTPAddr — the platform,
+	// not the operator, owns it.
 	Port      string `env:"PORT"`
 	DB        DB
 	Auth      Auth
@@ -47,8 +47,7 @@ func (c *Config) ListenAddr() string {
 }
 
 // Bootstrap creates the first tenant on an empty database, for platforms where
-// running a one-off command is awkward (Cloud Run). It is the convenience, not
-// the mechanism — sild-admin is the mechanism, and it works everywhere.
+// running a one-off command is awkward. sild-admin is the general mechanism.
 type Bootstrap struct {
 	TenantName    string `env:"SILD_BOOTSTRAP_TENANT"`
 	AdminEmail    string `env:"SILD_BOOTSTRAP_ADMIN_EMAIL"`
@@ -56,18 +55,14 @@ type Bootstrap struct {
 	AdminPassword string `env:"SILD_BOOTSTRAP_ADMIN_PASSWORD"`
 }
 
-// Jobs selects the background work a process runs in-process (§6.1 webhook
-// relay, §12 archival). Every job is lease-guarded, so any number of processes
-// may enable the same one; an empty Enabled gives a pure serving replica.
+// Jobs selects the background work a process runs in-process. Every job is
+// lease-guarded, so any number of processes may enable the same one.
 type Jobs struct {
-	// Enabled carries no envDefault on purpose: env fills a default in for an
-	// empty value as well as a missing one, and SILD_JOBS="" is a meaningful
-	// choice — a replica that serves requests and runs no background work. Load
-	// applies DefaultJobs only when the variable is genuinely absent.
+	// Enabled has no envDefault because env would fill it in for an empty value
+	// too, and SILD_JOBS="" means something: a replica that runs no jobs.
 	Enabled string `env:"SILD_JOBS"`
-	// SMTPIngest runs the forwarded-mail receiver in-process. Off by default:
-	// the platforms the all-in-one binary targets have no raw TCP ingress, and
-	// inbound mail there arrives over POST /v1/email/inbound instead.
+	// SMTPIngest runs the forwarded-mail receiver in-process. Off by default: the
+	// PaaS targets have no raw TCP ingress and use POST /v1/email/inbound.
 	SMTPIngest bool `env:"SILD_SMTP_INGEST" envDefault:"false"`
 }
 
@@ -167,11 +162,8 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-// RequireProduction rejects a non-production environment. sild-standalone runs
-// the whole product in one process the way sild-dev does, but it is a production
-// binary: it holds to the fleet-safety checks below, and to production behaviour
-// elsewhere (no stub admin login, no API docs, secure cookies, release-mode gin)
-// instead of inheriting the zero-config development defaults.
+// RequireProduction rejects a non-production environment, for a binary that must
+// not inherit the development defaults — chiefly the stub admin login.
 func (c *Config) RequireProduction() error {
 	if c.Env == "production" {
 		return nil

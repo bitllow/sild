@@ -20,9 +20,8 @@ func main() {
 	jobsFlag := flag.String("jobs", "", "comma-separated: webhook,archive (default: SILD_JOBS)")
 	once := flag.Bool("once", false, "run each job a single time and exit (cron / Cloud Run Jobs)")
 	flag.Parse()
-	// gcloud splits --args on commas, so `--jobs webhook,archive` arrives as a
-	// flag plus a stray "archive". Refusing leftovers turns that into a startup
-	// error instead of a job that quietly never runs.
+	// gcloud splits --args on commas, so `--jobs webhook,archive` arrives as a flag
+	// plus a stray "archive" — refuse it rather than silently drop a job.
 	if flag.NArg() > 0 {
 		log.Fatalf("sild-worker: unexpected argument %q (use -jobs=a,b as one argument)", flag.Arg(0))
 	}
@@ -46,9 +45,9 @@ func main() {
 		}
 		log.Printf("sild-worker: jobs=%v once=%v (driver=%s)", selected.Names(), *once, cfg.DB.Driver)
 		if *once {
-			return jobs.RunOnce(ctx, selected, relay, sweep)
+			return jobs.RunOnce(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
 		}
-		jobs.Start(ctx, selected, relay, sweep)
+		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
 
 		<-ctx.Done()
 		log.Printf("sild-worker: shutting down")

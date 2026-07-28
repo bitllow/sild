@@ -1,10 +1,7 @@
 // Command sild-admin is the operator CLI: it creates tenants, operators and API
-// keys. Before it existed the only paths to a tenant were the dev seed and
-// hand-written SQL, which is the real barrier to a first deployment.
-//
-// Everything goes through domain.Service, so the §1 invariants, password hashing
-// and API-key hashing hold exactly as they do over HTTP. It runs against the same
-// database as the serving processes and never migrates (§4).
+// keys. Everything goes through domain.Service, so the §1 invariants and password
+// hashing hold exactly as they do over HTTP. It runs against the same database as
+// the serving processes and never migrates (§4).
 //
 //	sild-admin tenant create --name "Acme" --admin-email a@acme.com --admin-name "A B"
 //	sild-admin tenant list
@@ -93,9 +90,11 @@ func tenantCreate(ctx context.Context, svc *domain.Service, args []string) error
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	// A tenant with no password and no OIDC has no way in, so prompt by default;
-	// scripted runs pipe it in with --password -.
-	password, err := readPassword(*pwSrc, "owner password: ", false)
+	if err := need("name", name, "admin-email", email); err != nil {
+		return err
+	}
+	// Prompt by default: a tenant with no password and no OIDC has no way in.
+	password, err := readPassword(*pwSrc, "owner password: ")
 	if err != nil {
 		return err
 	}
@@ -138,11 +137,11 @@ func agentInvite(ctx context.Context, svc *domain.Service, args []string) error 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *tenant == "" || *email == "" {
-		return errors.New("--tenant and --email are required")
+	if err := need("tenant", tenant, "email", email); err != nil {
+		return err
 	}
-	first, last, _ := strings.Cut(strings.TrimSpace(*name), " ")
-	admin, err := svc.InviteAgent(ctx, *tenant, *email, first, strings.TrimSpace(last), models.PlatformRole(*role))
+	first, last := provision.SplitName(*name)
+	admin, err := svc.InviteAgent(ctx, *tenant, *email, first, last, models.PlatformRole(*role))
 	if err != nil {
 		return err
 	}
@@ -159,13 +158,19 @@ func agentSetPassword(ctx context.Context, svc *domain.Service, args []string) e
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := need("tenant", tenant, "email", email); err != nil {
+		return err
+	}
 	admin, err := lookup(ctx, svc, *tenant, *email)
 	if err != nil {
 		return err
 	}
-	password, err := readPassword(*pwSrc, "new password: ", true)
+	password, err := readPassword(*pwSrc, "new password: ")
 	if err != nil {
 		return err
+	}
+	if password == "" {
+		return errors.New(`no password given: pass it on stdin with --password -`)
 	}
 	if err := svc.SetAdminPassword(ctx, *tenant, admin.ID, password); err != nil {
 		return err
@@ -186,6 +191,9 @@ func agentPeerAccess(ctx context.Context, svc *domain.Service, args []string) er
 	if *on == *off {
 		return errors.New("pass exactly one of --on or --off")
 	}
+	if err := need("tenant", tenant, "email", email); err != nil {
+		return err
+	}
 	admin, err := lookup(ctx, svc, *tenant, *email)
 	if err != nil {
 		return err
@@ -204,8 +212,8 @@ func apikeyCreate(ctx context.Context, svc *domain.Service, args []string) error
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *tenant == "" {
-		return errors.New("--tenant is required")
+	if err := need("tenant", tenant); err != nil {
+		return err
 	}
 	key, rec, err := svc.CreateAPIKey(ctx, *tenant, *label)
 	if err != nil {
@@ -223,8 +231,8 @@ func apikeyRevoke(ctx context.Context, svc *domain.Service, args []string) error
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *tenant == "" || *id == "" {
-		return errors.New("--tenant and --id are required")
+	if err := need("tenant", tenant, "id", id); err != nil {
+		return err
 	}
 	if err := svc.RevokeAPIKey(ctx, *tenant, *id); err != nil {
 		return err
@@ -233,10 +241,28 @@ func apikeyRevoke(ctx context.Context, svc *domain.Service, args []string) error
 	return nil
 }
 
-func lookup(ctx context.Context, svc *domain.Service, tenant, email string) (*models.AdminUser, error) {
-	if tenant == "" || email == "" {
-		return nil, errors.New("--tenant and --email are required")
+// need reports the first missing required flag, named as the operator typed it.
+func need(pairs ...any) error {
+	var missing []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if *(pairs[i+1].(*string)) == "" {
+			missing = append(missing, "--"+pairs[i].(string))
+		}
 	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s %s required", strings.Join(missing, " and "), plural(len(missing)))
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "is"
+	}
+	return "are"
+}
+
+func lookup(ctx context.Context, svc *domain.Service, tenant, email string) (*models.AdminUser, error) {
 	admin, err := svc.FindAdminByEmail(ctx, tenant, email)
 	if err != nil {
 		return nil, fmt.Errorf("%s in tenant %s: %w", email, tenant, err)
@@ -244,12 +270,9 @@ func lookup(ctx context.Context, svc *domain.Service, tenant, email string) (*mo
 	return admin, nil
 }
 
-// readPassword resolves a password without ever reading it from argv. src is
-// either "-" (one line from stdin, for scripts) or empty, which prompts on a
-// terminal. required decides what an empty non-terminal stdin means: an error for
-// set-password, where there is nothing to set, and "leave it unset" for a new
-// tenant whose owner may sign in through OIDC instead.
-func readPassword(src, prompt string, required bool) (string, error) {
+// readPassword resolves a password without ever reading it from argv: "-" reads
+// one line from stdin, empty prompts on a terminal, and "" when there is neither.
+func readPassword(src, prompt string) (string, error) {
 	switch {
 	case src == "-":
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -267,9 +290,7 @@ func readPassword(src, prompt string, required bool) (string, error) {
 			return "", fmt.Errorf("read password: %w", err)
 		}
 		return string(b), nil
-	case required:
-		return "", errors.New(`no terminal to prompt on: pass the password on stdin with --password -`)
 	default:
-		return "", nil
+		return "", nil // no terminal to prompt on
 	}
 }

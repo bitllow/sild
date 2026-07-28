@@ -63,7 +63,7 @@ func TestRunOnceReturns(t *testing.T) {
 	sweep := archive.NewJob(h.Store, noopSink{}, h.Cfg)
 
 	done := make(chan error, 1)
-	go func() { done <- jobs.RunOnce(context.Background(), set, relay, sweep) }()
+	go func() { done <- jobs.RunOnce(context.Background(), set, jobs.Deps{Relay: relay, Sweep: sweep}) }()
 	select {
 	case err := <-done:
 		if err != nil {

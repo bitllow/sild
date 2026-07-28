@@ -41,17 +41,13 @@ func main() {
 		log.Fatalf("di: %v", err)
 	}
 
-	// Check the configuration in its own Invoke, needing only *Config: dig builds
-	// a dependency before the callback that asks for it, and constructing the
-	// domain service already connects the broker. A rejected configuration should
-	// touch nothing at all.
+	// Config alone, so a rejected one touches nothing: dig builds a dependency
+	// before the callback asking for it, and *domain.Service dials the broker.
 	var selected jobs.Set
 	err = c.Invoke(func(cfg *config.Config) error {
 		if err := cfg.RequireProduction(); err != nil {
 			return err
 		}
-		// A typo in SILD_JOBS must not produce a healthy-looking process with a
-		// job quietly missing.
 		selected, err = jobs.Parse(cfg.Jobs.Enabled)
 		return err
 	})
@@ -70,8 +66,7 @@ func main() {
 			return err
 		}
 
-		// The whole product on one listener: this is the property that makes a
-		// single container, and a single Cloud Run service, enough.
+		// The whole product on one listener — what makes a single container enough.
 		srv.Engine().GET("/v1/ws", gin.WrapH(node.WSHandler()))
 		srv.Engine().GET("/v1/ws/sse", gin.WrapH(node.SSEHandler()))
 
@@ -79,7 +74,7 @@ func main() {
 			return err
 		}
 
-		jobs.Start(ctx, selected, relay, sweep)
+		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
 
 		if cfg.Jobs.SMTPIngest {
 			go func() {
@@ -115,12 +110,14 @@ func bootstrap(ctx context.Context, cfg *config.Config, svc *domain.Service, st 
 	if !done {
 		return nil
 	}
-	log.Printf("┌─ bootstrap ───────────────────────────────────────────")
-	log.Printf("│ tenant_id : %s", res.TenantID)
-	log.Printf("│ owner     : %s", cfg.Bootstrap.AdminEmail)
-	log.Printf("│ api key   : %s   (shown once)", res.APIKey)
-	log.Printf("│ email in  : forward to %s", res.ForwardingAddress)
-	log.Printf("└── clear SILD_BOOTSTRAP_ADMIN_PASSWORD once you have signed in")
+	// One entry, not six: Cloud Run and k8s render each log call separately.
+	log.Printf("bootstrap created the first tenant\n"+
+		"  tenant_id           %s\n"+
+		"  owner               %s\n"+
+		"  api_key             %s   (shown once)\n"+
+		"  forwarding_address  %s\n"+
+		"  clear SILD_BOOTSTRAP_ADMIN_PASSWORD once you have signed in",
+		res.TenantID, cfg.Bootstrap.AdminEmail, res.APIKey, res.ForwardingAddress)
 	return nil
 }
 

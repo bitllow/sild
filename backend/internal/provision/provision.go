@@ -1,27 +1,29 @@
 // Package provision creates the three things a new customer needs — a tenant, an
 // owner who can log in, and an API key — through domain.Service so the §1
 // invariants and password hashing hold. sild-admin drives it from a shell;
-// sild-standalone drives the same code from bootstrap env on platforms that have
-// no shell.
+// sild-standalone drives it from bootstrap env where there is no shell.
 package provision
 
 import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
-// LeaseBootstrap serializes the empty-database bootstrap. Replicas starting
-// together would otherwise each see an empty tenant table and create a tenant.
-const LeaseBootstrap = "tenant-bootstrap"
+// leaseBootstrap serializes the empty-database bootstrap, so replicas starting
+// together do not each create a tenant. The TTL bounds one holder.
+const (
+	leaseBootstrap = "tenant-bootstrap"
+	leaseTTL       = 2 * time.Minute
+)
 
-// TenantSpec describes the tenant to create. AdminPassword may be empty, which
-// leaves the owner without a password — an operator sets one later, or signs in
-// through Google OIDC (§2.4).
+// TenantSpec describes the tenant to create. An empty AdminPassword leaves the
+// owner without one — set it later, or sign in through Google OIDC (§2.4).
 type TenantSpec struct {
 	Name          string
 	AdminEmail    string
@@ -41,9 +43,9 @@ type Result struct {
 
 // Tenant creates the tenant, its owner, and one API key.
 func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result, error) {
-	// Validate everything before the first write. These steps are separate
-	// transactions, so a spec rejected halfway leaves a tenant with no owner and
-	// no key — and Bootstrap would then skip forever, because a tenant exists.
+	// Validate before the first write: these steps are separate transactions, so a
+	// spec rejected halfway leaves a tenant with no owner and no key, which
+	// Bootstrap then reads as "already done".
 	if err := spec.validate(); err != nil {
 		return nil, err
 	}
@@ -51,7 +53,7 @@ func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result,
 	if err != nil {
 		return nil, err
 	}
-	first, last := splitName(spec.AdminName)
+	first, last := SplitName(spec.AdminName)
 	admin, err := svc.InviteAgent(ctx, t.ID, spec.AdminEmail, first, last, models.PlatformOwner)
 	if err != nil {
 		return nil, fmt.Errorf("create owner: %w", err)
@@ -61,8 +63,7 @@ func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result,
 			return nil, fmt.Errorf("set owner password: %w", err)
 		}
 	}
-	// The owner is the operator who configures the product; peer conversations are
-	// part of it, and only an owner can grant the access to anyone else.
+	// Only an owner can grant peer access to anyone else, so the first one gets it.
 	if err := svc.SetPeerAccess(ctx, t.ID, admin.ID, true); err != nil {
 		return nil, fmt.Errorf("grant peer access: %w", err)
 	}
@@ -81,26 +82,21 @@ func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result,
 	return res, nil
 }
 
-// Bootstrap creates spec's tenant only when no tenant exists yet, so restarts and
+// Bootstrap creates spec's tenant only while no tenant exists, so restarts and
 // extra replicas are no-ops. done reports whether this call created it.
-//
-// The empty-table condition is deliberately coarse: it makes bootstrap a
-// first-run convenience for platforms with no shell, not a management API. Adding
-// a second tenant is sild-admin's job.
 func Bootstrap(ctx context.Context, svc *domain.Service, st store.Store, spec TenantSpec) (res *Result, done bool, err error) {
 	if strings.TrimSpace(spec.Name) == "" {
 		return nil, false, nil // not configured
 	}
-	// Cheap check first, so the common case — every restart after the first — costs
-	// one SELECT instead of a lease round-trip.
-	if ids, err := st.Tenants().AllIDs(ctx); err != nil || len(ids) > 0 {
+	empty, err := noTenants(ctx, st)
+	if err != nil || !empty {
 		return nil, false, err
 	}
-	err = store.RunExclusive(ctx, st.Leases(), LeaseBootstrap, func(ctx context.Context) error {
-		// Re-check under the lease: another replica may have bootstrapped between
-		// our start and our turn.
-		ids, err := st.Tenants().AllIDs(ctx)
-		if err != nil || len(ids) > 0 {
+	// Skip rather than wait when another replica holds the lease: this runs before
+	// the listener binds, and blocking here would fail the startup probe.
+	_, err = store.RunLeased(ctx, st.Leases(), leaseBootstrap, leaseTTL, func(ctx context.Context) error {
+		empty, err := noTenants(ctx, st) // another replica may have won the race
+		if err != nil || !empty {
 			return err
 		}
 		res, err = Tenant(ctx, svc, spec)
@@ -113,23 +109,23 @@ func Bootstrap(ctx context.Context, svc *domain.Service, st store.Store, spec Te
 	return res, done, nil
 }
 
-// validate rejects a spec that would fail partway through provisioning. It
-// duplicates the domain's own rules deliberately: the domain enforces them per
-// call, and this needs them all to hold before the first call.
+func noTenants(ctx context.Context, st store.Store) (bool, error) {
+	exists, err := st.Tenants().Exists(ctx)
+	return !exists, err
+}
+
 func (s TenantSpec) validate() error {
-	if strings.TrimSpace(s.Name) == "" {
-		return fmt.Errorf("tenant name is required")
-	}
 	if strings.TrimSpace(s.AdminEmail) == "" {
 		return fmt.Errorf("admin email is required")
 	}
-	if s.AdminPassword != "" && len(s.AdminPassword) < domain.MinPasswordLen {
-		return fmt.Errorf("admin password must be at least %d characters", domain.MinPasswordLen)
+	if s.AdminPassword == "" {
+		return nil
 	}
-	return nil
+	return domain.ValidatePassword(s.AdminPassword)
 }
 
-func splitName(full string) (first, last string) {
+// SplitName splits a display name into first and last parts.
+func SplitName(full string) (first, last string) {
 	first, last, _ = strings.Cut(strings.TrimSpace(full), " ")
 	return first, strings.TrimSpace(last)
 }

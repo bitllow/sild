@@ -27,7 +27,7 @@ func main() {
 		if err := km.EnsureActiveKey(ctx); err != nil { // bootstrap JWT signing key
 			return err
 		}
-		log.Printf("sild-api: listening on %s (driver=%s)", cfg.HTTPAddr, cfg.DB.Driver)
+		log.Printf("sild-api: listening on %s (driver=%s)", cfg.ListenAddr(), cfg.DB.Driver)
 		return srv.Run(ctx)
 	})
 	if err != nil {

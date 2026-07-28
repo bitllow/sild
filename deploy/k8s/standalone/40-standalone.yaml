@@ -2,11 +2,8 @@
 # :8080, with the webhook relay and archive sweep in-process and lease-guarded.
 # Replaces 30-api / 31-ws / 32-worker; 20-migrate still owns the schema (§4).
 #
-# fsGroup 65532 matches the distroless "nonroot" uid/gid so the uploads volume is
-# writable. That volume is a node-local hostPath, and sild-config asserts
-# STORAGE_LOCAL_SHARED=true — true at one replica on one node, and false as soon as
-# a second pod lands elsewhere. config.Validate believes the assertion, so read the
-# README and move to STORAGE_BACKEND=gcs/s3 before raising replicas.
+# Read the README before raising replicas: the uploads hostPath is node-local, and
+# nothing will catch that for you. fsGroup 65532 is the distroless nonroot uid.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,8 +30,7 @@ spec:
           env:
             - { name: SILD_HTTP_ADDR, value: ":8080" }
             - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
-            # Safe on any replica count: both are lease-guarded. Set to "" to keep
-            # this Deployment purely serving and run the jobs elsewhere.
+            # Safe on any replica count: both are lease-guarded. "" serves only.
             - { name: SILD_JOBS, value: "webhook,archive" }
           ports:
             - { containerPort: 8080, name: http }

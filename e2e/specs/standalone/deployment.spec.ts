@@ -2,13 +2,9 @@ import { test, expect } from "@playwright/test";
 import { BACKEND_URL, uid } from "../../support/env";
 import { BOOTSTRAP, runAdmin } from "../../support/standalone";
 
-// What this project covers is the DEPLOYMENT, not the product: one process on one
-// port, a production posture, a way in on a fresh database, and an operator CLI
-// that reaches the same database. The product behaviour that runs on top is
-// covered by the inbox/widget/cross projects against the same handler code.
-//
-// It boots sild-standalone against Postgres + Redis, because those are what the
-// binary requires — see playwright.config.ts.
+// Covers the DEPLOYMENT, not the product: one process on one port, a production
+// posture, a way in on a fresh database, and a CLI that reaches the same store.
+// The product behaviour on top is covered by the inbox/widget/cross projects.
 
 test.describe("one listener", () => {
   test("serves REST, health and the realtime transport on the same port", async ({ request }) => {
@@ -33,8 +29,8 @@ test.describe("one listener", () => {
 
 test.describe("production posture", () => {
   test("serves none of the dev surfaces", async ({ request }) => {
-    // Each of these is a real hole if it ships: a login that needs no
-    // credentials, a token mint that needs no API key, tenant ids for the asking.
+    // Each is a real hole if it ships: a login needing no credentials, a token
+    // mint needing no API key, tenant ids for the asking.
     for (const path of [
       "/sild-demo",
       "/v1/dev/app-id",
@@ -56,10 +52,8 @@ test.describe("bootstrap", () => {
     });
     expect(login.ok(), "bootstrap owner can sign in").toBeTruthy();
 
-    // Production posture: the session cookie is HttpOnly and Secure, so it is not
-    // readable from JS and never travels over plain HTTP. That is also why the
-    // request below carries it explicitly — this suite runs without TLS, and a
-    // real deployment terminates it at the edge.
+    // Secure means the cookie never travels over plain HTTP, which is why the
+    // request below carries it explicitly — this suite runs without TLS.
     const setCookie = login.headers()["set-cookie"] ?? "";
     expect(setCookie, "session cookie is issued").toContain("sild_admin=");
     expect(setCookie).toContain("HttpOnly");
@@ -84,9 +78,8 @@ test.describe("bootstrap", () => {
 });
 
 test.describe("sild-admin", () => {
-  // The CLI is the documented way to create a tenant on every platform. It runs
-  // as a separate process against the same database as the serving one, so this
-  // also proves the two agree on the schema they were given by sild-migrate.
+  // A separate process against the same database as the serving one, so this also
+  // proves the two agree on the schema sild-migrate gave them.
   test("creates a tenant whose API key works against the running server", async ({ request }) => {
     const name = uid("Acme");
     const out = runAdmin(["tenant", "create", "--name", name, "--admin-email", `${name}@acme.test`]);
@@ -111,8 +104,7 @@ test.describe("sild-admin", () => {
     });
     expect(own.ok(), "the tenant reads its own conversation").toBeTruthy();
 
-    // A CLI-minted key is a TENANT key, not a cross-tenant one: a second tenant's
-    // key must not reach the first tenant's conversation.
+    // A CLI-minted key is a tenant key: another tenant's must not reach this one.
     const other = uid("Other");
     const otherOut = runAdmin([
       "tenant", "create", "--name", other, "--admin-email", `${other}@acme.test`,
