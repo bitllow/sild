@@ -39,39 +39,24 @@ const (
 
 // RunSweep archives every tenant, once per cluster: a worker that cannot take
 // the lease skips this tick rather than duplicating the pass. ran reports
-// whether this worker did the sweep.
+// whether this worker did the sweep. The lease is heartbeated for the whole
+// sweep, so a pass longer than sweepLeaseTTL keeps its single owner.
 func (j *Job) RunSweep(ctx context.Context, limit int) (archived int, ran bool, err error) {
-	owner := id.New(id.Holder)
-	ok, err := j.store.Leases().Acquire(ctx, sweepLease, owner, sweepLeaseTTL)
-	if err != nil || !ok {
-		return 0, false, err
-	}
-	defer func() { _ = j.store.Leases().Release(context.WithoutCancel(ctx), sweepLease, owner) }()
-
-	tenants, err := j.store.Tenants().AllIDs(ctx)
-	if err != nil {
-		return 0, true, err
-	}
-	for i, t := range tenants {
-		// A fleet-wide sweep can outlast the lease, so renew as it goes and stop if
-		// we have lost it — carrying on would be the overlapping sweep the lease
-		// exists to prevent. The first tenant is covered by the lease just taken.
-		if i > 0 {
-			held, aerr := j.store.Leases().Acquire(ctx, sweepLease, owner, sweepLeaseTTL)
-			if aerr != nil {
-				return archived, true, aerr
-			}
-			if !held {
-				return archived, true, nil
+	ran, err = store.RunLeased(ctx, j.store.Leases(), sweepLease, sweepLeaseTTL, func(ctx context.Context) error {
+		tenants, terr := j.store.Tenants().AllIDs(ctx)
+		if terr != nil {
+			return terr
+		}
+		for _, t := range tenants {
+			n, rerr := j.RunOnce(ctx, t, limit)
+			archived += n
+			if rerr != nil {
+				return rerr
 			}
 		}
-		n, rerr := j.RunOnce(ctx, t, limit)
-		if rerr != nil {
-			return archived, true, rerr
-		}
-		archived += n
-	}
-	return archived, true, nil
+		return nil
+	})
+	return archived, ran, err
 }
 
 // RunOnce archives up to `limit` eligible conversations for a tenant and returns
@@ -84,6 +69,11 @@ func (j *Job) RunOnce(ctx context.Context, tenantID string, limit int) (int, err
 	}
 	archived := 0
 	for i := range convs {
+		// One conversation failing must not stop the batch, but a cancelled context
+		// must: under RunSweep that is the lease going to another worker.
+		if err := ctx.Err(); err != nil {
+			return archived, err
+		}
 		if err := j.archiveOne(ctx, &convs[i]); err == nil {
 			archived++
 		}

@@ -193,9 +193,9 @@ func TestWaiterRunsTheWorkWhenTheHolderFails(t *testing.T) {
 	}
 }
 
-// Renewal is what a long job leans on: the archive sweep re-acquires between
-// tenants so a pass longer than the TTL keeps its lease instead of lapsing into
-// an overlapping second sweep.
+// Renewal is what a long job leans on: RunLeased heartbeats in the background so
+// a pass longer than the TTL keeps its lease instead of lapsing into an
+// overlapping second pass.
 func TestRenewalExtendsTheExpiry(t *testing.T) {
 	ctx := context.Background()
 	st, db := sqliteStore(t)
@@ -217,5 +217,91 @@ func TestRenewalExtendsTheExpiry(t *testing.T) {
 	}
 	if !expiry().After(before) {
 		t.Fatal("renewing did not push the expiry out, so a long job still lapses")
+	}
+}
+
+// A second worker does not queue behind the holder: it skips the turn. The
+// archive sweep depends on this — a duplicated pass adds nothing.
+func TestRunLeasedSkipsWhenHeld(t *testing.T) {
+	ctx := context.Background()
+	st, _ := sqliteStore(t)
+	name := id.New("lease")
+
+	if ok, _ := st.Leases().Acquire(ctx, name, "worker-a", time.Minute); !ok {
+		t.Fatal("acquire")
+	}
+	var runs atomic.Int32
+	ran, err := store.RunLeased(ctx, st.Leases(), name, time.Minute, func(context.Context) error {
+		runs.Add(1)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunLeased: %v", err)
+	}
+	if ran || runs.Load() != 0 {
+		t.Fatalf("ran while another worker held the lease: ran=%v runs=%d", ran, runs.Load())
+	}
+}
+
+// The heartbeat is the point: work that outlives its TTL keeps the lease, so no
+// second worker starts an overlapping pass underneath it.
+func TestRunLeasedHeartbeatOutlivesTheTTL(t *testing.T) {
+	ctx := context.Background()
+	st, _ := sqliteStore(t)
+	name := id.New("lease")
+	const ttl = 150 * time.Millisecond
+
+	var stolen atomic.Bool
+	ran, err := store.RunLeased(ctx, st.Leases(), name, ttl, func(ctx context.Context) error {
+		time.Sleep(4 * ttl) // without renewal the lease has lapsed by now
+		ok, aerr := st.Leases().Acquire(ctx, name, "worker-b", time.Minute)
+		stolen.Store(ok)
+		return aerr
+	})
+	if err != nil || !ran {
+		t.Fatalf("RunLeased: ran=%v err=%v", ran, err)
+	}
+	if stolen.Load() {
+		t.Fatal("the lease lapsed mid-run, so a second worker could sweep in parallel")
+	}
+}
+
+// Losing the lease has to reach the work: past that point another worker is
+// entitled to start, so the run must be cut short rather than carry on.
+func TestRunLeasedCancelsAndReportsWhenTheLeaseIsLost(t *testing.T) {
+	ctx := context.Background()
+	st, db := sqliteStore(t)
+	name := id.New("lease")
+	const ttl = 150 * time.Millisecond
+
+	var observed atomic.Bool
+	ran, err := store.RunLeased(ctx, st.Leases(), name, ttl, func(runCtx context.Context) error {
+		// Another worker takes the lease while this run is still going.
+		if uerr := db.Model(&models.JobLease{}).Where("name = ?", name).
+			Updates(map[string]any{"owner": "worker-b", "expires_at": time.Now().Add(time.Hour)}).Error; uerr != nil {
+			return uerr
+		}
+		select {
+		case <-runCtx.Done():
+			observed.Store(true)
+		case <-time.After(10 * time.Second):
+		}
+		return nil
+	})
+	if !ran {
+		t.Fatal("the work never ran")
+	}
+	if !observed.Load() {
+		t.Fatal("the work was not cancelled when the lease went to another worker")
+	}
+	if !errors.Is(err, store.ErrLeaseLost) {
+		t.Fatalf("a lost lease was reported as %v, want ErrLeaseLost", err)
+	}
+	var l models.JobLease
+	if derr := db.First(&l, "name = ?", name).Error; derr != nil {
+		t.Fatalf("read lease: %v", derr)
+	}
+	if l.Owner != "worker-b" {
+		t.Fatalf("the superseded run released the new holder's lease (owner=%q)", l.Owner)
 	}
 }
