@@ -29,8 +29,8 @@ func (r *tenantRepo) AllIDs(ctx context.Context) ([]string, error) {
 	return ids, err
 }
 
-// List orders by id, which is time-ordered and already the primary key — so this
-// needs no sort and no index on created_at.
+// List orders by id: the primary key, and time-ordered to the millisecond, so it
+// needs no sort node and no index on created_at.
 func (r *tenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
 	var ts []models.Tenant
 	err := r.db.WithContext(ctx).Order("id").Find(&ts).Error

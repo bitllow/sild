@@ -153,7 +153,7 @@ func main() {
 		}()
 
 		// The same jobs, on the same schedule, as the deployed binaries.
-		selected, err := jobs.Parse(cfg.Jobs.Enabled)
+		selected, err := jobs.Parse(devJobs(cfg))
 		if err != nil {
 			return err
 		}
@@ -165,6 +165,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("sild-dev: %v", err)
 	}
+}
+
+// devJobs keeps `make dev` non-destructive: the relay only, since the archive
+// sweep purges hot rows. SILD_JOBS opts in.
+func devJobs(cfg *config.Config) string {
+	if _, set := os.LookupEnv("SILD_JOBS"); set {
+		return cfg.Jobs.Enabled
+	}
+	return jobs.Webhook
 }
 
 // devSeed creates a ready-to-use tenant + owner admin + API key on first run so
