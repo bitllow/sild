@@ -127,20 +127,26 @@ upload:
 	docker push $(REF)
 
 # `deploy` — apply the whole stack; re-run migrations against the current image.
+# Namespace, config and datastores first (the migration Job needs them), then the
+# schema, then the services — so nothing serves against a schema that is behind.
 deploy:
-	kubectl apply -f $(K8S_DIR)/
+	kubectl apply -f $(K8S_DIR)/00-namespace.yaml -f $(K8S_DIR)/05-config.yaml \
+	  -f $(K8S_DIR)/10-postgres.yaml -f $(K8S_DIR)/11-redis.yaml
 	kubectl -n $(NS) delete job sild-migrate --ignore-not-found
 	kubectl apply -f $(K8S_DIR)/20-migrate.yaml
+	kubectl -n $(NS) wait --for=condition=complete job/sild-migrate --timeout=300s
+	kubectl apply -f $(K8S_DIR)/
 
 # `update` — only swap the image on the package's Deployments (fast path). For
 # backend, also re-run the migration Job on the new image.
 update:
+	@if [ "$(PACKAGE)" = "backend" ]; then \
+	  kubectl -n $(NS) delete job sild-migrate --ignore-not-found; \
+	  sed 's#dmitri896/sild:backend#$(REF)#' $(K8S_DIR)/20-migrate.yaml | kubectl apply -f -; \
+	  kubectl -n $(NS) wait --for=condition=complete job/sild-migrate --timeout=300s; \
+	fi
 	@for d in $(DEPLOYS_$(PACKAGE)); do \
 	  echo "→ set image $$d = $(REF)"; \
 	  kubectl -n $(NS) set image deployment/$$d $$d=$(REF); \
 	done
-	@if [ "$(PACKAGE)" = "backend" ]; then \
-	  kubectl -n $(NS) delete job sild-migrate --ignore-not-found; \
-	  sed 's#dmitri896/sild:backend#$(REF)#' $(K8S_DIR)/20-migrate.yaml | kubectl apply -f -; \
-	fi
 	@for d in $(DEPLOYS_$(PACKAGE)); do kubectl -n $(NS) rollout status deployment/$$d --timeout=180s; done

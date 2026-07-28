@@ -372,9 +372,11 @@ func TestListQueueFilters(t *testing.T) {
 				r := seedRow{i: i, lastAct: base.Add(time.Duration(i) * time.Minute), created: base}
 				seedQueueRow(t, st, tenant, r)
 				if i >= 3 {
-					a, _ := st.Assignments().Get(ctx, tenant, r.assignID(tenant))
-					a.Status = models.AssignmentClosed
-					if err := st.Assignments().Update(ctx, a); err != nil {
+					closed := store.AssignmentTransition{
+						From: []models.AssignmentStatus{models.AssignmentQueued, models.AssignmentAssigned},
+						To:   models.AssignmentClosed,
+					}
+					if _, err := st.Assignments().Transition(ctx, tenant, r.assignID(tenant), closed); err != nil {
 						t.Fatalf("close: %v", err)
 					}
 				}

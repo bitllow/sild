@@ -5,7 +5,12 @@
 // easy-install path). Production overrides DB_DRIVER/DB_DSN etc.
 package config
 
-import "github.com/caarlos0/env/v11"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/caarlos0/env/v11"
+)
 
 // Driver identifies the SQL dialect. The store and search layers branch on it.
 type Driver string
@@ -79,6 +84,12 @@ type Storage struct {
 	// unset, which is fine for a single dev node and wrong for a fleet — set it
 	// in any deployment running more than one replica.
 	SigningKey string `env:"STORAGE_SIGNING_KEY"`
+	// LocalShared asserts that LocalDir is the SAME storage on every replica (a
+	// shared volume, or a single node). The signing key only makes replicas agree
+	// on URLs — the bytes still live wherever they were written, so without this
+	// a second replica answers 404 for the first's uploads. Production will not
+	// run on the local backend unless an operator states this explicitly.
+	LocalShared bool `env:"STORAGE_LOCAL_SHARED" envDefault:"false"`
 }
 
 // Archive selects the cold-storage sink (§12).
@@ -105,5 +116,37 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// Validate rejects configurations that are silently wrong above one replica.
+// Each of these fails invisibly at runtime — realtime that reaches half the
+// users, uploads that 404 on the wrong node — so production refuses to start
+// instead. Development keeps the zero-config defaults.
+func (c *Config) Validate() error {
+	if c.Env != "production" {
+		return nil
+	}
+	var bad []string
+	if c.Realtime.Broker != "redis" {
+		bad = append(bad, "SILD_BROKER must be redis: the memory broker is per-process, so events published by one replica never reach clients connected to another")
+	}
+	if c.DB.Driver == SQLite {
+		bad = append(bad, "DB_DRIVER must be postgres or mysql: sqlite is single-node")
+	}
+	if c.Storage.Backend == "local" {
+		if c.Storage.SigningKey == "" {
+			bad = append(bad, "STORAGE_SIGNING_KEY must be set with STORAGE_BACKEND=local: a per-process key makes every other replica reject the URLs this one signs")
+		}
+		if !c.Storage.LocalShared {
+			bad = append(bad, "STORAGE_BACKEND=local stores attachment bytes on the node that received them, so another replica answers 404 for them: use gcs/s3, or set STORAGE_LOCAL_SHARED=true to assert STORAGE_LOCAL_DIR is one shared volume across every replica")
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return fmt.Errorf("invalid production config:\n  - %s", strings.Join(bad, "\n  - "))
 }

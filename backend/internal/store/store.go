@@ -31,4 +31,5 @@ type Store interface {
 	Email() EmailRepo
 	Archives() ArchiveRepo
 	Brands() BrandRepo
+	Leases() LeaseRepo
 }

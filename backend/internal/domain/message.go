@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/realtime"
@@ -72,12 +71,8 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	}
 
 	// Idempotency (§4.2): a repeat client_msg_id returns the original.
-	if in.ClientMsgID != nil && *in.ClientMsgID != "" {
-		if existing, err := s.store.Messages().FindByClientMsgID(ctx, tenantID, convID, *in.ClientMsgID); err == nil {
-			return existing, nil
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return nil, err
-		}
+	if existing, ok := s.findByClientMsgID(ctx, tenantID, convID, in.ClientMsgID); ok {
+		return existing, nil
 	}
 
 	atts, err := s.resolveAttachments(ctx, tenantID, in.Attachments)
@@ -93,6 +88,11 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		Attachments: atts,
 	}
 	if err := s.store.Messages().Create(ctx, msg); err != nil {
+		// A concurrent retry of the same client_msg_id lost the race to the unique
+		// index; the winner's message is the answer both callers must get.
+		if existing, ok := s.findByClientMsgID(ctx, tenantID, convID, in.ClientMsgID); ok {
+			return existing, nil
+		}
 		return nil, err
 	}
 
@@ -121,6 +121,21 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}
 	return msg, nil
+}
+
+// findByClientMsgID resolves an idempotency key to the message it already
+// created. A lookup failure other than not-found is treated as "no original":
+// the caller is either about to insert (and will hit the unique index) or
+// already has the insert error worth reporting.
+func (s *Service) findByClientMsgID(ctx context.Context, tenantID, convID string, key *string) (*models.Message, bool) {
+	if key == nil || *key == "" {
+		return nil, false
+	}
+	existing, err := s.store.Messages().FindByClientMsgID(ctx, tenantID, convID, *key)
+	if err != nil {
+		return nil, false
+	}
+	return existing, true
 }
 
 // applyMessageActivity maintains the denormalized last-activity (timestamp +

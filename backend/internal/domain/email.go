@@ -6,6 +6,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/bitllow/sild/backend/internal/id"
 	"github.com/bitllow/sild/backend/internal/mail"
@@ -157,6 +158,12 @@ func (s *Service) ForwardedMailHandler() mail.Handler {
 		case err == nil:
 			log.Printf("sild-mail: dropped mail from %s to %s (spam filter)", in.From, in.Recipient)
 			return nil
+		case errors.Is(err, ErrAlreadyIngested):
+			log.Printf("sild-mail: mail to %s already ingested — acknowledging the redelivery", in.Recipient)
+			return nil
+		case errors.Is(err, ErrIngestInFlight):
+			log.Printf("sild-mail: mail to %s is being ingested by another delivery — asking for a retry", in.Recipient)
+			return err // transient: that attempt may still fail
 		case errors.Is(err, ErrNotFound):
 			log.Printf("sild-mail: dropped mail to %s (no tenant for that forwarding address)", in.Recipient)
 			return nil
@@ -174,15 +181,50 @@ func (s *Service) ForwardedMailHandler() mail.Handler {
 // auto-reply acknowledgement when a new conversation was opened (§6.2). Shared
 // by the provider webhook (HandleInbound) and the forwarding daemon.
 func (s *Service) ingestAndNotify(ctx context.Context, cfg *models.TenantEmailConfig, in mail.InboundEmail) (*models.Message, error) {
+	// Mail carrying no Message-ID cannot be deduped, so it is always ingested.
+	mid := headerValue(in.Headers, "Message-Id")
+	var owner string
+	if mid != "" {
+		claim, err := s.store.Email().ClaimIngest(ctx, cfg.TenantID, mid, ingestClaimStale)
+		switch {
+		case err != nil:
+			return nil, err
+		case claim.Done:
+			return nil, ErrAlreadyIngested
+		case claim.InFlight:
+			// Another attempt holds it and may still fail. Acknowledging now would
+			// tell the sender we have the mail before anyone has stored it, so ask
+			// for a retry instead.
+			return nil, ErrIngestInFlight
+		}
+		owner = claim.Owner
+	}
 	msg, created, err := s.ingest(ctx, cfg.TenantID, in)
 	if err != nil {
+		// The claim must not outlive a failed attempt, or the MTA's retry would be
+		// refused as a duplicate and the mail lost.
+		if owner != "" {
+			_ = s.store.Email().ReleaseIngest(ctx, cfg.TenantID, mid, owner)
+		}
 		return nil, err
+	}
+	if owner != "" {
+		// Only a completed claim refuses a redelivery; until now it was provisional,
+		// so a crash mid-ingest leaves the mail redeliverable.
+		if cerr := s.store.Email().CompleteIngest(ctx, cfg.TenantID, mid, owner); cerr != nil {
+			log.Printf("email: claim %s left incomplete: %v", mid, cerr)
+		}
 	}
 	if created && cfg.AutoReply {
 		s.sendAutoReply(ctx, cfg, msg.ConversationID, in.From)
 	}
 	return msg, nil
 }
+
+// ingestClaimStale bounds how long a claim may sit unfinished before another
+// delivery may take it. Longer than any ingest (a few bucket uploads), short
+// enough that an MTA retry after a crash still lands.
+const ingestClaimStale = 10 * time.Minute
 
 // ingest binds the email to an existing OPEN conversation by sender + normalized
 // subject, or creates a new one. The bool reports whether a new conversation was

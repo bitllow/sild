@@ -1,6 +1,9 @@
-# Schema migration (AutoMigrate then exit). Runs once per deploy before the
-# services roll — `make deploy`/`make update PACKAGE=backend` delete+recreate it
-# so it re-runs against the freshly pushed image. ttl cleans up the finished pod.
+# Schema migration (AutoMigrate then exit). The ONLY thing that changes the
+# schema — no serving binary migrates (ARCHITECTURE §4). `make deploy` /
+# `make update PACKAGE=backend` delete+recreate it against the freshly pushed
+# image and WAIT for it before rolling the services, so the new schema is in
+# place first and the old release meets it while still running. ttl cleans up
+# the finished pod.
 apiVersion: batch/v1
 kind: Job
 metadata:

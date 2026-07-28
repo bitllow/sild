@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/config"
+	"github.com/bitllow/sild/backend/internal/id"
 	"github.com/bitllow/sild/backend/internal/store/gormstore"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"gorm.io/gorm"
@@ -84,8 +85,9 @@ func TestMigrateDoesNotReclassifyAssignmentless(t *testing.T) {
 			// An assignment-less conversation, classified support (the AutoMigrate
 			// default), carrying no assignment — exactly what the removed backfill
 			// used to promote to peer.
+			bare := id.New(id.Conversation) // fresh: the dialect DBs persist between runs
 			if err := db.Create(&models.Conversation{
-				ID: "c_bare", TenantID: "t1", Status: models.ConversationOpen,
+				ID: bare, TenantID: "t1", Status: models.ConversationOpen,
 				Kind: models.KindSupport, CreatedAt: time.Now(),
 			}).Error; err != nil {
 				t.Fatalf("insert: %v", err)
@@ -96,7 +98,7 @@ func TestMigrateDoesNotReclassifyAssignmentless(t *testing.T) {
 			}
 
 			var kind string
-			if err := db.Raw("SELECT kind FROM conversations WHERE id = ?", "c_bare").Scan(&kind).Error; err != nil {
+			if err := db.Raw("SELECT kind FROM conversations WHERE id = ?", bare).Scan(&kind).Error; err != nil {
 				t.Fatalf("read kind: %v", err)
 			}
 			if kind != string(models.KindSupport) {

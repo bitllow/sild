@@ -47,7 +47,7 @@ docker compose up -d        # postgres + redis + api + ws + worker + migrate
 | `sild-api` | REST API (§4), stateless |
 | `sild-ws` | Centrifuge WS/SSE egress (§5), holds connections |
 | `sild-worker` | webhook relay, archival, (push/email) — `--jobs` selects |
-| `sild-migrate` | AutoMigrate + dialect index hook, then exits |
+| `sild-migrate` | AutoMigrate + dialect index hook, then exits — the **only** thing that changes the schema (ARCHITECTURE §4) |
 
 ## Tests
 
@@ -63,3 +63,12 @@ Everything is env-driven with SQLite defaults — see
 [`backend/.env.example`](backend/.env.example). Key knobs: `DB_DRIVER`
 (postgres|mysql|sqlite), `DB_DSN`, `SILD_BROKER` (memory|redis),
 `STORAGE_BACKEND` (local|gcs|s3), `ARCHIVE_SINK` (gcs_json|s3_json|bigquery).
+
+With `SILD_ENV=production` the defaults that are single-node are refused at
+boot: `SILD_BROKER` must be `redis` (the memory broker never leaves the
+process), `DB_DRIVER` must not be `sqlite`, and `STORAGE_BACKEND=local` needs an
+explicit `STORAGE_SIGNING_KEY` every replica shares.
+
+One knob stays per-replica by design: the rate limiter
+(`middleware/ratelimit.go`) counts in-process, so N replicas allow N× the
+configured rate. It blunts brute force; it is not a fleet-wide quota.

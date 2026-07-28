@@ -70,6 +70,21 @@ type EmailThread struct {
 	LastMessageID  string `gorm:"size:40"`
 }
 
+// EmailIngest records one already-ingested inbound mail, keyed on its RFC-5322
+// Message-ID. An MTA that redelivers after a transient failure — or two replicas
+// behind one MX — would otherwise open a second conversation for the same mail.
+type EmailIngest struct {
+	TenantID  string `gorm:"primaryKey;size:40"`
+	MessageID string `gorm:"primaryKey;size:255"`
+	// An incomplete claim goes stale and is retryable, so a process that died
+	// mid-ingest cannot turn the MTA's redelivery into a mail-losing "duplicate".
+	// Owner names the attempt holding it, so a superseded attempt cannot complete
+	// or release the claim that replaced it.
+	Owner       string `gorm:"size:40"`
+	ClaimedAt   time.Time
+	CompletedAt *time.Time
+}
+
 // Upload is the ownership/validation record for a direct-to-bucket upload
 // (review finding). An attachment may only reference a completed upload owned by
 // the caller's tenant.

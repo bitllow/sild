@@ -11,6 +11,14 @@ var (
 	ErrConflict   = errors.New("conflict")
 	ErrForbidden  = errors.New("forbidden")
 	ErrValidation = errors.New("validation")
+	// ErrAlreadyIngested reports an inbound email whose Message-ID was already
+	// ingested. Callers acknowledge it as success — the mail is not lost, it is
+	// already a conversation.
+	ErrAlreadyIngested = errors.New("already ingested")
+	// ErrIngestInFlight reports that another delivery of the same mail is being
+	// ingested right now. Transient: the sender must retry, because that attempt
+	// may still fail and nobody has stored the mail yet.
+	ErrIngestInFlight = errors.New("ingest in flight")
 )
 
 // ValidationError carries a human message for a 400.
@@ -34,6 +42,7 @@ func (e *ConflictError) Unwrap() error { return ErrConflict }
 // Conflict codes. These are API surface.
 const (
 	CodeAssignmentAlreadyClosed = "assignment_already_closed"
+	CodeAssignmentAlreadyTaken  = "assignment_already_taken"
 	CodeConversationClosed      = "conversation_closed"
 	CodeLastMemberRemoval       = "last_member_removal"
 	CodePeerNotQueueable        = "peer_not_queueable"

@@ -37,6 +37,10 @@ spec:
             # token mint + demo host page behave, even against the shared DB.
             - { name: SILD_ENV, value: "development" }
             - { name: SILD_HTTP_ADDR, value: ":8080" }
+            # This pod shares the deployment's Postgres, so it must NOT migrate:
+            # the schema belongs to the sild-migrate Job (ARCHITECTURE §4) and a
+            # demo restart mid-rollout would otherwise race an operator.
+            - { name: SILD_DEV_MIGRATE, value: "false" }
             - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
             - { name: STORAGE_PUBLIC_URL, value: "https://sild.bitllow.com" }
           ports:

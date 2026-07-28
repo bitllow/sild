@@ -29,6 +29,36 @@ func NewJob(st store.Store, sink Sink, cfg *config.Config) *Job {
 // SetClock overrides the clock (tests).
 func (j *Job) SetClock(fn func() time.Time) { j.now = fn }
 
+// sweepLease names the cluster-wide lease for a full sweep, and bounds how long
+// one worker may hold it. Without it, every replica sweeps every tenant on its
+// own ticker and the passes overlap.
+const (
+	sweepLease    = "archive-sweep"
+	sweepLeaseTTL = 30 * time.Minute
+)
+
+// RunSweep archives every tenant, once per cluster: a worker that cannot take
+// the lease skips this tick rather than duplicating the pass. ran reports
+// whether this worker did the sweep. The lease is heartbeated for the whole
+// sweep, so a pass longer than sweepLeaseTTL keeps its single owner.
+func (j *Job) RunSweep(ctx context.Context, limit int) (archived int, ran bool, err error) {
+	ran, err = store.RunLeased(ctx, j.store.Leases(), sweepLease, sweepLeaseTTL, func(ctx context.Context) error {
+		tenants, terr := j.store.Tenants().AllIDs(ctx)
+		if terr != nil {
+			return terr
+		}
+		for _, t := range tenants {
+			n, rerr := j.RunOnce(ctx, t, limit)
+			archived += n
+			if rerr != nil {
+				return rerr
+			}
+		}
+		return nil
+	})
+	return archived, ran, err
+}
+
 // RunOnce archives up to `limit` eligible conversations for a tenant and returns
 // the count archived. Eligibility: status=closed AND idle past idleDays (§12).
 func (j *Job) RunOnce(ctx context.Context, tenantID string, limit int) (int, error) {
@@ -39,6 +69,11 @@ func (j *Job) RunOnce(ctx context.Context, tenantID string, limit int) (int, err
 	}
 	archived := 0
 	for i := range convs {
+		// One conversation failing must not stop the batch, but a cancelled context
+		// must: under RunSweep that is the lease going to another worker.
+		if err := ctx.Err(); err != nil {
+			return archived, err
+		}
 		if err := j.archiveOne(ctx, &convs[i]); err == nil {
 			archived++
 		}

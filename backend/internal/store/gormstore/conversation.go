@@ -271,8 +271,27 @@ func (r *assignmentRepo) GetByConversation(ctx context.Context, tenantID, convID
 	return &a, nil
 }
 
-func (r *assignmentRepo) Update(ctx context.Context, a *models.Assignment) error {
-	return r.db.WithContext(ctx).Save(a).Error
+// Transition writes the new state guarded by the expected current one, so the
+// database decides the winner when two agents act on the same assignment at
+// once. Zero rows affected means the row already moved on.
+func (r *assignmentRepo) Transition(ctx context.Context, tenantID, id string, t store.AssignmentTransition) (bool, error) {
+	updates := map[string]any{"status": t.To}
+	switch {
+	case t.ClearAssignee:
+		updates["assignee_actor_id"] = nil
+	case t.Assignee != nil:
+		updates["assignee_actor_id"] = *t.Assignee
+	}
+	if t.ClosedAt != nil {
+		updates["closed_at"] = *t.ClosedAt
+	}
+	res := r.db.WithContext(ctx).Model(&models.Assignment{}).
+		Where("id = ? AND tenant_id = ? AND status IN ?", id, tenantID, t.From).
+		Updates(updates)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 // CountQueue counts the representative (latest) assignment per conversation,

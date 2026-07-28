@@ -29,8 +29,9 @@ type Claims struct {
 // KeyManager mints and verifies user JWTs and serves JWKS, backed by signing
 // keys in the store. Public keys are cached by kid (immutable once created).
 type KeyManager struct {
-	keys store.SigningKeyRepo
-	cfg  config.Auth
+	keys   store.SigningKeyRepo
+	leases store.LeaseRepo
+	cfg    config.Auth
 
 	mu     sync.RWMutex
 	pubCar map[string]*ecdsa.PublicKey
@@ -38,28 +39,50 @@ type KeyManager struct {
 
 // NewKeyManager constructs a KeyManager. dig provides it.
 func NewKeyManager(st store.Store, cfg *config.Config) *KeyManager {
-	return &KeyManager{keys: st.SigningKeys(), cfg: cfg.Auth, pubCar: map[string]*ecdsa.PublicKey{}}
+	return &KeyManager{keys: st.SigningKeys(), leases: st.Leases(), cfg: cfg.Auth, pubCar: map[string]*ecdsa.PublicKey{}}
 }
 
 // EnsureActiveKey bootstraps a signing key if none exists (rotation-friendly).
+// Replicas booting together take a lease first, so a cold start mints one key
+// rather than one per replica.
 func (m *KeyManager) EnsureActiveKey(ctx context.Context) error {
-	if _, err := m.keys.Active(ctx); err == nil {
-		return nil
-	} else if !errors.Is(err, store.ErrNotFound) {
+	has, err := m.hasActiveKey(ctx)
+	if err != nil || has {
 		return err
 	}
-	priv, pub, err := GenerateES256()
-	if err != nil {
-		return err
-	}
-	return m.keys.Create(ctx, &models.SigningKey{
-		Kid:        id.New("sk"),
-		Algorithm:  "ES256",
-		PrivatePEM: priv,
-		PublicPEM:  pub,
-		Active:     true,
-		CreatedAt:  time.Now(),
+	return store.RunExclusive(ctx, m.leases, store.LeaseSigningKey, func(ctx context.Context) error {
+		// Another replica may have minted one before we took the lease.
+		has, err := m.hasActiveKey(ctx)
+		if err != nil || has {
+			return err
+		}
+		priv, pub, err := GenerateES256()
+		if err != nil {
+			return err
+		}
+		return m.keys.Create(ctx, &models.SigningKey{
+			Kid:        id.New("sk"),
+			Algorithm:  "ES256",
+			PrivatePEM: priv,
+			PublicPEM:  pub,
+			Active:     true,
+			CreatedAt:  time.Now(),
+		})
 	})
+}
+
+// hasActiveKey separates "no key yet" from a broken lookup: treating a database
+// failure as an absent key would mint a second active key on top of the first.
+func (m *KeyManager) hasActiveKey(ctx context.Context) (bool, error) {
+	_, err := m.keys.Active(ctx)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, store.ErrNotFound):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // Mint issues a user JWT for sub within tenant tid (§2.3).

@@ -219,7 +219,7 @@ install — not a hidden behavior.
 
 ### Migrations
 
-> **Decision:** **AutoMigrate + a dialect index hook.**
+> **Decision:** **AutoMigrate + a dialect index hook, run only on demand.**
 
 `gormstore.Migrate(db)`:
 1. `db.AutoMigrate(models.All()...)` — builds every table on any dialect.
@@ -230,8 +230,48 @@ install — not a hidden behavior.
    - **sqlite** → none (LIKE path).
 
 No SQL files to maintain by hand. Versioned migrations (golang-migrate) can be
-introduced before the first production deploy if schema-change auditing is
-needed; AutoMigrate covers development and the OSS install path until then.
+introduced later if schema-change auditing is needed.
+
+> **Decision:** **schema changes are an operator action, never a side effect of
+> starting a process.**
+
+`sild-migrate` is the only way a deployment's schema changes. `sild-api`,
+`sild-ws`, `sild-worker` and `sild-mail` never migrate — they start against
+whatever schema is already there, and fail loudly if it is wrong. Two exceptions,
+both outside a deployment: `sild-dev` (one process, a throwaway SQLite file, the
+zero-infra path) and the test harness.
+
+This is what makes a rollout controllable: the schema moves when an operator runs
+one command, so the window where old and new code share a database is a decision
+rather than a race between whichever pod booted first.
+
+### Schema changes are backward compatible
+
+A rollout always has both releases live at once. Every schema change must
+therefore be safe for the code **already running**, not only for the code that
+needs it. The rules, in the order they bite:
+
+1. **Migrate first, then roll code.** The new schema has to be harmless to the
+   old release, because the old release meets it first.
+2. **Additive only.** Add nullable columns, new tables, new indexes. Never drop,
+   rename, or narrow a column in the release that ships the code changing how it
+   is used. Removal is a later, separate release, once nothing running references
+   it.
+3. **New columns are nullable or defaulted.** Old code inserts without them.
+4. **Never add a value to a column that running code filters on.** Old code's
+   `WHERE status = 'pending'` silently stops matching rows moved to a status it
+   has never heard of, and that work strands with no error anywhere. Put new
+   state in **new columns old code ignores** instead. The webhook outbox claim is
+   the worked example: it locks rows with `claim_token` + `locked_until` and
+   leaves `status` alone, so a relay from the previous release still sees them.
+5. **Rollback is rolling back code, not schema.** There are no down migrations.
+   The previous release must run against the new schema unchanged — which
+   follows from 2 and 4, and is the reason they are not negotiable.
+6. **A new guarantee starts when the last old process exits.** A guarded write
+   (see the assignment claim, §5) cannot bind a replica still running the
+   unguarded version. During the window the behavior is the old behavior; what
+   the rules above buy is that nothing is *corrupted* or *stranded* in the
+   meantime.
 
 ---
 

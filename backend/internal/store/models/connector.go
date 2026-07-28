@@ -49,6 +49,10 @@ type Outbox struct {
 	Attempts       int            `gorm:"not null;default:0"`
 	AvailableAt    time.Time      `gorm:"index"` // next eligible send time (backoff)
 	CreatedAt      time.Time
+	// The relay that holds this row, and until when. New columns rather than a new
+	// `status` value, so the previous release still sees the row (ARCHITECTURE §4).
+	ClaimToken  *string `gorm:"size:40;index"`
+	LockedUntil *time.Time
 }
 
 func (o *Outbox) BeforeCreate(*gorm.DB) error {
