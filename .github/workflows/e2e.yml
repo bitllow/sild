@@ -180,3 +180,94 @@ jobs:
             e2e/playwright-report/
             e2e/test-results/
           retention-days: 7
+
+  # The deployment suite: boots `sild-standalone` — the whole backend in one
+  # process on one port — and asserts the shape a customer deploys. Its own job
+  # because the binary is a production one: it requires Postgres AND Redis, has no
+  # dev seed, and serves none of sild-dev's surfaces.
+  e2e-standalone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sild
+          POSTGRES_PASSWORD: sild
+          POSTGRES_DB: sild
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sild"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The widget bundle is embedded at compile time, and standalone serves it.
+      - name: Build widget bundle
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build backend
+        working-directory: backend
+        run: go build ./...
+
+      - name: Install e2e
+        working-directory: e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      # webServer[] runs sild-migrate (the only thing that migrates, §4) and then
+      # sild-standalone against the services above.
+      - name: Run standalone deployment tests
+        working-directory: e2e
+        run: npm run test:standalone
+        env:
+          CI: "1"
+          SILD_E2E_SKIP_BUILD: "1"
+          SILD_E2E_DB_DSN: "host=localhost port=5432 user=sild password=sild dbname=sild sslmode=disable"
+          SILD_E2E_REDIS_URL: "redis://localhost:6379"
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-standalone
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7

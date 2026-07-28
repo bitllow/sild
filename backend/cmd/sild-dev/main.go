@@ -18,12 +18,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/connector/webhook"
 	"github.com/bitllow/sild/backend/internal/di"
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/jobs"
 	"github.com/bitllow/sild/backend/internal/mail"
+	"github.com/bitllow/sild/backend/internal/provision"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/server"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -46,6 +49,7 @@ func main() {
 	err = c.Invoke(func(
 		cfg *config.Config, db *gorm.DB, km *auth.KeyManager, svc *domain.Service,
 		srv *server.Server, node *realtime.Node, relay *webhook.Relay, st store.Store,
+		sweep *archive.Job,
 	) error {
 		// Dev-only exception to "only sild-migrate migrates" (ARCHITECTURE §4).
 		// SILD_DEV_MIGRATE=false wherever this shares a database with a deployment.
@@ -148,21 +152,14 @@ func main() {
 			}
 		}()
 
-		// Background webhook relay (in-process worker).
-		go func() {
-			t := time.NewTicker(5 * time.Second)
-			defer t.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					_, _ = relay.ProcessOnce(ctx, 100)
-				}
-			}
-		}()
+		// The same jobs, on the same schedule, as the deployed binaries.
+		selected, err := jobs.Parse(devJobs(cfg))
+		if err != nil {
+			return err
+		}
+		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
 
-		log.Printf("sild-dev: REST+WS on %s (db=%s, broker=%s) — Ctrl-C to stop", cfg.HTTPAddr, cfg.DB.Driver, cfg.Realtime.Broker)
+		log.Printf("sild-dev: REST+WS on %s (db=%s, broker=%s, jobs=%v) — Ctrl-C to stop", cfg.ListenAddr(), cfg.DB.Driver, cfg.Realtime.Broker, selected.Names())
 		return srv.Run(ctx)
 	})
 	if err != nil {
@@ -170,47 +167,42 @@ func main() {
 	}
 }
 
+// devJobs keeps `make dev` non-destructive: the relay only, since the archive
+// sweep purges hot rows. SILD_JOBS opts in.
+func devJobs(cfg *config.Config) string {
+	if _, set := os.LookupEnv("SILD_JOBS"); set {
+		return cfg.Jobs.Enabled
+	}
+	return jobs.Webhook
+}
+
 // devSeed creates a ready-to-use tenant + owner admin + API key on first run so
 // you can log into the inbox (email/password) and call the API immediately.
 func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *config.Config) {
-	ids, err := st.Tenants().AllIDs(ctx)
-	if err != nil || len(ids) > 0 {
-		if len(ids) > 0 {
+	res, done, err := provision.Bootstrap(ctx, svc, st, provision.TenantSpec{
+		Name: "Dev Tenant", AdminEmail: "admin@sild.local", AdminName: "Eva Marleen",
+		AdminPassword: "password123", APIKeyLabel: "dev",
+	})
+	if err != nil {
+		log.Printf("dev seed: %v", err)
+		return
+	}
+	if !done { // already seeded
+		if ids, err := st.Tenants().AllIDs(ctx); err == nil && len(ids) > 0 {
 			if ch, err := svc.GetEmailChannel(ctx, ids[0]); err == nil {
 				log.Printf("sild-dev: forward email to %s (SMTP %s) to open a conversation", ch.ForwardingAddress, cfg.Email.SMTPListenAddr)
 			}
 		}
-		return // already seeded
-	}
-	t := &models.Tenant{Name: "Dev Tenant", MaxAttachmentBytes: 10 << 20}
-	if err := st.Tenants().Create(ctx, t); err != nil {
-		log.Printf("dev seed: %v", err)
 		return
 	}
-	admin, err := svc.InviteAgent(ctx, t.ID, "admin@sild.local", "Eva", "Marleen", models.PlatformOwner)
-	if err != nil {
-		log.Printf("dev seed admin: %v", err)
-		return
-	}
-	_ = svc.SetAdminPassword(ctx, t.ID, admin.ID, "password123")
-	_ = svc.SetPeerAccess(ctx, t.ID, admin.ID, true) // owner sees the peer surface out of the box
-	key, _, err := svc.CreateAPIKey(ctx, t.ID, "dev")
-	if err != nil {
-		log.Printf("dev seed key: %v", err)
-		return
-	}
-	devSeedConversations(ctx, svc, t.ID, admin.ID)
-	devSeedPeerConversations(ctx, svc, t.ID, admin.ID)
-	fwd := ""
-	if ch, err := svc.GetEmailChannel(ctx, t.ID); err == nil {
-		fwd = ch.ForwardingAddress
-	}
+	devSeedConversations(ctx, svc, res.TenantID, res.AdminID)
+	devSeedPeerConversations(ctx, svc, res.TenantID, res.AdminID)
 	log.Printf("┌─ dev seed ────────────────────────────────────────────")
-	log.Printf("│ tenant_id : %s", t.ID)
+	log.Printf("│ tenant_id : %s", res.TenantID)
 	log.Printf("│ admin     : admin@sild.local / password123  (POST /v1/admin/auth/password)")
-	log.Printf("│ api key   : %s", key)
+	log.Printf("│ api key   : %s", res.APIKey)
 	log.Printf("│ inbox     : sample support requests + contact history seeded")
-	log.Printf("│ email in  : forward to %s (SMTP %s)", fwd, cfg.Email.SMTPListenAddr)
+	log.Printf("│ email in  : forward to %s (SMTP %s)", res.ForwardingAddress, cfg.Email.SMTPListenAddr)
 	log.Printf("└───────────────────────────────────────────────────────")
 }
 

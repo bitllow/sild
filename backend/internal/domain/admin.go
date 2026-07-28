@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -59,10 +60,21 @@ func (s *Service) CreateSessionWithPassword(ctx context.Context, email, password
 	return "", time.Time{}, ErrForbidden // no matching credential
 }
 
+const minPasswordLen = 8
+
+// ValidatePassword applies the password rule. Exported for callers that must
+// check before they start writing, so the rule and its wording have one home.
+func ValidatePassword(password string) error {
+	if len(password) < minPasswordLen {
+		return invalid(fmt.Sprintf("password must be at least %d characters", minPasswordLen))
+	}
+	return nil
+}
+
 // SetAdminPassword sets/updates an admin's password (Settings → Team).
 func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, password string) error {
-	if len(password) < 8 {
-		return invalid("password must be at least 8 characters")
+	if err := ValidatePassword(password); err != nil {
+		return err
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
@@ -74,10 +86,8 @@ func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, passw
 // SetAdminRole updates an admin's platform role (Settings → Team, §7). Caller rules
 // live in api.guardOwnerMutation; the last-owner invariant below holds for all paths.
 func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole) error {
-	switch role {
-	case models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent:
-	default:
-		return invalid("invalid platform role")
+	if err := validPlatformRole(role); err != nil {
+		return err
 	}
 	// A tenant must keep an owner: only owners can grant peer access or appoint
 	// another owner, so demoting the last one locks the tenant out irreversibly.
@@ -91,6 +101,16 @@ func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, ro
 		}
 	}
 	return mapStoreErr(s.store.Admins().SetRole(ctx, tenantID, adminID, role))
+}
+
+// validPlatformRole rejects a role outside the §7 set: one no permission check
+// matches would store an operator who can do nothing.
+func validPlatformRole(role models.PlatformRole) error {
+	switch role {
+	case models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent:
+		return nil
+	}
+	return invalid("invalid platform role")
 }
 
 // hasOtherOwner reports whether another owner exists. Rosters are small, so this
@@ -161,6 +181,9 @@ func (s *Service) InviteAgent(ctx context.Context, tenantID, email, first, last 
 	}
 	if role == "" {
 		role = models.PlatformAgent
+	}
+	if err := validPlatformRole(role); err != nil {
+		return nil, err
 	}
 	a := &models.AdminUser{TenantID: tenantID, Email: email, FirstName: first, LastName: last, PlatformRole: role, CreatedAt: s.now()}
 	if err := s.store.Admins().Create(ctx, a); err != nil {

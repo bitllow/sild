@@ -1,0 +1,64 @@
+# The whole backend in one process (§3a packaging): REST + /v1/ws + /v1/ws/sse on
+# :8080, with the webhook relay and archive sweep in-process and lease-guarded.
+# Replaces 30-api / 31-ws / 32-worker; 20-migrate still owns the schema (§4).
+#
+# Read the README before raising replicas: the uploads hostPath is node-local, and
+# nothing will catch that for you. fsGroup 65532 is the distroless nonroot uid.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sild-standalone
+  namespace: sild
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sild-standalone }
+  template:
+    metadata:
+      labels: { app: sild-standalone }
+    spec:
+      securityContext:
+        fsGroup: 65532
+      containers:
+        - name: sild-standalone
+          image: dmitri896/sild:backend
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/sild-standalone"]
+          envFrom:
+            - configMapRef: { name: sild-config }
+            - secretRef: { name: sild-secrets }
+          env:
+            - { name: SILD_HTTP_ADDR, value: ":8080" }
+            - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
+            # Safe on any replica count: both are lease-guarded. "" serves only.
+            - { name: SILD_JOBS, value: "webhook,archive" }
+          ports:
+            - { containerPort: 8080, name: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - { name: uploads, mountPath: /data/uploads }
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 768Mi }
+      volumes:
+        - name: uploads
+          hostPath:
+            path: /data/sild-uploads
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sild-standalone
+  namespace: sild
+spec:
+  selector: { app: sild-standalone }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

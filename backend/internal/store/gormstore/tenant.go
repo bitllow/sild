@@ -29,6 +29,20 @@ func (r *tenantRepo) AllIDs(ctx context.Context) ([]string, error) {
 	return ids, err
 }
 
+// List orders by id: the primary key, and time-ordered to the millisecond, so it
+// needs no sort node and no index on created_at.
+func (r *tenantRepo) List(ctx context.Context) ([]models.Tenant, error) {
+	var ts []models.Tenant
+	err := r.db.WithContext(ctx).Order("id").Find(&ts).Error
+	return ts, err
+}
+
+func (r *tenantRepo) Exists(ctx context.Context) (bool, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&models.Tenant{}).Limit(1).Pluck("id", &ids).Error
+	return len(ids) > 0, err
+}
+
 func (r *tenantRepo) SearchableKeys(ctx context.Context, tenantID string) ([]string, error) {
 	var keys []string
 	err := r.db.WithContext(ctx).Model(&models.TenantSearchableKey{}).

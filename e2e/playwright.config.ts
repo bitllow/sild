@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
+import { STANDALONE_ENV } from "./support/standalone";
 
 // The two product surfaces both talk to one zero-infra `sild-dev` backend.
 export const INBOX_URL = process.env.SILD_E2E_INBOX_URL || "http://localhost:3000";
@@ -22,6 +23,10 @@ process.env.SILD_E2E_DB_DRIVER = DB_DRIVER;
 const isCI = !!process.env.CI;
 // Opt-in browser-code coverage (inbox client JS) via monocart. See fixtures.
 const COVERAGE = process.env.E2E_COVERAGE === "1";
+
+// Opt-in: run the deployment suite against `sild-standalone` (production binary,
+// needs Postgres AND Redis) instead of the product suites against `sild-dev`.
+const STANDALONE = process.env.SILD_E2E_STANDALONE === "1";
 
 // The widget bundle is embedded into the Go backend at COMPILE time
 // (`//go:embed widget.js`), so it must be rebuilt BEFORE `go run` compiles.
@@ -53,6 +58,34 @@ if (COVERAGE) {
   ]);
 }
 
+// The standalone deployment suite: one project, one backend, no inbox — it
+// asserts the deployment shape, not the UI.
+const standaloneProjects: NonNullable<import("@playwright/test").PlaywrightTestConfig["projects"]> = [
+  {
+    name: "standalone",
+    testDir: "./specs/standalone",
+    use: { ...devices["Desktop Chrome"], baseURL: BACKEND_URL },
+  },
+];
+
+// sild-migrate owns the schema everywhere (§4) and standalone refuses to migrate,
+// so it runs first. The widget bundle is built ahead of `go run` because it is
+// embedded at compile time (see SKIP_BUILD above).
+const standaloneServers: NonNullable<import("@playwright/test").PlaywrightTestConfig["webServer"]> = [
+  {
+    command:
+      (SKIP_BUILD ? "" : "(cd ../web && node build.mjs) && ") +
+      "go run ./cmd/sild-migrate && go run ./cmd/sild-standalone",
+    cwd: "../backend",
+    url: `${BACKEND_URL}/healthz`,
+    reuseExistingServer: !isCI,
+    timeout: 180_000,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...(process.env as Record<string, string>), ...STANDALONE_ENV },
+  },
+];
+
 export default defineConfig({
   testDir: "./specs",
   // The widget bundle is (re)built as the first step of the backend command
@@ -79,7 +112,9 @@ export default defineConfig({
     actionTimeout: 15_000,
   },
 
-  projects: [
+  projects: STANDALONE
+    ? standaloneProjects
+    : [
     // Logs the admin in once and saves the session cookie for the inbox/cross
     // projects. Runs first via `dependencies`.
     { name: "setup", testDir: "./setup", testMatch: /admin\.setup\.ts/ },
@@ -105,7 +140,9 @@ export default defineConfig({
     },
   ],
 
-  webServer: [
+  webServer: STANDALONE
+    ? standaloneServers
+    : [
     {
       // Zero-infra dev backend: SQLite (fresh temp file) + in-memory broker +
       // in-process worker/SMTP. NOT `make dev` (that uses Postgres/Redis).

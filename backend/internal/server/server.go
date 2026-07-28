@@ -58,7 +58,7 @@ func (s *Server) registerHealth() {
 // Run starts the HTTP server and blocks until the context is cancelled, then
 // shuts down gracefully.
 func (s *Server) Run(ctx context.Context) error {
-	srv := &http.Server{Addr: s.cfg.HTTPAddr, Handler: s.engine}
+	srv := &http.Server{Addr: s.cfg.ListenAddr(), Handler: s.engine}
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
