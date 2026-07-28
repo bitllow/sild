@@ -54,12 +54,18 @@ jobs:
 
       # Boot sild-dev (SQLite + in-memory broker) so the core integration tests
       # have a backend at :8080; wait for /healthz before running them.
+      - name: Build sild-dev
+        working-directory: backend
+        # Separate from the start step so a compile error reads as one, and so the
+        # health budget below waits for startup rather than for linking.
+        run: go build -o /tmp/sild-dev ./cmd/sild-dev
+
       - name: Start sild-dev
         working-directory: backend
         run: |
           DB_DRIVER=sqlite DB_DSN=/tmp/sild-android-ci.db SILD_BROKER=memory \
             STORAGE_BACKEND=local SILD_ENV=development \
-            go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
+            /tmp/sild-dev > /tmp/sild-dev.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://localhost:8080/healthz && { healthy=1; break; }
             sleep 1
@@ -122,12 +128,18 @@ jobs:
 
       # The simulator shares the runner's network, so the tests reach sild-dev on
       # localhost exactly as the JVM ones do.
+      - name: Build sild-dev
+        working-directory: backend
+        # Separate from the start step so a compile error reads as one, and so the
+        # health budget below waits for startup rather than for linking.
+        run: go build -o /tmp/sild-dev ./cmd/sild-dev
+
       - name: Start sild-dev
         working-directory: backend
         run: |
           DB_DRIVER=sqlite DB_DSN=/tmp/sild-ios-ci.db SILD_BROKER=memory \
             STORAGE_BACKEND=local SILD_ENV=development \
-            go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
+            /tmp/sild-dev > /tmp/sild-dev.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://localhost:8080/healthz && { healthy=1; break; }
             sleep 1
@@ -286,12 +298,18 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Build sild-dev
+        working-directory: backend
+        # Separate from the start step so a compile error reads as one, and so the
+        # health budget below waits for startup rather than for linking.
+        run: go build -o /tmp/sild-dev ./cmd/sild-dev
+
       - name: Start sild-dev
         working-directory: backend
         run: |
           DB_DRIVER=sqlite DB_DSN=/tmp/sild-android-e2e.db SILD_BROKER=memory \
             STORAGE_BACKEND=local SILD_ENV=development \
-            go run ./cmd/sild-dev > /tmp/sild-dev.log 2>&1 &
+            /tmp/sild-dev > /tmp/sild-dev.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://localhost:8080/healthz && { healthy=1; break; }
             sleep 1
