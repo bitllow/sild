@@ -241,7 +241,10 @@ install — not a hidden behavior.
 
 > **Decision:** **AutoMigrate + a dialect index hook, run only on demand.**
 
-`gormstore.Migrate(db)`:
+`gormstore.Migrate(db)`, holding a dialect advisory lock (`pg_advisory_lock` /
+`GET_LOCK`) so two migrators against one database queue instead of issuing
+concurrent DDL — not the `job_leases` table, whose row lives in the schema being
+built, and whose expiry would hand the lock to a second migrator mid-DDL:
 1. `db.AutoMigrate(models.All()...)` — builds every table on any dialect.
 2. `applyDialectIndexes(db)` — branches on `db.Dialector.Name()`:
    - **postgres** → `CREATE EXTENSION pg_trgm`; `GIN (… gin_trgm_ops)` on
