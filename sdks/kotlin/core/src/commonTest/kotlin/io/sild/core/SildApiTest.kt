@@ -191,6 +191,28 @@ class SildApiTest {
             "the second call resumes from the last id received, not from the original",
         )
     }
+
+    @Test fun listMessagesPagesBackwardThroughTheCursor() = runBlockingTest {
+        val api = api(
+            { ok("""{"items":[{"id":"m3"},{"id":"m4"}],"next_cursor":"cur_m3","has_more":true}""") },
+            { ok("""{"items":[{"id":"m1"},{"id":"m2"}],"next_cursor":null,"has_more":false}""") },
+        )
+
+        val newest = api.listMessages("c1")
+        assertEquals(listOf("m3", "m4"), newest.items.map { it.id })
+        assertEquals("cur_m3", newest.nextCursor)
+        assertTrue(newest.hasMore, "has_more survives decoding — without it there is nothing to load")
+
+        val older = api.listMessages("c1", newest.nextCursor)
+        assertEquals(listOf("m1", "m2"), older.items.map { it.id })
+        assertTrue(!older.hasMore)
+
+        assertEquals("/v1/conversations/c1/messages?limit=100", path(0))
+        assertEquals(
+            "/v1/conversations/c1/messages?limit=100&cursor=cur_m3", path(1),
+            "the second call carries the cursor the first page returned",
+        )
+    }
 }
 
 // Local-dev storage is rewritten onto our base (an emulator reaches the host at

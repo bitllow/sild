@@ -136,6 +136,9 @@ data class SildState(
     val activeId: String? = null,
     val messages: List<Message> = emptyList(),
     val loadingThread: Boolean = false,
+    /** Cursor for the next page of OLDER messages; null when the thread is whole. */
+    val olderCursor: String? = null,
+    val loadingOlder: Boolean = false,
     val soundOn: Boolean = true,
     /** The support agent's display name learned from incoming messages. */
     val agentName: String? = null,

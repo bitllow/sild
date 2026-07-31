@@ -14,6 +14,28 @@ import { expect } from "@playwright/test";
 // `admin` is the authenticated agent request context (carries the session cookie
 // via storageState), i.e. the same credentials the inbox uses.
 
+// 3. Bulk thread history — posts [count] messages as the agent. Order is NOT
+//    guaranteed across the workers, so callers anchor on a message they created
+//    themselves rather than on an index.
+export async function seedManyMessages(
+  admin: APIRequestContext,
+  conversationId: string,
+  count: number,
+  label: string
+): Promise<void> {
+  const concurrency = 8; // SQLite serializes writers; a wider fan-out only contends
+  let next = 0;
+  const post = async () => {
+    for (let i = next++; i < count; i = next++) {
+      const res = await admin.post(`/v1/conversations/${conversationId}/messages`, {
+        data: { body: `${label} #${i}`, client_msg_id: `${label}-${i}` },
+      });
+      expect(res.ok(), `seed message ${i}`).toBeTruthy();
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, post));
+}
+
 export async function closeAssignmentForConversation(
   admin: APIRequestContext,
   conversationId: string
