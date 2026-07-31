@@ -339,10 +339,13 @@ jobs:
       # match is silently impossible, which is why the emulator survived and the
       # action's own teardown then burned the step's whole budget. The pattern is
       # bracketed so it does not match the `sh -c` running it.
+      #
+      # The timeout bounds the wedged teardown, not the work — boot + gradle + tests is
+      # ~2.5 minutes on a warm AVD cache.
       - name: Run instrumented E2E
         id: android_e2e
         continue-on-error: true
-        timeout-minutes: 12
+        timeout-minutes: 8
         env:
           ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: "5"
         uses: reactivecircus/android-emulator-runner@v2
@@ -352,9 +355,12 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
+          # Default is 600s — above this step's ceiling, so it never fires and a boot
+          # failure costs the whole budget instead of reporting itself.
+          emulator-boot-timeout: 240
           working-directory: sdks/kotlin
           script: |
-            ./gradlew :sample:connectedDebugAndroidTest && touch /tmp/android-e2e-passed
+            ./gradlew :sample:connectedDebugAndroidTest; echo $? > /tmp/android-e2e-status
             pkill -x sild-dev || true
             pkill -9 -f '[q]emu-system-x86_64' || true
 
@@ -388,12 +394,18 @@ jobs:
           print(f"{total} tests, {failed} failed")
           PY
 
-      # The real gate: teardown flakiness cannot make a red suite look green,
-      # and cannot make a green suite look red.
+      # The real gate: teardown flakiness cannot make a red suite look green, and
+      # cannot make a green suite look red. No status file means gradle never ran to
+      # completion, which is a different failure from a suite that ran and failed.
       - name: Assert instrumented E2E passed
         run: |
-          if [ ! -f /tmp/android-e2e-passed ]; then
-            echo "::error::instrumented tests did not pass"
+          status=$(cat /tmp/android-e2e-status 2>/dev/null || true)
+          if [ -z "$status" ]; then
+            echo "::error::gradle never finished — the emulator failed to boot or the step timed out. Look for adb errors above, not at the test results."
+            exit 1
+          fi
+          if [ "$status" != 0 ]; then
+            echo "::error::the instrumented run failed (gradle exit $status) — see the results above"
             cat /tmp/sild-dev.log || true
             exit 1
           fi
