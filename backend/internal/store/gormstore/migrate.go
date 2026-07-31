@@ -1,29 +1,76 @@
 package gormstore
 
 import (
-	"encoding/json"
-	"time"
+	"context"
+	"database/sql"
+	"fmt"
 
 	"github.com/bitllow/sild/backend/internal/config"
-	"github.com/bitllow/sild/backend/internal/id"
 	"github.com/bitllow/sild/backend/internal/store/models"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 // Migrate builds the schema on any dialect via AutoMigrate, then applies the
-// dialect-specific search indexes (ARCHITECTURE §4). Idempotent.
+// dialect-specific search indexes (ARCHITECTURE §4). Idempotent, and serialized
+// across processes: two overlapping deploys wait for each other instead of issuing
+// concurrent DDL against the same tables.
 func Migrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(models.All()...); err != nil {
-		return err
+	return withMigrationLock(db, func(db *gorm.DB) error {
+		if err := db.AutoMigrate(models.All()...); err != nil {
+			return err
+		}
+		if err := backfillLastActivity(db); err != nil {
+			return err
+		}
+		return applyDialectIndexes(db)
+	})
+}
+
+// Lock identity: arbitrary, but must stay stable across releases. Postgres takes an
+// int64, MySQL a string.
+const (
+	migrationLockKey  = 8265168776373
+	migrationLockName = "sild_schema_migration"
+	// Seconds MySQL waits for the holder, kept under the deploy's own 300s wait for
+	// the migration Job so a queued migrator still finishes inside it.
+	migrationLockWait = 120
+)
+
+// withMigrationLock runs fn holding a cluster-wide lock. Both dialect locks are
+// session-scoped, so one dedicated connection holds it while fn keeps using the pool.
+func withMigrationLock(db *gorm.DB, fn func(*gorm.DB) error) error {
+	dialect := Dialect(db)
+	if dialect == config.SQLite {
+		return fn(db) // one file, one writer; no advisory lock exists
 	}
-	if err := backfillLastActivity(db); err != nil {
-		return err
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("migration lock connection: %w", err)
 	}
-	if err := restoreArchivedConversations(db); err != nil {
-		return err
+	ctx := context.Background()
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("migration lock connection: %w", err)
 	}
-	return applyDialectIndexes(db)
+	defer conn.Close()
+
+	switch dialect {
+	case config.Postgres:
+		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+			return fmt.Errorf("take migration lock: %w", err)
+		}
+		defer conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+	case config.MySQL:
+		var got sql.NullInt64
+		if err := conn.QueryRowContext(ctx, `SELECT GET_LOCK(?, ?)`, migrationLockName, migrationLockWait).Scan(&got); err != nil {
+			return fmt.Errorf("take migration lock: %w", err)
+		}
+		if got.Int64 != 1 {
+			return fmt.Errorf("another migration held the lock for %ds", migrationLockWait)
+		}
+		defer conn.ExecContext(ctx, `SELECT RELEASE_LOCK(?)`, migrationLockName)
+	}
+	return fn(db)
 }
 
 // backfillLastActivity derives the denormalized conversation columns
@@ -50,75 +97,6 @@ func backfillLastActivity(db *gorm.DB) error {
 		ORDER BY m.created_at DESC, m.id DESC LIMIT 1)
 		WHERE (last_message_preview IS NULL OR last_message_preview = '')
 		  AND last_message_at IS NOT NULL`).Error
-}
-
-// restoreArchivedConversations rebuilds the conversation + membership rows for
-// conversations archived before archival began retaining them. Their hot rows were
-// deleted, so without this every read of them 404s and their contacts vanish.
-//
-// The tombstone carries the durable kind and a membership snapshot; the restored
-// rows are marked archived_at so the archive read path still routes to the sink.
-// Idempotent: both inserts skip conversations that already have a row.
-func restoreArchivedConversations(db *gorm.DB) error {
-	if err := db.Exec(`INSERT INTO conversations (id, tenant_id, status, kind, created_at, archived_at)
-		SELECT a.conversation_id, a.tenant_id, 'closed', a.kind, a.archived_at, a.archived_at
-		FROM conversation_archives a
-		WHERE NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = a.conversation_id)`).Error; err != nil {
-		return err
-	}
-
-	type tomb struct {
-		ConversationID  string
-		TenantID        string
-		MembersSnapshot []byte
-		ArchivedAt      time.Time
-	}
-	var tombs []tomb
-	if err := db.Table("conversation_archives a").
-		Select("a.conversation_id, a.tenant_id, a.members_snapshot, a.archived_at").
-		Where(`NOT EXISTS (SELECT 1 FROM conversation_members m
-			WHERE m.conversation_id = a.conversation_id)`).
-		Scan(&tombs).Error; err != nil {
-		return err
-	}
-
-	for _, t := range tombs {
-		var snap []struct {
-			MemberKind      string          `json:"member_kind"`
-			ConvRole        string          `json:"conv_role"`
-			ExternalUserID  *string         `json:"external_user_id"`
-			InternalActorID *string         `json:"internal_actor_id"`
-			Metadata        json.RawMessage `json:"metadata"`
-			JoinedAt        *time.Time      `json:"joined_at"`
-		}
-		if len(t.MembersSnapshot) == 0 {
-			continue
-		}
-		if err := json.Unmarshal(t.MembersSnapshot, &snap); err != nil {
-			continue // an unreadable snapshot must not block the migration
-		}
-		for _, m := range snap {
-			joined := t.ArchivedAt
-			if m.JoinedAt != nil {
-				joined = *m.JoinedAt
-			}
-			row := models.ConversationMember{
-				ID:              id.New(id.Member),
-				TenantID:        t.TenantID,
-				ConversationID:  t.ConversationID,
-				MemberKind:      models.MemberKind(m.MemberKind),
-				ConvRole:        models.ConvRole(m.ConvRole),
-				ExternalUserID:  m.ExternalUserID,
-				InternalActorID: m.InternalActorID,
-				Metadata:        datatypes.JSON(m.Metadata),
-				JoinedAt:        joined,
-			}
-			if err := db.Create(&row).Error; err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // applyDialectIndexes adds the search indexes that AutoMigrate can't express:
