@@ -11,18 +11,13 @@ import kotlinx.coroutines.cancel
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
-// The ?since= catch-up is covered at the API layer, but nothing exercised the TRIGGER:
-// the CONNECTED transition that fires it. A regression that stopped catch-up happening
-// at all would leave messages sent during an outage invisible until the thread is
-// reopened — the exact bug it was added to fix — with every other test still green.
-//
-// The transport is injectable, so this drives the connection state directly instead of
-// needing an instrumented test with a real socket.
+// The transport is injectable, so the CONNECTED transition catch-up hangs off can be
+// driven directly rather than through a real socket.
 class SildClientReconnectTest {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val requests = mutableListOf<String>()
+    private val fake = FakeTransport()
 
     @AfterTest fun tearDown() {
         scope.cancel()
@@ -30,17 +25,19 @@ class SildClientReconnectTest {
 
     /** A transport that reports nothing on its own, so the test owns every transition. */
     private class FakeTransport : RealtimeTransport {
-        var onConnection: ((ConnectionState) -> Unit)? = null
+        var onConnection: (ConnectionState) -> Unit = {}
         override fun connect() {}
         override fun reconnect() {}
         override fun destroy() {}
     }
 
-    private fun client(routes: Map<String, String>, fake: FakeTransport): SildClient {
+    /** A client whose thread endpoint answers per ?since= value, not per path. */
+    private fun client(routes: Map<String, String>): SildClient {
         val engine = MockEngine { request ->
             val url = request.url
-            requests += url.encodedPath + (url.parameters["since"]?.let { "?since=$it" } ?: "")
-            val body = routes[url.encodedPath + (url.parameters["since"]?.let { "?since=$it" } ?: "")]
+            val key = url.encodedPath + (url.parameters["since"]?.let { "?since=$it" } ?: "")
+            requests += key
+            val body = routes[key]
                 ?: routes[url.encodedPath]
                 ?: when (url.encodedPath) {
                     "/v1/conversations" -> """{"items":[],"next_cursor":null,"has_more":false}"""
@@ -62,69 +59,38 @@ class SildClientReconnectTest {
         return SildClient(cfg, scope, {}, factory, SildApi(cfg, HttpClient(engine) { sildDefaults() }))
     }
 
-    private fun msg(id: String, at: String) =
-        """{"id":"$id","sender_kind":"user","external_user_id":"u_rider","body":"$id","created_at":"$at"}"""
+    private fun msg(n: Int) =
+        """{"id":"m$n","sender_kind":"user","external_user_id":"u_rider","body":"m$n","created_at":"2026-01-01T00:00:0${n}Z"}"""
 
-    @Test fun reconnectResumesFromTheLastMessageHeldAndAppendsTheGap() = runBlockingTest {
-        val fake = FakeTransport()
+    private fun page(vararg items: String, more: Boolean = false) =
+        """{"items":[${items.joinToString(",")}],"next_cursor":null,"has_more":$more}"""
+
+    // has_more means "call again with the last id you got".
+    @Test fun reconnectResumesFromTheLastMessageHeldAndDrainsEveryPage() = runBlockingTest {
         val client = client(
             mapOf(
-                "/v1/conversations/c1/messages" to
-                    """{"items":[${msg("m1", "2026-01-01T00:00:01Z")}],"next_cursor":null,"has_more":false}""",
-                "/v1/conversations/c1/messages?since=m1" to
-                    """{"items":[${msg("m2", "2026-01-01T00:00:02Z")},${msg("m3", "2026-01-01T00:00:03Z")}],"next_cursor":null,"has_more":false}""",
+                "/v1/conversations/c1/messages" to page(msg(1)),
+                "/v1/conversations/c1/messages?since=m1" to page(msg(2), more = true),
+                "/v1/conversations/c1/messages?since=m2" to page(msg(3)),
             ),
-            fake,
         )
 
         client.openConversation("c1")
         awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.messages.size == 1 }
 
-        // An outage, then the socket comes back — the transition catch-up hangs off.
-        fake.onConnection?.invoke(ConnectionState.CONNECTED)
-        fake.onConnection?.invoke(ConnectionState.DISCONNECTED)
-        requests.clear()
-        fake.onConnection?.invoke(ConnectionState.CONNECTED)
+        // The connection is IDLE until now, so returning to CONNECTED is the reconnect.
+        fake.onConnection(ConnectionState.DISCONNECTED)
+        fake.onConnection(ConnectionState.CONNECTED)
 
         val s = awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.messages.size == 3 }
         assertEquals(
             listOf("m1", "m2", "m3"), s.messages.map { it.id },
             "the gap is appended in order after what was already held",
         )
-        assertTrue(
-            requests.any { it == "/v1/conversations/c1/messages?since=m1" },
-            "catch-up resumed from the last id held, not from the start: $requests",
-        )
-    }
-
-    // has_more means "call again with the last id you got". Stopping after one page
-    // silently drops the remainder of a longer outage.
-    @Test fun reconnectDrainsEveryPageOfTheGap() = runBlockingTest {
-        val fake = FakeTransport()
-        val client = client(
-            mapOf(
-                "/v1/conversations/c1/messages" to
-                    """{"items":[${msg("m1", "2026-01-01T00:00:01Z")}],"next_cursor":null,"has_more":false}""",
-                "/v1/conversations/c1/messages?since=m1" to
-                    """{"items":[${msg("m2", "2026-01-01T00:00:02Z")}],"next_cursor":null,"has_more":true}""",
-                "/v1/conversations/c1/messages?since=m2" to
-                    """{"items":[${msg("m3", "2026-01-01T00:00:03Z")}],"next_cursor":null,"has_more":false}""",
-            ),
-            fake,
-        )
-
-        client.openConversation("c1")
-        awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.messages.size == 1 }
-
-        fake.onConnection?.invoke(ConnectionState.CONNECTED)
-        fake.onConnection?.invoke(ConnectionState.DISCONNECTED)
-        fake.onConnection?.invoke(ConnectionState.CONNECTED)
-
-        val s = awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.messages.size == 3 }
-        assertEquals(listOf("m1", "m2", "m3"), s.messages.map { it.id })
-        assertTrue(
-            requests.any { it == "/v1/conversations/c1/messages?since=m2" },
-            "the second page was requested from the last id of the first: $requests",
+        assertEquals(
+            listOf("/v1/conversations/c1/messages?since=m1", "/v1/conversations/c1/messages?since=m2"),
+            requests.filter { "since=" in it },
+            "catch-up resumed from the last id held, then from the last id of that page",
         )
     }
 }
