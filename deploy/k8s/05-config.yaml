@@ -16,9 +16,6 @@ data:
   # storage strands whichever of them wrote them.
   STORAGE_BACKEND: "gcs"
   STORAGE_BUCKET: "please-change-me-sild-uploads"
-  # Base URL for local-backend signed links (§11). Unused with STORAGE_BACKEND=gcs;
-  # the demo pod is the only local-backend consumer left.
-  STORAGE_PUBLIC_URL: "https://api.sild.bitllow.com"
   # JWT issuer advertised in the JWKS + minted tokens.
   SILD_JWT_ISSUER: "https://api.sild.bitllow.com"
   # Email ingest (§6.2): orgs forward support mail to <token>@mail.sild.bitllow.com.

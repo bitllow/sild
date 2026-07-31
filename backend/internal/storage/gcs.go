@@ -5,29 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"time"
 
 	gcs "cloud.google.com/go/storage"
 	"github.com/bitllow/sild/backend/internal/config"
-	"github.com/bitllow/sild/backend/internal/id"
 )
 
-// putTTL bounds a direct upload grant; getTTL is the fallback read window when a
-// caller asks for none.
-const (
-	putTTL = 15 * time.Minute
-	getTTL = 15 * time.Minute
-)
-
-// gcsBucket issues V4 signed URLs so bytes go direct to the bucket (§11).
-//
-// Credentials come from ADC and signing goes through the IAM SignBlob API, which
-// BucketHandle.SignedURL selects on its own when no private key is configured —
-// so a Cloud Run or GKE workload identity needs no key file, only
-// roles/iam.serviceAccountTokenCreator on its own service account.
+// gcsBucket issues V4 signed URLs so bytes go direct to the bucket (§11). With no
+// private key configured SignedURL signs via the IAM SignBlob API, so a workload
+// identity needs roles/iam.serviceAccountTokenCreator on its own service account
+// rather than a key file.
 type gcsBucket struct {
-	name   string
 	handle *gcs.BucketHandle
 	// sign is BucketHandle.SignedURL in production and a stub in tests, which
 	// have no credentials to sign with.
@@ -43,18 +31,16 @@ func newGCSBucket(cfg config.Storage) (Bucket, error) {
 		return nil, fmt.Errorf("gcs: %w", err)
 	}
 	handle := client.Bucket(cfg.Bucket)
-	return &gcsBucket{name: cfg.Bucket, handle: handle, sign: handle.SignedURL}, nil
+	return &gcsBucket{handle: handle, sign: handle.SignedURL}, nil
 }
 
-// NewObjectKey mirrors the local backend so a key is portable between backends.
 func (b *gcsBucket) NewObjectKey(tenantID, filename string) string {
-	return fmt.Sprintf("%s/%s/%s", tenantID, id.New("obj"), url.PathEscape(filename))
+	return newObjectKey(tenantID, filename)
 }
 
-// SignPut grants a direct PUT. The content type is part of the signature, so a
-// client that sends a different one is rejected by GCS rather than by us.
+// SignPut grants a direct PUT. The content type is part of the signature.
 func (b *gcsBucket) SignPut(_ context.Context, objectKey, mimeType string, _ int64) (SignedUpload, error) {
-	exp := time.Now().Add(putTTL)
+	exp := time.Now().Add(signTTL)
 	signed, err := b.sign(objectKey, &gcs.SignedURLOptions{
 		Scheme:      gcs.SigningSchemeV4,
 		Method:      "PUT",
@@ -69,7 +55,7 @@ func (b *gcsBucket) SignPut(_ context.Context, objectKey, mimeType string, _ int
 
 func (b *gcsBucket) SignGet(_ context.Context, objectKey string, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
-		ttl = getTTL
+		ttl = signTTL
 	}
 	signed, err := b.sign(objectKey, &gcs.SignedURLOptions{
 		Scheme:  gcs.SigningSchemeV4,

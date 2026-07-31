@@ -10,17 +10,16 @@ import (
 	"github.com/bitllow/sild/backend/internal/config"
 )
 
-// The signing tests use a stub, so nothing there drives the real GCS client. This
-// does: against fake-gcs-server (STORAGE_EMULATOR_HOST) it exercises the same
-// Put/Get code a deployment runs, including the not-found mapping the archive read
-// path depends on. Skipped when no emulator is configured.
+// Drives the real GCS client, which the signing tests stub out. Without
+// -public-host the emulator serves reads at a host the client cannot resolve, and
+// every Get comes back not-found.
 //
-//	docker run -p 4443:4443 fsouza/fake-gcs-server -scheme http -backend memory
+//	docker run -p 4443:4443 fsouza/fake-gcs-server \
+//	  -scheme http -backend memory -public-host localhost:4443
 //	STORAGE_EMULATOR_HOST=localhost:4443 go test ./internal/storage/
 func emulatorBucket(t *testing.T) Bucket {
 	t.Helper()
-	host := os.Getenv("STORAGE_EMULATOR_HOST")
-	if host == "" {
+	if os.Getenv("STORAGE_EMULATOR_HOST") == "" {
 		t.Skip("STORAGE_EMULATOR_HOST not set — no GCS emulator to test against")
 	}
 	const name = "sild-emulator-test"
@@ -57,8 +56,6 @@ func TestGCSPutGetRoundTrip(t *testing.T) {
 	}
 }
 
-// A missing object must be distinguishable from an unreachable bucket: the
-// archive read path shows "gone" for one and must not for the other (§12).
 func TestGCSGetMissingObjectIsNotFound(t *testing.T) {
 	bucket := emulatorBucket(t)
 

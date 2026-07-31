@@ -112,8 +112,8 @@ type Realtime struct {
 // Storage selects the attachment bucket backend (§11).
 type Storage struct {
 	Backend string `env:"STORAGE_BACKEND" envDefault:"local"` // local | gcs | s3
-	// Bucket carries no default: only the cloud backends read it, and a default
-	// would let STORAGE_BACKEND=gcs start against a bucket nobody named.
+	// No default: only the cloud backends read it, and one would let
+	// STORAGE_BACKEND=gcs start against a bucket nobody named.
 	Bucket    string `env:"STORAGE_BUCKET"`
 	Region    string `env:"STORAGE_REGION"`
 	LocalDir  string `env:"STORAGE_LOCAL_DIR" envDefault:"./.uploads"`

@@ -2,36 +2,19 @@ package archive_test
 
 import (
 	"context"
-	"os"
+	"strings"
 	"testing"
 
-	gcs "cloud.google.com/go/storage"
 	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/storage"
 )
 
-// ARCHIVE_SINK=gcs_json used to write to a local directory despite its name, so a
-// worker archived conversations into its own container and the tombstone pointed at
-// bytes nobody else could read. The sink now goes through storage.Bucket; this
-// drives it against a real GCS client (fake-gcs-server) to prove the object lands
-// in the bucket and rehydrates from it.
-//
-//	docker run -p 4443:4443 fsouza/fake-gcs-server -scheme http -backend memory
-//	STORAGE_EMULATOR_HOST=localhost:4443 go test ./internal/archive/
-func TestGCSJSONSinkRoundTripsThroughTheBucket(t *testing.T) {
-	if os.Getenv("STORAGE_EMULATOR_HOST") == "" {
-		t.Skip("STORAGE_EMULATOR_HOST not set — no GCS emulator to test against")
-	}
-	const name = "sild-archive-test"
-	client, err := gcs.NewClient(context.Background())
-	if err != nil {
-		t.Fatalf("emulator client: %v", err)
-	}
-	_ = client.Bucket(name).Create(context.Background(), "sild-test", nil)
-
+// The sink writes through storage.Bucket, so the object lands wherever
+// STORAGE_BACKEND points; storage/gcs_emulator_test.go covers the GCS client itself.
+func TestJSONSinkRoundTripsThroughTheBucket(t *testing.T) {
 	cfg := &config.Config{
-		Storage: config.Storage{Backend: "gcs", Bucket: name},
+		Storage: config.Storage{Backend: "local", LocalDir: t.TempDir()},
 		Archive: config.Archive{Sink: "gcs_json", IdleDays: 30},
 	}
 	bucket, err := storage.New(cfg)
@@ -56,8 +39,11 @@ func TestGCSJSONSinkRoundTripsThroughTheBucket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	if !strings.HasPrefix(ref, "archive/t_archive/") {
+		t.Fatalf("sink_ref %q is not a tenant-scoped bucket key", ref)
+	}
 
-	// The object is really in the bucket, at the key the tombstone will carry.
+	// The tombstone's sink_ref has to be a key the bucket itself can serve.
 	if _, err := bucket.Get(ctx, ref); err != nil {
 		t.Fatalf("archived object is not readable at sink_ref %q: %v", ref, err)
 	}

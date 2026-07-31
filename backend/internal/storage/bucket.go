@@ -6,8 +6,21 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"time"
+
+	"github.com/bitllow/sild/backend/internal/id"
 )
+
+// How long an upload or download grant stays valid.
+const signTTL = 15 * time.Minute
+
+// newObjectKey is shared by the backends so a key is portable between them; the
+// local PUT/GET routes parse this shape (see api/uploads_local.go).
+func newObjectKey(tenantID, filename string) string {
+	return fmt.Sprintf("%s/%s/%s", tenantID, id.New("obj"), url.PathEscape(filename))
+}
 
 // SignedUpload is a direct-to-bucket PUT grant.
 type SignedUpload struct {
@@ -28,12 +41,10 @@ type Bucket interface {
 	// SignPut (§11); this is for ingestion paths that already hold the bytes —
 	// the email forwarding daemon writing inbound attachments (§6.2).
 	Put(ctx context.Context, objectKey string, data []byte, mimeType string) error
-	// Get reads object bytes server-side, for the paths that consume an object
-	// rather than hand it to a client — the archive sink rehydrating a
-	// conversation (§12). ErrObjectNotFound when the key holds nothing.
+	// Get reads object bytes server-side; ErrObjectNotFound when the key holds
+	// nothing.
 	Get(ctx context.Context, objectKey string) ([]byte, error)
 }
 
-// ErrObjectNotFound reports a key with no object behind it, so callers can tell
-// "archived conversation is gone" from "storage is unreachable".
+// ErrObjectNotFound distinguishes a missing object from unreachable storage.
 var ErrObjectNotFound = errors.New("object not found")

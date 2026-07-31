@@ -3,6 +3,7 @@ module github.com/bitllow/sild/backend
 go 1.25.0
 
 require (
+	cloud.google.com/go/storage v1.64.0
 	github.com/caarlos0/env/v11 v11.2.2
 	github.com/centrifugal/centrifuge v0.38.0
 	github.com/coreos/go-oidc/v3 v3.11.0
@@ -29,7 +30,6 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/iam v1.11.0 // indirect
 	cloud.google.com/go/monitoring v1.29.0 // indirect
-	cloud.google.com/go/storage v1.64.0 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/FZambia/eagle v0.2.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.32.0 // indirect

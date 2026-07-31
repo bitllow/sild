@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/config"
-	"github.com/bitllow/sild/backend/internal/id"
 )
 
 // New returns the configured bucket backend. dig binds the result to Bucket.
@@ -42,12 +40,11 @@ type localBucket struct {
 }
 
 func (b *localBucket) NewObjectKey(tenantID, filename string) string {
-	safe := url.PathEscape(filename)
-	return fmt.Sprintf("%s/%s/%s", tenantID, id.New("obj"), safe)
+	return newObjectKey(tenantID, filename)
 }
 
 func (b *localBucket) SignPut(_ context.Context, objectKey, _ string, _ int64) (SignedUpload, error) {
-	exp := time.Now().Add(15 * time.Minute)
+	exp := time.Now().Add(signTTL)
 	return SignedUpload{
 		ObjectKey: objectKey,
 		UploadURL: b.publicURL + "/v1/uploads/local/" + objectKey + "?" + b.signer.Sign("PUT", objectKey, exp),
@@ -57,7 +54,7 @@ func (b *localBucket) SignPut(_ context.Context, objectKey, _ string, _ int64) (
 
 func (b *localBucket) SignGet(_ context.Context, objectKey string, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
-		ttl = 15 * time.Minute
+		ttl = signTTL
 	}
 	exp := time.Now().Add(ttl)
 	return b.publicURL + "/v1/uploads/local/" + objectKey + "?" + b.signer.Sign("GET", objectKey, exp), nil
@@ -66,8 +63,6 @@ func (b *localBucket) SignGet(_ context.Context, objectKey string, ttl time.Dura
 // Signer exposes the URL signer so the local PUT/GET routes can verify grants.
 func (b *localBucket) Signer() *LocalSigner { return b.signer }
 
-// Put writes bytes to the on-disk object store, under the same objects/ root the
-// local PUT/GET routes use (so a server-side write is readable via SignGet).
 func (b *localBucket) Put(_ context.Context, objectKey string, data []byte, _ string) error {
 	full := b.objectPath(objectKey)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -77,12 +72,11 @@ func (b *localBucket) Put(_ context.Context, objectKey string, data []byte, _ st
 }
 
 // objectPath is the on-disk location of a key, under the same objects/ root the
-// local PUT/GET routes serve.
+// local PUT/GET routes serve — so a server-side write is readable via SignGet.
 func (b *localBucket) objectPath(objectKey string) string {
 	return filepath.Join(b.dir, "objects", filepath.Clean("/"+objectKey))
 }
 
-// Get reads bytes back from the on-disk object store.
 func (b *localBucket) Get(_ context.Context, objectKey string) ([]byte, error) {
 	data, err := os.ReadFile(b.objectPath(objectKey))
 	if errors.Is(err, os.ErrNotExist) {

@@ -130,8 +130,6 @@ jobs:
       # localhost exactly as the JVM ones do.
       - name: Build sild-dev
         working-directory: backend
-        # Separate from the start step so a compile error reads as one, and so the
-        # health budget below waits for startup rather than for linking.
         run: go build -o /tmp/sild-dev ./cmd/sild-dev
 
       - name: Start sild-dev
@@ -300,8 +298,6 @@ jobs:
 
       - name: Build sild-dev
         working-directory: backend
-        # Separate from the start step so a compile error reads as one, and so the
-        # health budget below waits for startup rather than for linking.
         run: go build -o /tmp/sild-dev ./cmd/sild-dev
 
       - name: Start sild-dev

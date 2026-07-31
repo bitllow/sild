@@ -11,10 +11,8 @@ import (
 	"github.com/bitllow/sild/backend/internal/storage"
 )
 
-// jsonSink writes archive/{tenant}/{conversation}.json through the configured
-// storage bucket (§12), so the sink follows STORAGE_BACKEND rather than keeping a
-// second notion of where objects live: gcs/s3 in a deployment, the local dir in
-// dev. sink_ref is the object key. JSON sinks are NOT queryable — the accepted
+// jsonSink writes archive/{tenant}/{conversation}.json to the configured bucket
+// (§12); sink_ref is the object key. JSON sinks are NOT queryable — the accepted
 // tradeoff (§12).
 type jsonSink struct {
 	bucket storage.Bucket
@@ -33,7 +31,7 @@ func (s *jsonSink) Name() string { return s.kind }
 
 func (s *jsonSink) Write(ctx context.Context, c SerializedConversation) (string, error) {
 	objectKey := path.Join("archive", c.TenantID, c.ConversationID+".json")
-	b, err := json.MarshalIndent(c, "", "  ")
+	b, err := json.Marshal(c)
 	if err != nil {
 		return "", err
 	}
@@ -55,8 +53,8 @@ func (s *jsonSink) Read(ctx context.Context, sinkRef string) (SerializedConversa
 	return c, nil
 }
 
-// bigQuerySink is the queryable sink (§12). Real impl inserts flat rows into
-// partitioned tables; wired in the BigQuery buildout.
+// The queryable sink (§12): flat rows in partitioned tables, wired in the
+// BigQuery buildout.
 func newBigQuerySink(*config.Config) (Sink, error) {
 	return nil, errors.New("bigquery sink not yet wired; use ARCHIVE_SINK=gcs_json")
 }

@@ -49,10 +49,10 @@ spec:
     scaleDown: { stabilizationWindowSeconds: 600 }
 ```
 
-Set `STORAGE_BUCKET` and grant the pods' service account
-`roles/storage.objectAdmin` on it plus `roles/iam.serviceAccountTokenCreator` on
-itself — signed URLs are produced through the IAM SignBlob API, so no key file is
-needed (workload identity is enough).
+Set `STORAGE_BUCKET`, then give the pods' service account the two IAM grants and
+the CORS policy in [The bucket](../../../docs/deployment.md#the-bucket) — signed
+URLs go through IAM SignBlob, so workload identity is enough and no key file is
+needed. Skipping the CORS policy leaves signed URLs that fail in the browser only.
 
 The jobs need no attention: the outbox claim and the archive lease make every
 replica safe to run them (ARCHITECTURE §4). If you would rather keep serving pods
