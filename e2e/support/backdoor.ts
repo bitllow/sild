@@ -14,20 +14,16 @@ import { expect } from "@playwright/test";
 // `admin` is the authenticated agent request context (carries the session cookie
 // via storageState), i.e. the same credentials the inbox uses.
 
-// 3. Bulk thread history — a thread long enough to page needs hundreds of messages,
-//    and the only UI path is typing them one at a time. Posts them as the agent, in
-//    bounded-concurrency batches so a ten-page thread costs seconds, not minutes —
-//    kept modest because SQLite serializes writers and a wide fan-out just produces
-//    lock contention.
-//    Order is NOT guaranteed across a batch, so callers anchor on a message they
-//    created themselves (the conversation's opening one) rather than on an index.
+// 3. Bulk thread history — posts [count] messages as the agent. Order is NOT
+//    guaranteed across the workers, so callers anchor on a message they created
+//    themselves rather than on an index.
 export async function seedManyMessages(
   admin: APIRequestContext,
   conversationId: string,
   count: number,
-  label: string,
-  concurrency = 8
+  label: string
 ): Promise<void> {
+  const concurrency = 8; // SQLite serializes writers; a wider fan-out only contends
   let next = 0;
   const post = async () => {
     for (let i = next++; i < count; i = next++) {

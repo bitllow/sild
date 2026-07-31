@@ -13,22 +13,20 @@ export const ConversationView = observer(function ConversationView() {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const newestId = active?.messages.length ? active.messages[active.messages.length - 1].id : "";
 
-  // Open at the newest message, like PeerView and the widget. Keyed on the newest id,
-  // not the count, so loading older pages does not scroll the reader back down.
+  // Keyed on the newest id, not the count, so loading older pages does not scroll the
+  // reader back down.
   useEffect(() => {
     if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
   }, [newestId, active?.id]);
 
-  // Scroll-loading upward, mirroring ConversationList's downward pattern (§4.3).
-  // Prepending grows the list above the viewport, so hold the distance from the
-  // bottom — anchoring on scrollTop would jump the reader to the new oldest message.
   const onTranscriptScroll = async () => {
     const el = transcriptRef.current;
-    if (!el || el.scrollTop > 240) return;
+    if (!el || el.scrollTop > 240 || !active?.olderCursor || store.loadingOlder) return;
+    // Prepending grows the list above the viewport, so hold the distance from the
+    // bottom — anchoring on scrollTop would jump the reader to the new oldest message.
     const fromBottom = el.scrollHeight - el.scrollTop;
     await store.loadOlderMessages();
-    const after = transcriptRef.current;
-    if (after) after.scrollTop = after.scrollHeight - fromBottom;
+    el.scrollTop = el.scrollHeight - fromBottom;
   };
 
   if (!active) {

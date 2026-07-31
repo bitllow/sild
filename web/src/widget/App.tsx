@@ -335,23 +335,21 @@ function Thread({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Key the auto-scroll on the NEWEST message, not the count: loading older
-  // messages grows the list at the top, and scrolling to the bottom for that would
-  // undo the reader's scroll-up every time a page arrives.
+  // Keyed on the newest id, not the count, so loading older pages does not scroll the
+  // reader back down.
   const newestId = state.messages.length ? state.messages[state.messages.length - 1].id : "";
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
   }, [newestId, state.loadingThread]);
 
-  // Prepending grows the list above the viewport, so hold the distance from the
-  // bottom rather than scrollTop.
   const onScroll = async () => {
     const el = scroller.current;
     if (!el || el.scrollTop > 120 || !state.olderCursor || state.loadingOlder) return;
+    // Prepending grows the list above the viewport, so hold the distance from the
+    // bottom — anchoring on scrollTop would jump the reader to the new oldest message.
     const fromBottom = el.scrollHeight - el.scrollTop;
     await client.loadOlder();
-    const after = scroller.current;
-    if (after) after.scrollTop = after.scrollHeight - fromBottom;
+    el.scrollTop = el.scrollHeight - fromBottom;
   };
 
   const closed = !draft && state.conversations.find((c) => c.id === state.activeId)?.closed;

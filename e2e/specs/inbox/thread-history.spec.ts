@@ -4,25 +4,18 @@ import { seedManyMessages } from "../../support/backdoor";
 import { createConversation } from "../../support/appdata";
 import { uid } from "../../support/env";
 
-// A thread is fetched with ?limit=100 and the endpoint returns a cursor for the rest.
-// Nothing consumed that cursor, so every conversation past 100 messages was
-// permanently truncated to its newest 100 — on a healthy connection, with no outage
-// involved.
-//
-// The thread is deliberately ten pages deep: two would pass on an implementation that
-// pages exactly once, and draining this one only works if the cursor advances every
-// time. The opening message is the anchor because it is the only one whose position is
-// guaranteed — it was sent through the widget before any seeding.
+// Three pages deep: two would pass an implementation that pages exactly once, so the
+// drain only finishes if the cursor advances every time.
 const PAGE_SIZE = 100;
-const PAGES = 10;
+const PAGES = 3;
 
 test.describe("inbox · thread history", () => {
-  test("scrolling up drains a ten-page thread to its first message", async ({
+  test("scrolling up drains a multi-page thread to its first message", async ({
     page,
     request,
     browser,
   }) => {
-    test.slow(); // seeding a thousand messages, then paging back through them
+    test.slow(); // seeding hundreds of messages, then paging back through them
 
     const label = uid("hist");
     const opening = `${label} opening`;
@@ -45,9 +38,8 @@ test.describe("inbox · thread history", () => {
     await expect(older, "earlier messages are offered").toBeVisible();
     await expect(openingBubble).toHaveCount(0);
 
-    // The thread opens at the newest message, so scrolling up is the real gesture.
     // Each scroll to the top prepends one page; repeat until the opening message is
-    // reachable, which can only happen if the cursor advanced every time.
+    // reachable.
     await expect
       .poll(
         async () => {
@@ -58,7 +50,7 @@ test.describe("inbox · thread history", () => {
         },
         {
           message: `scrolling up reaches the first of ${PAGE_SIZE * PAGES} messages`,
-          timeout: 120_000,
+          timeout: 60_000,
         }
       )
       .toBeGreaterThan(0);

@@ -14,10 +14,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-// loadOlder is what Android and iOS both call to read a thread past its newest page,
-// so the prepend order, the de-duplication and the cursor advance are shared-core
-// behaviour rather than per-platform UI. The API-level test covers the request; this
-// covers what the client does with the response.
 class SildClientHistoryTest {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val cursors = mutableListOf<String?>()
@@ -83,8 +79,6 @@ class SildClientHistoryTest {
         assertEquals(listOf(null, "cur_m5", "cur_m3"), cursors, "each request carried the previous page's cursor")
     }
 
-    // A page that overlaps what is already held — a message that also arrived over the
-    // socket — must not double up in the transcript.
     @Test fun loadOlderDoesNotDuplicateMessagesAlreadyHeld() = runBlockingTest {
         val client = client(
             mapOf(
@@ -101,8 +95,7 @@ class SildClientHistoryTest {
         assertEquals(listOf("m1", "m2"), s.messages.map { it.id }, "the overlapping message appears once")
     }
 
-    // Nothing to load must not issue a request: the thread is whole, and a call with a
-    // null cursor would re-fetch the newest page and look like a reload.
+    // A cursorless call would re-fetch the newest page and look like a reload.
     @Test fun loadOlderIsANoOpOnAWholeThread() = runBlockingTest {
         val client = client(
             mapOf(null to """{"items":[${msg("m1", "2026-01-01T00:00:01Z")}],"next_cursor":null,"has_more":false}"""),

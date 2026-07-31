@@ -97,8 +97,7 @@ internal class SildApi(
         json.decodeFromString(api("GET", "/conversations/$id"))
 
     /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope.
-     *  [cursor] pages BACKWARD (older) from a previous page's next_cursor; ?since=
-     *  below is the opposite direction. */
+     *  [cursor] pages BACKWARD (older); ?since= below is the opposite direction. */
     suspend fun listMessages(id: String, cursor: String? = null): ApiMessagesPage {
         val page = if (cursor == null) "" else "&cursor=${cursor.encodeURLParameter()}"
         return json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100$page"))

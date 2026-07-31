@@ -192,9 +192,6 @@ class SildApiTest {
         )
     }
 
-    // Paging BACKWARD: the thread endpoint always returned next_cursor, and no client
-    // consumed it — so any conversation past the first page was permanently truncated
-    // to its newest 100 messages on every surface.
     @Test fun listMessagesPagesBackwardThroughTheCursor() = runBlockingTest {
         val api = api(
             { ok("""{"items":[{"id":"m3"},{"id":"m4"}],"next_cursor":"cur_m3","has_more":true}""") },

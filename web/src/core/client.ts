@@ -379,10 +379,7 @@ export class SildClient implements WidgetClient {
         const items = page.items || [];
         if (!items.length) return;
         if (this.state.activeId !== id) return; // switched threads mid-flight
-        const have = new Set(this.state.messages.map((m) => m.id));
-        const fresh = items
-          .filter((m) => !have.has(m.id))
-          .map((m) => mapMessage(m, this.selfId, this.activeNames));
+        const fresh = this.freshMessages(items);
         if (fresh.length) this.patch({ messages: [...this.state.messages, ...fresh] });
         since = items[items.length - 1].id;
         if (!page.has_more) return;
@@ -481,9 +478,16 @@ export class SildClient implements WidgetClient {
     }
   }
 
-  // loadOlder prepends the next page of OLDER messages. The thread endpoint has
-  // always returned a cursor for this; nothing consumed it, so a conversation past
-  // the first page was truncated to its newest 100 on every surface.
+  /** Map a page in thread order, dropping messages the thread already holds. */
+  private freshMessages(items: ApiMessage[] = []): WidgetMessage[] {
+    const have = new Set(this.state.messages.map((m) => m.id));
+    return items
+      .filter((m) => !have.has(m.id))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((m) => mapMessage(m, this.selfId, this.activeNames));
+  }
+
+  /** Prepend the next page of older messages to the open thread. */
   async loadOlder(): Promise<void> {
     const cursor = this.state.olderCursor;
     const id = this.state.activeId;
@@ -494,11 +498,7 @@ export class SildClient implements WidgetClient {
         "GET",
         `/conversations/${id}/messages?limit=100&cursor=${encodeURIComponent(cursor)}`
       );
-      const have = new Set(this.state.messages.map((m) => m.id));
-      const older = (page.items || [])
-        .filter((m) => !have.has(m.id))
-        .sort((a, b) => a.created_at.localeCompare(b.created_at))
-        .map((m) => mapMessage(m, this.selfId, this.activeNames));
+      const older = this.freshMessages(page.items);
       this.patch({
         messages: [...older, ...this.state.messages],
         olderCursor: page.has_more ? page.next_cursor : null,

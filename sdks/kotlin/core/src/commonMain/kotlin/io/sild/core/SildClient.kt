@@ -108,9 +108,7 @@ class SildClient internal constructor(
         _state.update { it.copy(conversations = convs, agentName = named ?: it.agentName) }
     }
 
-    /** Prepend the next page of OLDER messages to the open thread. Without it a
-     *  conversation past the first page is truncated to its newest 100 — the cursor
-     *  the endpoint returns had no consumer. */
+    /** Prepend the next page of older messages to the open thread. */
     fun loadOlder() {
         scope.launch {
             val s = _state.value
@@ -120,14 +118,13 @@ class SildClient internal constructor(
             _state.update { it.copy(loadingOlder = true) }
             runCatching { api.listMessages(id, cursor) }
                 .onSuccess { page ->
-                    if (!isActive(id)) return@launch
+                    if (!isActive(id)) {
+                        _state.update { it.copy(loadingOlder = false) } // switched threads mid-flight
+                        return@onSuccess
+                    }
                     val names = namesOf(id)
                     _state.update { cur ->
-                        val have = cur.messages.map { m -> m.id }.toSet()
-                        val older = page.items
-                            .filterNot { m -> m.id in have }
-                            .sortedBy { m -> m.createdAt }
-                            .map { m -> mapMessage(m, names) }
+                        val older = newMessages(page.items.sortedBy { m -> m.createdAt }, cur.messages, names)
                         cur.copy(
                             messages = older + cur.messages,
                             olderCursor = if (page.hasMore) page.nextCursor else null,
@@ -142,6 +139,16 @@ class SildClient internal constructor(
         }
     }
 
+    /** Map [items] to messages, dropping the ones [held] already has. */
+    private fun newMessages(
+        items: List<ApiMessage>,
+        held: List<Message>,
+        names: Map<String, String>,
+    ): List<Message> {
+        val have = held.mapTo(HashSet()) { m -> m.id }
+        return items.filterNot { m -> m.id in have }.map { m -> mapMessage(m, names) }
+    }
+
     /** Open a conversation and load its (last 100) messages. */
     fun openConversation(id: String) {
         scope.launch { loadThread(id) }
@@ -150,7 +157,17 @@ class SildClient internal constructor(
     /** Set [id] active and load its thread. Suspends until the page is applied so a
      *  caller can safely send afterwards without the load clobbering the new message. */
     private suspend fun loadThread(id: String) {
-        _state.update { it.copy(activeId = id, loadingThread = true, messages = emptyList()) }
+        // olderCursor belongs to the thread being left — carrying it over would page the
+        // new one from the wrong place.
+        _state.update {
+            it.copy(
+                activeId = id,
+                loadingThread = true,
+                messages = emptyList(),
+                olderCursor = null,
+                loadingOlder = false,
+            )
+        }
         // The row lookup and the page are independent; serialising them would put a
         // second round trip in front of every deep-linked open.
         val result = coroutineScope {
@@ -322,8 +339,7 @@ class SildClient internal constructor(
                     if (!isActive(id)) return@runCatching
                     val names = namesOf(id)
                     _state.update { s ->
-                        val have = s.messages.mapTo(HashSet()) { m -> m.id }
-                        val fresh = page.items.filterNot { it.id in have }.map { mapMessage(it, names) }
+                        val fresh = newMessages(page.items, s.messages, names)
                         if (fresh.isEmpty()) s else s.copy(messages = s.messages + fresh)
                     }
                     since = page.items.last().id

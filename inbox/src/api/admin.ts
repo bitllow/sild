@@ -299,8 +299,7 @@ export const adminApi = {
     return api.get<ApiQueuePage>(`/conversations${qs ? `?${qs}` : ""}`);
   },
   getConversation: (id: string) => api.get<ApiConversation>(`/conversations/${id}`),
-  // cursor pages BACKWARD (older), newest-first pages; ?since= below is the
-  // opposite direction. Both come off the same endpoint.
+  // cursor pages BACKWARD (older); ?since= below is the opposite direction.
   listMessages: (id: string, cursor?: string) =>
     api.get<ApiMessagesPage>(
       `/conversations/${id}/messages?limit=100` +
