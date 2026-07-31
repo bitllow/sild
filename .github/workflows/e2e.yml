@@ -13,12 +13,33 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      # Ahead of setup-go so the image pull overlaps the toolchain and module
+      # download. A step, not a service: `services:` cannot pass container
+      # arguments, and without -scheme http and a -public-host matching the host
+      # we reach it on, the emulator serves reads its clients cannot resolve.
+      - name: Start GCS emulator
+        run: |
+          docker run -d --name fake-gcs -p 4443:4443 fsouza/fake-gcs-server \
+            -scheme http -backend memory -public-host localhost:4443
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+
+      - name: Wait for the GCS emulator
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4443/storage/v1/b >/dev/null && exit 0
+            sleep 1
+          done
+          echo "GCS emulator did not become ready"; docker logs fake-gcs; exit 1
+
       - name: go test
         working-directory: backend
+        env:
+          STORAGE_EMULATOR_HOST: localhost:4443
         run: go test ./...
 
   # The concurrency guards (assignment claim, outbox claim, job leases) need real

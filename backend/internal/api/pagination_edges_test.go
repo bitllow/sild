@@ -35,7 +35,7 @@ func TestArchivedHistoryPagesToExhaustion(t *testing.T) {
 		t.Fatalf("close: %d %s", w.Code, w.Body)
 	}
 
-	sink, _ := archive.New(h.Cfg)
+	sink, _ := archive.New(h.Cfg, h.Bucket)
 	job := archive.NewJob(h.Store, sink, h.Cfg)
 	job.SetClock(func() time.Time { return time.Now().Add(60 * 24 * time.Hour) })
 	if n, err := job.RunOnce(ctx, tenant.ID, 100); err != nil || n != 1 {
@@ -88,7 +88,7 @@ func TestArchivedSupportStaysVisibleToAgents(t *testing.T) {
 	h.Request("POST", "/v1/conversations/"+conv.ID+"/messages").Bearer(tok).JSON(map[string]any{"body": "hi"}).Do()
 	h.Request("POST", "/v1/conversations/"+conv.ID+"/close").Bearer(key).Do()
 
-	sink, _ := archive.New(h.Cfg)
+	sink, _ := archive.New(h.Cfg, h.Bucket)
 	job := archive.NewJob(h.Store, sink, h.Cfg)
 	job.SetClock(func() time.Time { return time.Now().Add(60 * 24 * time.Hour) })
 	if n, err := job.RunOnce(ctx, tenant.ID, 100); err != nil || n != 1 {
