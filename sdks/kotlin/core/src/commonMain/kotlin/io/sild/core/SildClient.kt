@@ -118,12 +118,11 @@ class SildClient internal constructor(
             _state.update { it.copy(loadingOlder = true) }
             runCatching { api.listMessages(id, cursor) }
                 .onSuccess { page ->
-                    if (!isActive(id)) {
-                        _state.update { it.copy(loadingOlder = false) } // switched threads mid-flight
-                        return@onSuccess
-                    }
                     val names = namesOf(id)
                     _state.update { cur ->
+                        // The thread may have been switched or re-paged while this was in
+                        // flight; applying it now would prepend another thread's history.
+                        if (cur.activeId != id || cur.olderCursor != cursor) return@update cur
                         val older = newMessages(page.items.sortedBy { m -> m.createdAt }, cur.messages, names)
                         cur.copy(
                             messages = older + cur.messages,
@@ -134,7 +133,10 @@ class SildClient internal constructor(
                 }
                 .onFailure {
                     if (it is CancellationException) throw it
-                    _state.update { cur -> cur.copy(loadingOlder = false) } // retry by scrolling again
+                    _state.update { cur ->
+                        if (cur.activeId != id || cur.olderCursor != cursor) cur
+                        else cur.copy(loadingOlder = false) // retry by scrolling again
+                    }
                 }
         }
     }

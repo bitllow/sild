@@ -449,7 +449,15 @@ export class SildClient implements WidgetClient {
   }
 
   async openConversation(id: string) {
-    this.patch({ activeId: id, loadingThread: true, messages: [] });
+    // olderCursor belongs to the thread being left — carrying it over would page the
+    // new one from the wrong place.
+    this.patch({
+      activeId: id,
+      loadingThread: true,
+      messages: [],
+      olderCursor: null,
+      loadingOlder: false,
+    });
     // The row carries the peer flag, title/subtitle, closed state and member names, so
     // fetch the list when it's missing — the normal case for a late open(id).
     if (!this.state.conversations.some((c) => c.id === id)) {
@@ -498,6 +506,9 @@ export class SildClient implements WidgetClient {
         "GET",
         `/conversations/${id}/messages?limit=100&cursor=${encodeURIComponent(cursor)}`
       );
+      // The thread may have been switched or re-paged while this was in flight; applying
+      // it now would prepend one conversation's history into another's.
+      if (this.state.activeId !== id || this.state.olderCursor !== cursor) return;
       const older = this.freshMessages(page.items);
       this.patch({
         messages: [...older, ...this.state.messages],
@@ -505,7 +516,9 @@ export class SildClient implements WidgetClient {
         loadingOlder: false,
       });
     } catch {
-      this.patch({ loadingOlder: false }); // scrolling up again retries
+      if (this.state.activeId === id && this.state.olderCursor === cursor) {
+        this.patch({ loadingOlder: false }); // scrolling up again retries
+      }
     }
   }
 

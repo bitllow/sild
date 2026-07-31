@@ -4,10 +4,12 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -110,5 +112,55 @@ class SildClientHistoryTest {
         assertEquals(1, s.messages.size)
         assertEquals(before, cursors.size, "no request was issued")
         assertTrue(s.olderCursor == null)
+    }
+
+    @Test fun anOlderPageArrivingAfterAThreadSwitchIsDropped() = runBlockingTest {
+        val release = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            val body = when (path) {
+                "/v1/conversations" -> """{"items":[],"next_cursor":null,"has_more":false}"""
+                "/v1/brands/active" -> """{"name":"Acme","config":{}}"""
+                "/v1/conversations/c1" -> """{"id":"c1","status":"open","members":[]}"""
+                "/v1/conversations/c2" -> """{"id":"c2","status":"open","members":[]}"""
+                "/v1/conversations/c1/messages" ->
+                    if (request.url.parameters["cursor"] == null) {
+                        """{"items":[${msg("a2", "2026-01-01T00:00:02Z")}],"next_cursor":"cur_a2","has_more":true}"""
+                    } else {
+                        release.await()
+                        cursors += "cur_a2"
+                        """{"items":[${msg("a1", "2026-01-01T00:00:01Z")}],"next_cursor":null,"has_more":false}"""
+                    }
+                "/v1/conversations/c2/messages" ->
+                    if (request.url.parameters["cursor"] == null) {
+                        """{"items":[${msg("b2", "2026-01-02T00:00:02Z")}],"next_cursor":"cur_b2","has_more":true}"""
+                    } else {
+                        """{"items":[${msg("b1", "2026-01-02T00:00:01Z")}],"next_cursor":null,"has_more":false}"""
+                    }
+                else -> return@MockEngine respond("", HttpStatusCode.NotFound)
+            }
+            respond(body, HttpStatusCode.OK)
+        }
+        val cfg = SildConfig(baseUrl = "http://api.test", tokenProvider = TokenProvider { "tok" }, userId = "u_rider")
+        val client = SildClient(cfg, scope, {}, null, SildApi(cfg, HttpClient(engine) { sildDefaults() }))
+
+        client.openConversation("c1")
+        awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.olderCursor == "cur_a2" }
+        client.loadOlder()
+        awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.loadingOlder }
+
+        client.openConversation("c2")
+        awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.olderCursor == "cur_b2" }
+        release.complete(Unit)
+        awaitUntil(timeoutMs = 3_000, get = { cursors }) { "cur_a2" in it }
+        delay(200)
+
+        var s = client.state.value
+        assertEquals(listOf("b2"), s.messages.map { it.id }, "c1's history stayed out of c2")
+        assertEquals("cur_b2", s.olderCursor, "c2 kept its own cursor")
+
+        client.loadOlder()
+        s = awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.messages.size == 2 }
+        assertEquals(listOf("b1", "b2"), s.messages.map { it.id }, "c2 can still page back")
     }
 }
