@@ -26,33 +26,26 @@ func Migrate(db *gorm.DB) error {
 	})
 }
 
-// The advisory-lock identity. Postgres takes an int64, MySQL a string; both are
-// arbitrary but must be stable across releases.
+// Lock identity: arbitrary, but must stay stable across releases. Postgres takes an
+// int64, MySQL a string.
 const (
-	migrationLockKey  = 8265168776373 // "sild" as decimal digits
+	migrationLockKey  = 8265168776373
 	migrationLockName = "sild_schema_migration"
-	// migrationLockWait bounds how long MySQL waits for the holder. Postgres
-	// advisory locks have no timeout parameter and simply queue.
-	migrationLockWait = 300
+	// Seconds MySQL waits for the holder, kept under the deploy's own 300s wait for
+	// the migration Job so a queued migrator still finishes inside it.
+	migrationLockWait = 120
 )
 
-// withMigrationLock runs fn holding a cluster-wide lock. It uses a dialect advisory
-// lock rather than the job_leases table, because the lease row lives in the schema
-// this function is creating — on an empty database there is nowhere to take it from.
-//
-// Both locks are session-scoped, so they are held on one dedicated connection for
-// the duration; fn keeps using the pool. Closing that connection releases the lock
-// even if the explicit release fails.
+// withMigrationLock runs fn holding a cluster-wide lock. Both dialect locks are
+// session-scoped, so one dedicated connection holds it while fn keeps using the pool.
 func withMigrationLock(db *gorm.DB, fn func(*gorm.DB) error) error {
 	dialect := Dialect(db)
 	if dialect == config.SQLite {
-		// SQLite serializes writers within one file, and a second migrator against
-		// one SQLite file is a local-dev accident rather than a deployment.
-		return fn(db)
+		return fn(db) // one file, one writer; no advisory lock exists
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
-		return err
+		return fmt.Errorf("migration lock connection: %w", err)
 	}
 	ctx := context.Background()
 	conn, err := sqlDB.Conn(ctx)
