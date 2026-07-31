@@ -31,8 +31,10 @@ class SildClientReconnectTest {
         override fun destroy() {}
     }
 
+    private val routes = mutableMapOf<String, String>()
+
     /** A client whose thread endpoint answers per ?since= value, not per path. */
-    private fun client(routes: Map<String, String>): SildClient {
+    private fun client(): SildClient {
         val engine = MockEngine { request ->
             val url = request.url
             val key = url.encodedPath + (url.parameters["since"]?.let { "?since=$it" } ?: "")
@@ -67,19 +69,22 @@ class SildClientReconnectTest {
 
     // has_more means "call again with the last id you got".
     @Test fun reconnectResumesFromTheLastMessageHeldAndDrainsEveryPage() = runBlockingTest {
-        val client = client(
-            mapOf(
-                "/v1/conversations/c1/messages" to page(msg(1)),
-                "/v1/conversations/c1/messages?since=m1" to page(msg(2), more = true),
-                "/v1/conversations/c1/messages?since=m2" to page(msg(3)),
-            ),
-        )
+        routes["/v1/conversations/c1/messages"] = page(msg(1))
+        val client = client()
 
         client.openConversation("c1")
         awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.messages.size == 1 }
 
-        // The connection is IDLE until now, so returning to CONNECTED is the reconnect.
         fake.onConnection(ConnectionState.DISCONNECTED)
+        // The gap only becomes servable once the socket is down, so nothing but the
+        // reconnect can be what fetched it.
+        routes["/v1/conversations/c1/messages?since=m1"] = page(msg(2), more = true)
+        routes["/v1/conversations/c1/messages?since=m2"] = page(msg(3))
+        assertEquals(
+            listOf("m1"), client.state.value.messages.map { it.id },
+            "the outage gap is still missing before the reconnect",
+        )
+
         fake.onConnection(ConnectionState.CONNECTED)
 
         val s = awaitUntil(timeoutMs = 3_000, get = { client.state.value }) { it.messages.size == 3 }
