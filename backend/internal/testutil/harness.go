@@ -186,8 +186,8 @@ func NewWithConfig(t *testing.T, cfg *config.Config) *Harness {
 // SeedTenant creates a tenant (with optional searchable metadata keys).
 func (h *Harness) SeedTenant(searchableKeys ...string) *models.Tenant {
 	h.T.Helper()
-	t := &models.Tenant{Name: "Test Tenant", MaxAttachmentBytes: 10 << 20}
-	if err := h.Store.Tenants().Create(context.Background(), t); err != nil {
+	t, err := h.Svc.CreateTenant(context.Background(), "Test Tenant")
+	if err != nil {
 		h.T.Fatalf("seed tenant: %v", err)
 	}
 	if len(searchableKeys) > 0 {

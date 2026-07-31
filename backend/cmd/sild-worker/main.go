@@ -1,5 +1,5 @@
-// Command sild-worker runs background jobs (§6.1 webhook relay, §12 archival,
-// §6.2 outbound email, §5.5 push fan-out). --jobs selects a subset (§3a).
+// Command sild-worker runs background jobs (§6.1 webhook relay, §12 archival).
+// --jobs, or SILD_JOBS, selects a subset (§3a).
 package main
 
 import (
@@ -7,23 +7,23 @@ import (
 	"flag"
 	"log"
 	"os/signal"
-	"strings"
 	"syscall"
-	"time"
 
 	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/connector/webhook"
 	"github.com/bitllow/sild/backend/internal/di"
-	"github.com/bitllow/sild/backend/internal/store"
+	"github.com/bitllow/sild/backend/internal/jobs"
 )
 
 func main() {
-	jobsFlag := flag.String("jobs", "webhook,archive", "comma-separated: webhook,archive,push,email")
+	jobsFlag := flag.String("jobs", "", "comma-separated: webhook,archive (default: SILD_JOBS)")
+	once := flag.Bool("once", false, "run each job a single time and exit (cron / Cloud Run Jobs)")
 	flag.Parse()
-	jobs := map[string]bool{}
-	for _, j := range strings.Split(*jobsFlag, ",") {
-		jobs[strings.TrimSpace(j)] = true
+	// gcloud splits --args on commas, so `--jobs webhook,archive` arrives as a flag
+	// plus a stray "archive" — refuse it rather than silently drop a job.
+	if flag.NArg() > 0 {
+		log.Fatalf("sild-worker: unexpected argument %q (use -jobs=a,b as one argument)", flag.Arg(0))
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -34,35 +34,20 @@ func main() {
 		log.Fatalf("di: %v", err)
 	}
 
-	err = c.Invoke(func(cfg *config.Config, st store.Store, relay *webhook.Relay, job *archive.Job) error {
-		log.Printf("sild-worker: jobs=%v (driver=%s)", keys(jobs), cfg.DB.Driver)
-
-		if jobs["webhook"] {
-			go loop(ctx, 5*time.Second, func() {
-				if _, err := relay.ProcessOnce(ctx, 100); err != nil {
-					log.Printf("webhook relay: %v", err)
-				}
-			})
+	err = c.Invoke(func(cfg *config.Config, relay *webhook.Relay, sweep *archive.Job) error {
+		list := cfg.Jobs.Enabled
+		if *jobsFlag != "" {
+			list = *jobsFlag
 		}
-		if jobs["archive"] {
-			go loop(ctx, 1*time.Hour, func() {
-				n, ran, err := job.RunSweep(ctx, 100)
-				switch {
-				case err != nil:
-					log.Printf("archive sweep: %v", err)
-				case !ran:
-					log.Printf("archive sweep: another worker holds the lease — skipping")
-				case n > 0:
-					log.Printf("archive sweep: archived %d conversations", n)
-				}
-			})
+		selected, err := jobs.Parse(list)
+		if err != nil {
+			return err
 		}
-		if jobs["push"] || jobs["email"] {
-			// Push fan-out and outbound email run inline on the message path
-			// today (see domain.SendMessage). Worker-driven delivery keyed on
-			// Centrifuge presence is the remaining wiring (§5.5, §3a).
-			log.Printf("sild-worker: push/email selected — handled inline on the message path for now")
+		log.Printf("sild-worker: jobs=%v once=%v (driver=%s)", selected.Names(), *once, cfg.DB.Driver)
+		if *once {
+			return jobs.RunOnce(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
 		}
+		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
 
 		<-ctx.Done()
 		log.Printf("sild-worker: shutting down")
@@ -71,29 +56,4 @@ func main() {
 	if err != nil {
 		log.Fatalf("sild-worker: %v", err)
 	}
-}
-
-// loop runs fn immediately, then every interval until ctx is done.
-func loop(ctx context.Context, interval time.Duration, fn func()) {
-	fn()
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			fn()
-		}
-	}
-}
-
-func keys(m map[string]bool) []string {
-	var out []string
-	for k, v := range m {
-		if v {
-			out = append(out, k)
-		}
-	}
-	return out
 }

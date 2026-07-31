@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
@@ -24,13 +25,49 @@ const (
 type Config struct {
 	Env      string `env:"SILD_ENV" envDefault:"development"`
 	HTTPAddr string `env:"SILD_HTTP_ADDR" envDefault:":8080"`
-	DB       DB
-	Auth     Auth
-	Realtime Realtime
-	Storage  Storage
-	Archive  Archive
-	Email    Email
+	// Port is injected by PaaS platforms and wins over HTTPAddr — the platform,
+	// not the operator, owns it.
+	Port      string `env:"PORT"`
+	DB        DB
+	Auth      Auth
+	Realtime  Realtime
+	Storage   Storage
+	Archive   Archive
+	Email     Email
+	Jobs      Jobs
+	Bootstrap Bootstrap
 }
+
+// ListenAddr is the address the REST listener binds.
+func (c *Config) ListenAddr() string {
+	if c.Port == "" {
+		return c.HTTPAddr
+	}
+	return ":" + c.Port
+}
+
+// Bootstrap creates the first tenant on an empty database, for platforms where
+// running a one-off command is awkward. sild-admin is the general mechanism.
+type Bootstrap struct {
+	TenantName    string `env:"SILD_BOOTSTRAP_TENANT"`
+	AdminEmail    string `env:"SILD_BOOTSTRAP_ADMIN_EMAIL"`
+	AdminName     string `env:"SILD_BOOTSTRAP_ADMIN_NAME"`
+	AdminPassword string `env:"SILD_BOOTSTRAP_ADMIN_PASSWORD"`
+}
+
+// Jobs selects the background work a process runs in-process. Every job is
+// lease-guarded, so any number of processes may enable the same one.
+type Jobs struct {
+	// Enabled has no envDefault because env would fill it in for an empty value
+	// too, and SILD_JOBS="" means something: a replica that runs no jobs.
+	Enabled string `env:"SILD_JOBS"`
+	// SMTPIngest runs the forwarded-mail receiver in-process. Off by default: the
+	// PaaS targets have no raw TCP ingress and use POST /v1/email/inbound.
+	SMTPIngest bool `env:"SILD_SMTP_INGEST" envDefault:"false"`
+}
+
+// DefaultJobs is what a process runs when SILD_JOBS is not set at all.
+const DefaultJobs = "webhook,archive"
 
 // Email configures the forwarding ingestion daemon (inbound) and the outbound
 // SMTP relay (§6.2). Each tenant gets a forwarding address
@@ -116,10 +153,22 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, set := os.LookupEnv("SILD_JOBS"); !set {
+		cfg.Jobs.Enabled = DefaultJobs
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// RequireProduction rejects a non-production environment, for a binary that must
+// not inherit the development defaults — chiefly the stub admin login.
+func (c *Config) RequireProduction() error {
+	if c.Env == "production" {
+		return nil
+	}
+	return fmt.Errorf("SILD_ENV must be production (got %q): this binary serves real traffic, and development mode enables the stub admin login — use sild-dev for the zero-config path", c.Env)
 }
 
 // Validate rejects configurations that are silently wrong above one replica.

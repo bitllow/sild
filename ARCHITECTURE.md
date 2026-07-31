@@ -188,6 +188,26 @@ connection) also lives in the broker.
 
 Each binary exposes its own `/healthz` + `/metrics`.
 
+### Collapsing the processes is a packaging choice
+
+The reasoning above is about *scaling axes*, and it is worth nothing to a customer
+running one box. `sild-standalone` runs every serving role in one process on one
+listener — and does not collapse the scaling story, because the broker stays
+Redis: N standalone replicas behind a load balancer each hold their own
+connections and publish through Redis, exactly as N `api` + M `ws` pods do. Same
+image, same code; the topology is chosen by env and replica count.
+
+This is *not* a role subcommand on `sild-api` (still rejected) and *not* a second
+`sild-dev`. It is a production binary: it requires `SILD_ENV=production`, never
+migrates, and serves none of the dev conveniences. Its in-process jobs are the
+same lease-guarded jobs `sild-worker` runs (§4), which is what makes running them
+on every replica safe. See [`docs/deployment.md`](docs/deployment.md).
+
+`sild-admin` shares the image and goes through `domain.Service`, so operator
+commands hold the same invariants as the HTTP surface. There is deliberately no
+HTTP tenant-provisioning API: it would need a cross-tenant root principal that
+does not exist.
+
 ---
 
 ## 4. Cross-engine (Postgres / MySQL / SQLite)

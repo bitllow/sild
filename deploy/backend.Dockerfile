@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
-# Sild backend image — all six binaries in one distroless image; each k8s
-# Deployment picks which one to run via `command` (ARCHITECTURE §3a).
+# Sild backend image — every binary in one distroless image; each k8s Deployment,
+# compose service or Cloud Run revision picks which one to run via `command`
+# (ARCHITECTURE §3a). sild-standalone runs them all in one process.
 #
 # Built from the REPO ROOT (not ./backend) so the web drop-in bundle is compiled
 # and embedded in the same build (§9), instead of relying on a stale checked-in
@@ -37,7 +38,9 @@ RUN go build -o /out/sild-api     ./cmd/sild-api     && \
     go build -o /out/sild-worker  ./cmd/sild-worker  && \
     go build -o /out/sild-migrate ./cmd/sild-migrate && \
     go build -o /out/sild-mail    ./cmd/sild-mail    && \
-    go build -o /out/sild-dev     ./cmd/sild-dev
+    go build -o /out/sild-dev     ./cmd/sild-dev     && \
+    go build -o /out/sild-admin   ./cmd/sild-admin   && \
+    go build -o /out/sild-standalone ./cmd/sild-standalone
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/ /usr/local/bin/
