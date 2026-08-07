@@ -13,12 +13,40 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      # Backgrounded ahead of setup-go so the image pull overlaps the toolchain and
+      # module download — `docker run -d` returns only after pulling, so without
+      # the `&` this step just blocks. The wait below gates readiness. A step, not
+      # a service: `services:` cannot pass container arguments, and without
+      # -scheme http and a -public-host matching the host we reach it on, the
+      # emulator serves reads its clients cannot resolve.
+      - name: Start GCS emulator
+        run: |
+          nohup docker run -d --name fake-gcs -p 4443:4443 fsouza/fake-gcs-server \
+            -scheme http -backend memory -public-host localhost:4443 \
+            > /tmp/fake-gcs-start.log 2>&1 &
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+
+      - name: Wait for the GCS emulator
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4443/storage/v1/b >/dev/null && exit 0
+            sleep 1
+          done
+          # Backgrounded above, so a pull or start failure surfaces here.
+          echo "GCS emulator did not become ready"
+          cat /tmp/fake-gcs-start.log || true
+          docker logs fake-gcs || true
+          exit 1
+
       - name: go test
         working-directory: backend
+        env:
+          STORAGE_EMULATOR_HOST: localhost:4443
         run: go test ./...
 
   # The concurrency guards (assignment claim, outbox claim, job leases) need real
@@ -240,17 +268,8 @@ jobs:
         working-directory: e2e
         run: npm install --no-audit --no-fund
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Chromium
-        working-directory: e2e
-        run: npx playwright install --with-deps chromium
-
+      # No browser install: this suite asserts the deployment over `request`, and
+      # never opens a page.
       # webServer[] runs sild-migrate (the only thing that migrates, §4) and then
       # sild-standalone against the services above.
       - name: Run standalone deployment tests

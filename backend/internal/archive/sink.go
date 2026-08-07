@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/bitllow/sild/backend/internal/config"
+	"github.com/bitllow/sild/backend/internal/storage"
 )
 
 // SerializedConversation is the whole conversation flattened for the sink: row +
@@ -35,10 +36,10 @@ type Sink interface {
 }
 
 // New selects the configured sink. dig provides it.
-func New(cfg *config.Config) (Sink, error) {
+func New(cfg *config.Config, bucket storage.Bucket) (Sink, error) {
 	switch cfg.Archive.Sink {
 	case "gcs_json", "s3_json", "":
-		return newJSONSink(cfg)
+		return newJSONSink(cfg, bucket)
 	case "bigquery":
 		return newBigQuerySink(cfg)
 	default:

@@ -16,7 +16,7 @@ func TestProductionRejectsSingleNodeConfig(t *testing.T) {
 			Env:      "production",
 			DB:       config.DB{Driver: config.Postgres, DSN: "host=db"},
 			Realtime: config.Realtime{Broker: "redis"},
-			Storage:  config.Storage{Backend: "gcs"},
+			Storage:  config.Storage{Backend: "gcs", Bucket: "sild-uploads"},
 		}
 	}
 	if err := valid().Validate(); err != nil {
@@ -30,6 +30,9 @@ func TestProductionRejectsSingleNodeConfig(t *testing.T) {
 	}{
 		{"memory broker", func(c *config.Config) { c.Realtime.Broker = "memory" }, "SILD_BROKER"},
 		{"sqlite", func(c *config.Config) { c.DB.Driver = config.SQLite }, "DB_DRIVER"},
+		// A cloud backend with no bucket starts and then fails every upload and
+		// every archive write, in the worker's logs rather than in front of anyone.
+		{"cloud backend with no bucket", func(c *config.Config) { c.Storage.Bucket = "" }, "STORAGE_BUCKET"},
 		{"local storage without a shared signing key", func(c *config.Config) {
 			c.Storage.Backend = "local"
 			c.Storage.LocalShared = true

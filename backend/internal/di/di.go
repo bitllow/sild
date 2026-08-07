@@ -22,9 +22,27 @@ import (
 	"go.uber.org/dig"
 )
 
+// Option adjusts which implementations New registers.
+type Option func(*settings)
+
+type settings struct{ noRealtime bool }
+
+// WithoutRealtime drops events instead of publishing them. For one-shot operator
+// commands: they reach domain.Service, which needs a Publisher, but nothing is
+// connected to receive — and dialing the broker would make the CLI need Redis.
+func WithoutRealtime() Option { return func(s *settings) { s.noRealtime = true } }
+
 // New builds a container with every shared provider. dig only constructs what an
 // Invoke actually needs, so unused providers cost nothing per binary.
-func New() (*dig.Container, error) {
+func New(opts ...Option) (*dig.Container, error) {
+	var s settings
+	for _, o := range opts {
+		o(&s)
+	}
+	publisher := any(provideRealtimePublisher)
+	if s.noRealtime {
+		publisher = func() realtime.Publisher { return realtime.NoopPublisher{} }
+	}
 	c := dig.New()
 	providers := []any{
 		config.Load,
@@ -37,7 +55,7 @@ func New() (*dig.Container, error) {
 		search.New,                 // search.Backend
 		provideMailer,              // mail.Mailer
 		realtime.NewNode,           // *realtime.Node (ws serves it; api publishes through it)
-		provideRealtimePublisher,   // realtime.Publisher
+		publisher,                  // realtime.Publisher
 
 		newService,         // *domain.Service (search attached)
 		domain.NewSearch,   // *domain.SearchService

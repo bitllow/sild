@@ -11,11 +11,7 @@ import (
 
 func newJob(t *testing.T, h *testutil.Harness) *archive.Job {
 	t.Helper()
-	sink, err := archive.New(h.Cfg)
-	if err != nil {
-		t.Fatalf("sink: %v", err)
-	}
-	return archive.NewJob(h.Store, sink, h.Cfg)
+	return archive.NewJob(h.Store, h.Sink, h.Cfg)
 }
 
 // Every worker replica runs the archive ticker, so the sweep itself has to be

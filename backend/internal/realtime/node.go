@@ -13,6 +13,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/centrifugal/centrifuge"
+	"github.com/gin-gonic/gin"
 )
 
 // errNoScope means policy admits nothing for this operator, so there is no
@@ -158,11 +159,25 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 	return subs, nil
 }
 
+// Transport paths (§5). The SDKs and the widget hard-code them, so every binary
+// that serves the transport mounts these and not its own copy.
+const (
+	WSPath  = "/v1/ws"
+	SSEPath = "/v1/ws/sse"
+)
+
+// Mount adds the transport to a gin router, for the binaries that serve it on
+// the same listener as REST (sild-dev, sild-standalone).
+func (n *Node) Mount(r gin.IRouter) {
+	r.GET(WSPath, gin.WrapH(n.WSHandler()))
+	r.GET(SSEPath, gin.WrapH(n.SSEHandler()))
+}
+
 // Handler returns the HTTP mux serving WS (and SSE for the web widget) (§5).
 func (n *Node) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/v1/ws", n.WSHandler())
-	mux.Handle("/v1/ws/sse", n.SSEHandler())
+	mux.Handle(WSPath, n.WSHandler())
+	mux.Handle(SSEPath, n.SSEHandler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))

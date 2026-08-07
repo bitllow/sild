@@ -3,6 +3,9 @@ package domain
 import (
 	"context"
 	"encoding/json"
+	"errors"
+
+	"github.com/bitllow/sild/backend/internal/storage"
 
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
@@ -73,7 +76,7 @@ func (s *Service) ArchivedMessages(ctx context.Context, tenantID, convID string,
 	}
 	ser, err := s.sink.Read(ctx, tomb.SinkRef)
 	if err != nil {
-		return nil, true, err
+		return nil, true, archiveReadErr(err)
 	}
 	for _, m := range ser.Messages {
 		if !includeInternal {
@@ -86,29 +89,12 @@ func (s *Service) ArchivedMessages(ctx context.Context, tenantID, convID string,
 	return msgs, true, nil
 }
 
-// ArchivedConversation rehydrates a conversation view from the sink (§12).
-func (s *Service) ArchivedConversation(ctx context.Context, tenantID, convID string) (view map[string]any, archived bool, err error) {
-	if !s.IsArchived(ctx, tenantID, convID) {
-		return nil, false, nil
+// archiveReadErr maps a missing archive object to ErrNotFound: the tombstone says
+// the conversation was archived, so an object the bucket cannot produce is a gone
+// conversation, not a broken server.
+func archiveReadErr(err error) error {
+	if errors.Is(err, storage.ErrObjectNotFound) {
+		return ErrNotFound
 	}
-	tomb, ok := s.tombstone(ctx, tenantID, convID)
-	if !ok {
-		return nil, true, ErrNotFound
-	}
-	if s.sink == nil {
-		return nil, true, ErrNotFound
-	}
-	ser, err := s.sink.Read(ctx, tomb.SinkRef)
-	if err != nil {
-		return nil, true, err
-	}
-	view = map[string]any{
-		"id":        ser.ConversationID,
-		"status":    ser.Status,
-		"reference": ser.Reference,
-		"metadata":  ser.Metadata,
-		"members":   ser.Members,
-		"archived":  true,
-	}
-	return view, true, nil
+	return err
 }

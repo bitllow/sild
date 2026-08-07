@@ -61,14 +61,14 @@ services:
       retries: 20
 
   migrate:
-    build: ./backend
+    build: {context: ., dockerfile: deploy/backend.Dockerfile}
     command: ["/usr/local/bin/sild-migrate"]
     environment: *backend-env
     depends_on:
       postgres: {condition: service_healthy}
 
   api:
-    build: ./backend
+    build: {context: ., dockerfile: deploy/backend.Dockerfile}
     command: ["/usr/local/bin/sild-api"]
     environment:
       <<: *backend-env
@@ -79,7 +79,7 @@ services:
       redis: {condition: service_healthy}
 
   ws:
-    build: ./backend
+    build: {context: ., dockerfile: deploy/backend.Dockerfile}
     command: ["/usr/local/bin/sild-ws"]
     environment:
       <<: *backend-env
@@ -90,7 +90,7 @@ services:
       redis: {condition: service_healthy}
 
   worker:
-    build: ./backend
+    build: {context: ., dockerfile: deploy/backend.Dockerfile}
     command: ["/usr/local/bin/sild-worker", "-jobs", "webhook,archive"]
     environment: *backend-env
     depends_on:
@@ -101,7 +101,7 @@ services:
   # point here; orgs forward their support mailbox to <token>@inbound.sild.local
   # and each message becomes a conversation. :2525 in dev (no privileged port).
   mail:
-    build: ./backend
+    build: {context: ., dockerfile: deploy/backend.Dockerfile}
     command: ["/usr/local/bin/sild-mail"]
     environment:
       <<: *backend-env

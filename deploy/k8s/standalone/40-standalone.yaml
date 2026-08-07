@@ -2,8 +2,8 @@
 # :8080, with the webhook relay and archive sweep in-process and lease-guarded.
 # Replaces 30-api / 31-ws / 32-worker; 20-migrate still owns the schema (§4).
 #
-# Read the README before raising replicas: the uploads hostPath is node-local, and
-# nothing will catch that for you. fsGroup 65532 is the distroless nonroot uid.
+# Attachments and archives go to the bucket in 05-config.yaml, so every replica
+# reads what any other wrote and scaling needs no storage change.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,8 +17,6 @@ spec:
     metadata:
       labels: { app: sild-standalone }
     spec:
-      securityContext:
-        fsGroup: 65532
       containers:
         - name: sild-standalone
           image: dmitri896/sild:backend
@@ -28,8 +26,8 @@ spec:
             - configMapRef: { name: sild-config }
             - secretRef: { name: sild-secrets }
           env:
+            - { name: GOOGLE_APPLICATION_CREDENTIALS, value: /var/secrets/gcs/key.json }
             - { name: SILD_HTTP_ADDR, value: ":8080" }
-            - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
             # Safe on any replica count: both are lease-guarded. "" serves only.
             - { name: SILD_JOBS, value: "webhook,archive" }
           ports:
@@ -43,15 +41,14 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
           volumeMounts:
-            - { name: uploads, mountPath: /data/uploads }
+            - { name: gcs-key, mountPath: /var/secrets/gcs, readOnly: true }
           resources:
             requests: { cpu: 200m, memory: 256Mi }
             limits: { memory: 768Mi }
       volumes:
-        - name: uploads
-          hostPath:
-            path: /data/sild-uploads
-            type: DirectoryOrCreate
+        - name: gcs-key
+          secret: { secretName: sild-gcs-key }
+
 ---
 apiVersion: v1
 kind: Service

@@ -64,7 +64,8 @@ const standaloneProjects: NonNullable<import("@playwright/test").PlaywrightTestC
   {
     name: "standalone",
     testDir: "./specs/standalone",
-    use: { ...devices["Desktop Chrome"], baseURL: BACKEND_URL },
+    // No `devices` entry: these specs drive `request`, so CI installs no browser.
+    use: { baseURL: BACKEND_URL },
   },
 ];
 
@@ -83,6 +84,73 @@ const standaloneServers: NonNullable<import("@playwright/test").PlaywrightTestCo
     stdout: "pipe",
     stderr: "pipe",
     env: { ...(process.env as Record<string, string>), ...STANDALONE_ENV },
+  },
+];
+
+// The default suites, against the zero-infra `sild-dev` backend.
+const devProjects: NonNullable<import("@playwright/test").PlaywrightTestConfig["projects"]> = [
+  // Logs the admin in once and saves the session cookie for the inbox/cross
+  // projects. Runs first via `dependencies`.
+  { name: "setup", testDir: "./setup", testMatch: /admin\.setup\.ts/ },
+
+  {
+    name: "inbox",
+    testDir: "./specs/inbox",
+    dependencies: ["setup"],
+    use: { ...devices["Desktop Chrome"], baseURL: INBOX_URL, storageState: ".auth/agent.json" },
+  },
+  {
+    name: "widget",
+    testDir: "./specs/widget",
+    use: { ...devices["Desktop Chrome"], baseURL: BACKEND_URL },
+  },
+  {
+    // Cross-surface flows open a second (widget) context themselves; the base
+    // context is the authed agent inbox.
+    name: "cross",
+    testDir: "./specs/cross",
+    dependencies: ["setup"],
+    use: { ...devices["Desktop Chrome"], baseURL: INBOX_URL, storageState: ".auth/agent.json" },
+  },
+];
+
+const devServers: NonNullable<import("@playwright/test").PlaywrightTestConfig["webServer"]> = [
+  {
+    // Zero-infra dev backend: SQLite (fresh temp file) + in-memory broker +
+    // in-process worker/SMTP. NOT `make dev` (that uses Postgres/Redis).
+    // Override the command via SILD_E2E_BACKEND_CMD (e.g. a prebuilt binary)
+    // if `go run` is unavailable locally. The widget bundle is rebuilt first
+    // (unless SKIP_BUILD) so `go run` embeds the current web/ source; the
+    // build runs in ../web then `go run` in this cwd (../backend).
+    command:
+      process.env.SILD_E2E_BACKEND_CMD ||
+      (SKIP_BUILD
+        ? "go run ./cmd/sild-dev"
+        : "(cd ../web && node build.mjs) && go run ./cmd/sild-dev"),
+    cwd: "../backend",
+    url: `${BACKEND_URL}/sild-demo`,
+    reuseExistingServer: !isCI,
+    timeout: 180_000,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      DB_DRIVER,
+      DB_DSN,
+      SILD_ENV: "development",
+      SILD_BROKER: "memory",
+      STORAGE_BACKEND: "local",
+      // Keep uploads out of the repo working tree.
+      STORAGE_LOCAL_DIR: path.join(os.tmpdir(), `sild-e2e-uploads-${process.pid}`),
+    },
+  },
+  {
+    command: "npm run dev",
+    cwd: "../inbox",
+    url: INBOX_URL,
+    reuseExistingServer: !isCI,
+    timeout: 180_000,
+    env: { ...process.env, SILD_API_URL: BACKEND_URL, SILD_DISABLE_DEV_INDICATOR: "1" },
   },
 ];
 
@@ -112,73 +180,7 @@ export default defineConfig({
     actionTimeout: 15_000,
   },
 
-  projects: STANDALONE
-    ? standaloneProjects
-    : [
-    // Logs the admin in once and saves the session cookie for the inbox/cross
-    // projects. Runs first via `dependencies`.
-    { name: "setup", testDir: "./setup", testMatch: /admin\.setup\.ts/ },
+  projects: STANDALONE ? standaloneProjects : devProjects,
 
-    {
-      name: "inbox",
-      testDir: "./specs/inbox",
-      dependencies: ["setup"],
-      use: { ...devices["Desktop Chrome"], baseURL: INBOX_URL, storageState: ".auth/agent.json" },
-    },
-    {
-      name: "widget",
-      testDir: "./specs/widget",
-      use: { ...devices["Desktop Chrome"], baseURL: BACKEND_URL },
-    },
-    {
-      // Cross-surface flows open a second (widget) context themselves; the base
-      // context is the authed agent inbox.
-      name: "cross",
-      testDir: "./specs/cross",
-      dependencies: ["setup"],
-      use: { ...devices["Desktop Chrome"], baseURL: INBOX_URL, storageState: ".auth/agent.json" },
-    },
-  ],
-
-  webServer: STANDALONE
-    ? standaloneServers
-    : [
-    {
-      // Zero-infra dev backend: SQLite (fresh temp file) + in-memory broker +
-      // in-process worker/SMTP. NOT `make dev` (that uses Postgres/Redis).
-      // Override the command via SILD_E2E_BACKEND_CMD (e.g. a prebuilt binary)
-      // if `go run` is unavailable locally. The widget bundle is rebuilt first
-      // (unless SKIP_BUILD) so `go run` embeds the current web/ source; the
-      // build runs in ../web then `go run` in this cwd (../backend).
-      command:
-        process.env.SILD_E2E_BACKEND_CMD ||
-        (SKIP_BUILD
-          ? "go run ./cmd/sild-dev"
-          : "(cd ../web && node build.mjs) && go run ./cmd/sild-dev"),
-      cwd: "../backend",
-      url: `${BACKEND_URL}/sild-demo`,
-      reuseExistingServer: !isCI,
-      timeout: 180_000,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: {
-        ...process.env,
-        DB_DRIVER,
-        DB_DSN,
-        SILD_ENV: "development",
-        SILD_BROKER: "memory",
-        STORAGE_BACKEND: "local",
-        // Keep uploads out of the repo working tree.
-        STORAGE_LOCAL_DIR: path.join(os.tmpdir(), `sild-e2e-uploads-${process.pid}`),
-      },
-    },
-    {
-      command: "npm run dev",
-      cwd: "../inbox",
-      url: INBOX_URL,
-      reuseExistingServer: !isCI,
-      timeout: 180_000,
-      env: { ...process.env, SILD_API_URL: BACKEND_URL, SILD_DISABLE_DEV_INDICATOR: "1" },
-    },
-  ],
+  webServer: STANDALONE ? standaloneServers : devServers,
 });

@@ -23,6 +23,7 @@ spec:
             - configMapRef: { name: sild-config }
             - secretRef: { name: sild-secrets }
           env:
+            - { name: GOOGLE_APPLICATION_CREDENTIALS, value: /var/secrets/gcs/key.json }
             - { name: SILD_WS_ADDR, value: ":8081" }
           ports:
             - { containerPort: 8081, name: ws }
@@ -30,9 +31,15 @@ spec:
             tcpSocket: { port: 8081 }
             initialDelaySeconds: 5
             periodSeconds: 10
+          volumeMounts:
+            - { name: gcs-key, mountPath: /var/secrets/gcs, readOnly: true }
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { memory: 512Mi }
+      volumes:
+        - name: gcs-key
+          secret: { secretName: sild-gcs-key }
+
 ---
 apiVersion: v1
 kind: Service

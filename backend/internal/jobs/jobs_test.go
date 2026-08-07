@@ -2,10 +2,9 @@ package jobs_test
 
 import (
 	"context"
-	"errors"
+	"os"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/config"
@@ -52,36 +51,18 @@ func TestParseRejectsAnUnknownJob(t *testing.T) {
 }
 
 // A scheduled runner needs a process that finishes: as a Cloud Run Job or a k8s
-// CronJob, one that keeps looping is a task that never succeeds.
+// CronJob, one that keeps looping is a task that never succeeds — and RunOnce
+// drains, so "returns" is a claim about a loop with a termination condition.
 func TestRunOnceReturns(t *testing.T) {
 	h := testutil.New(t)
 	set, err := jobs.Parse(config.DefaultJobs)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	relay := webhook.NewRelay(h.Store)
-	sweep := archive.NewJob(h.Store, noopSink{}, h.Cfg)
-
-	done := make(chan error, 1)
-	go func() { done <- jobs.RunOnce(context.Background(), set, jobs.Deps{Relay: relay, Sweep: sweep}) }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("RunOnce: %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("RunOnce did not return")
+	deps := jobs.Deps{Relay: webhook.NewRelay(h.Store), Sweep: archive.NewJob(h.Store, h.Sink, h.Cfg)}
+	if err := jobs.RunOnce(context.Background(), set, deps); err != nil {
+		t.Fatalf("RunOnce: %v", err)
 	}
-}
-
-type noopSink struct{}
-
-func (noopSink) Name() string { return "noop" }
-func (noopSink) Write(context.Context, archive.SerializedConversation) (string, error) {
-	return "noop://ref", nil
-}
-func (noopSink) Read(context.Context, string) (archive.SerializedConversation, error) {
-	return archive.SerializedConversation{}, errors.New("not stored")
 }
 
 // SILD_JOBS="" has to survive config loading as an empty selection, not fall back
@@ -92,7 +73,7 @@ func TestEmptySILDJobsSurvivesConfigLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	set, err := jobs.Parse(cfg.Jobs.Enabled)
+	set, err := jobs.Parse(cfg.Jobs.List(config.DefaultJobs))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -101,16 +82,18 @@ func TestEmptySILDJobsSurvivesConfigLoad(t *testing.T) {
 	}
 }
 
-func TestSILDJobsDefaultsToBoth(t *testing.T) {
+func TestUnsetSILDJobsTakesTheBinaryDefault(t *testing.T) {
+	t.Setenv("SILD_JOBS", "") // scoped: restored by t.Cleanup
+	os.Unsetenv("SILD_JOBS")
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	want := []string{"webhook", "archive"}
-	set, err := jobs.Parse(cfg.Jobs.Enabled)
+	set, err := jobs.Parse(cfg.Jobs.List(config.DefaultJobs))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	want := []string{"webhook", "archive"}
 	if got := set.Names(); !slices.Equal(got, want) {
 		t.Fatalf("default jobs = %v, want %v", got, want)
 	}

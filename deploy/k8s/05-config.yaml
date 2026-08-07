@@ -1,6 +1,17 @@
 # Shared backend configuration. Every backend Deployment (api, ws, worker, mail,
 # migrate) loads this ConfigMap + Secret via envFrom; per-service knobs (listen
-# addr, storage dir) are set inline on each Deployment.
+# addr) are set inline on each Deployment.
+#
+# STORAGE_BACKEND=gcs needs credentials this cluster has no metadata server to
+# supply, so create the key Secret before applying anything else. Workload
+# Identity would replace this on GKE:
+#
+#   kubectl -n sild create secret generic sild-gcs-key \
+#     --from-file=key.json=/path/to/service-account-key.json
+#
+# The service account needs roles/storage.objectAdmin on the bucket. It does NOT
+# need roles/iam.serviceAccountTokenCreator: that binding is for signing through
+# the IAM API, and a key file signs locally.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,13 +22,15 @@ data:
   DB_DRIVER: "postgres"
   SILD_BROKER: "redis"
   SILD_REDIS_URL: "redis://sild-redis:6379"
-  # Attachment bytes live on the api pod's node-local hostPath (30-api.yaml), so
-  # this is only true while that Deployment runs one replica. Scaling it means
-  # moving to STORAGE_BACKEND=gcs/s3 or a genuinely shared volume first — every
-  # backend binary refuses to start in production without this (config.Validate).
-  STORAGE_LOCAL_SHARED: "true"
-  # Public base URL for signed attachment/storage links (§11).
-  STORAGE_PUBLIC_URL: "https://api.sild.bitllow.com"
+  # Attachments and archived conversations (§11, §12) go to one bucket every
+  # process can reach. api, mail and worker all write objects, so node-local
+  # storage strands whichever of them wrote them. Credentials come from the
+  # sild-gcs-key Secret — see the header above.
+  STORAGE_BACKEND: "gcs"
+  # Unlike the database placeholders, an unchanged bucket name still starts: it
+  # fails per request, and bucket names are one global namespace, so it either
+  # 403s every upload or writes into a stranger's bucket. Change it.
+  STORAGE_BUCKET: "please-change-me-sild-uploads"
   # JWT issuer advertised in the JWKS + minted tokens.
   SILD_JWT_ISSUER: "https://api.sild.bitllow.com"
   # Email ingest (§6.2): orgs forward support mail to <token>@mail.sild.bitllow.com.
@@ -36,6 +49,3 @@ stringData:
   POSTGRES_DB: "please-change-me"
   # Consumed by the backend binaries. Matches the postgres Deployment below.
   DB_DSN: "host=sild-postgres port=5432 user=please-change-me1 password=please-change-me2 dbname=please-change-me3"
-  # Signs local-backend upload URLs. Must be shared by every replica, or each
-  # signs URLs the others reject — production refuses to start without it.
-  STORAGE_SIGNING_KEY: "please-change-me"

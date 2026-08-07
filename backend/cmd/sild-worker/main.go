@@ -35,7 +35,7 @@ func main() {
 	}
 
 	err = c.Invoke(func(cfg *config.Config, relay *webhook.Relay, sweep *archive.Job) error {
-		list := cfg.Jobs.Enabled
+		list := cfg.Jobs.List(config.DefaultJobs)
 		if *jobsFlag != "" {
 			list = *jobsFlag
 		}

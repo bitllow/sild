@@ -1,7 +1,7 @@
 # REST API (§4) — stateless; publishes realtime events to Redis after each write.
 # Reachable at https://api.sild.bitllow.com and in-cluster at sild-api:8080.
-# Local attachment storage (§11) persists on a hostPath; fsGroup 65532 matches the
-# distroless "nonroot" uid/gid so the container can write it.
+# Attachments go direct to the bucket (§11), so this pod holds no object bytes and
+# scales freely.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,8 +15,6 @@ spec:
     metadata:
       labels: { app: sild-api }
     spec:
-      securityContext:
-        fsGroup: 65532
       containers:
         - name: sild-api
           image: dmitri896/sild:backend
@@ -26,8 +24,8 @@ spec:
             - configMapRef: { name: sild-config }
             - secretRef: { name: sild-secrets }
           env:
+            - { name: GOOGLE_APPLICATION_CREDENTIALS, value: /var/secrets/gcs/key.json }
             - { name: SILD_HTTP_ADDR, value: ":8080" }
-            - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
           ports:
             - { containerPort: 8080, name: http }
           readinessProbe:
@@ -35,15 +33,13 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
-            - { name: uploads, mountPath: /data/uploads }
+            - { name: gcs-key, mountPath: /var/secrets/gcs, readOnly: true }
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { memory: 512Mi }
       volumes:
-        - name: uploads
-          hostPath:
-            path: /data/sild-uploads
-            type: DirectoryOrCreate
+        - name: gcs-key
+          secret: { secretName: sild-gcs-key }
 ---
 apiVersion: v1
 kind: Service
