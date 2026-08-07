@@ -74,6 +74,14 @@ gcloud iam service-accounts add-iam-policy-binding SA@PROJECT.iam.gserviceaccoun
   --role=roles/iam.serviceAccountTokenCreator
 ```
 
+That second binding is what lets the workload sign without a key file, and it
+needs an environment that hands the process an identity — Cloud Run, or GKE with
+Workload Identity. Anywhere else (including the self-managed cluster
+`deploy/k8s/` targets) there is no metadata server to ask, so the process needs a
+service-account **key file** instead: `objectAdmin` alone is enough, signing then
+happens locally, and `GOOGLE_APPLICATION_CREDENTIALS` points at the mounted key.
+See [`deploy/k8s/05-config.yaml`](../deploy/k8s/05-config.yaml) for the Secret.
+
 Browsers upload direct to the bucket, so the bucket — not Sild — answers the
 preflight. Without a CORS policy naming your inbox and host-page origins, signed
 uploads are issued correctly and then rejected by the browser:

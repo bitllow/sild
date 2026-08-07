@@ -10,6 +10,9 @@ axes. Start here, move there when a dimension actually hurts.
 
 ```sh
 kubectl apply -f deploy/k8s/00-namespace.yaml
+# The pod mounts this to reach the bucket; without it, it never starts.
+kubectl -n sild create secret generic sild-gcs-key \
+  --from-file=key.json=/path/to/service-account-key.json
 kubectl apply -f deploy/k8s/05-config.yaml
 kubectl apply -f deploy/k8s/10-postgres.yaml -f deploy/k8s/11-redis.yaml
 kubectl apply -f deploy/k8s/20-migrate.yaml            # schema first, always

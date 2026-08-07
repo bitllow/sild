@@ -20,6 +20,13 @@ spec:
           envFrom:
             - configMapRef: { name: sild-config }
             - secretRef: { name: sild-secrets }
+          env:
+            - { name: GOOGLE_APPLICATION_CREDENTIALS, value: /var/secrets/gcs/key.json }
+          volumeMounts:
+            - { name: gcs-key, mountPath: /var/secrets/gcs, readOnly: true }
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }
+      volumes:
+        - name: gcs-key
+          secret: { secretName: sild-gcs-key }

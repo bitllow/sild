@@ -26,6 +26,7 @@ spec:
             - configMapRef: { name: sild-config }
             - secretRef: { name: sild-secrets }
           env:
+            - { name: GOOGLE_APPLICATION_CREDENTIALS, value: /var/secrets/gcs/key.json }
             - { name: SILD_HTTP_ADDR, value: ":8080" }
             # Safe on any replica count: both are lease-guarded. "" serves only.
             - { name: SILD_JOBS, value: "webhook,archive" }
@@ -39,9 +40,15 @@ spec:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 15
             periodSeconds: 20
+          volumeMounts:
+            - { name: gcs-key, mountPath: /var/secrets/gcs, readOnly: true }
           resources:
             requests: { cpu: 200m, memory: 256Mi }
             limits: { memory: 768Mi }
+      volumes:
+        - name: gcs-key
+          secret: { secretName: sild-gcs-key }
+
 ---
 apiVersion: v1
 kind: Service

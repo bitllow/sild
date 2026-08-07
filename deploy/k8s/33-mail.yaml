@@ -31,9 +31,15 @@ spec:
             - configMapRef: { name: sild-config }
             - secretRef: { name: sild-secrets }
           env:
+            - { name: GOOGLE_APPLICATION_CREDENTIALS, value: /var/secrets/gcs/key.json }
             - { name: SILD_SMTP_ADDR, value: ":2525" }
           ports:
             - { containerPort: 2525, hostPort: 25, name: smtp, protocol: TCP }
+          volumeMounts:
+            - { name: gcs-key, mountPath: /var/secrets/gcs, readOnly: true }
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }
+      volumes:
+        - name: gcs-key
+          secret: { secretName: sild-gcs-key }

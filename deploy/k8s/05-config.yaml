@@ -1,6 +1,17 @@
 # Shared backend configuration. Every backend Deployment (api, ws, worker, mail,
 # migrate) loads this ConfigMap + Secret via envFrom; per-service knobs (listen
-# addr, storage dir) are set inline on each Deployment.
+# addr) are set inline on each Deployment.
+#
+# STORAGE_BACKEND=gcs needs credentials this cluster has no metadata server to
+# supply, so create the key Secret before applying anything else. Workload
+# Identity would replace this on GKE:
+#
+#   kubectl -n sild create secret generic sild-gcs-key \
+#     --from-file=key.json=/path/to/service-account-key.json
+#
+# The service account needs roles/storage.objectAdmin on the bucket. It does NOT
+# need roles/iam.serviceAccountTokenCreator: that binding is for signing through
+# the IAM API, and a key file signs locally.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,8 +24,12 @@ data:
   SILD_REDIS_URL: "redis://sild-redis:6379"
   # Attachments and archived conversations (§11, §12) go to one bucket every
   # process can reach. api, mail and worker all write objects, so node-local
-  # storage strands whichever of them wrote them.
+  # storage strands whichever of them wrote them. Credentials come from the
+  # sild-gcs-key Secret — see the header above.
   STORAGE_BACKEND: "gcs"
+  # Unlike the database placeholders, an unchanged bucket name still starts: it
+  # fails per request, and bucket names are one global namespace, so it either
+  # 403s every upload or writes into a stranger's bucket. Change it.
   STORAGE_BUCKET: "please-change-me-sild-uploads"
   # JWT issuer advertised in the JWKS + minted tokens.
   SILD_JWT_ISSUER: "https://api.sild.bitllow.com"
