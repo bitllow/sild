@@ -18,6 +18,8 @@ export interface WidgetClient {
   subscribe(fn: () => void): () => void;
   start(conversationId?: string): void | Promise<void>;
   openConversation(id: string): void | Promise<void>;
+  /** Prepend the next page of older messages to the open thread. */
+  loadOlder(): void | Promise<void>;
   openSupportRequest(): void | Promise<string>;
   send(text: string, attachments?: PendingAttachment[]): void | Promise<void>;
   backToList(): void;
@@ -226,6 +228,8 @@ export class SildClient implements WidgetClient {
     connection: "idle",
     conversations: [],
     activeId: null,
+    olderCursor: null,
+    loadingOlder: false,
     messages: [],
     loadingThread: false,
     soundOn: initialSoundOn(),
@@ -375,10 +379,7 @@ export class SildClient implements WidgetClient {
         const items = page.items || [];
         if (!items.length) return;
         if (this.state.activeId !== id) return; // switched threads mid-flight
-        const have = new Set(this.state.messages.map((m) => m.id));
-        const fresh = items
-          .filter((m) => !have.has(m.id))
-          .map((m) => mapMessage(m, this.selfId, this.activeNames));
+        const fresh = this.freshMessages(items);
         if (fresh.length) this.patch({ messages: [...this.state.messages, ...fresh] });
         since = items[items.length - 1].id;
         if (!page.has_more) return;
@@ -448,7 +449,15 @@ export class SildClient implements WidgetClient {
   }
 
   async openConversation(id: string) {
-    this.patch({ activeId: id, loadingThread: true, messages: [] });
+    // olderCursor belongs to the thread being left — carrying it over would page the
+    // new one from the wrong place.
+    this.patch({
+      activeId: id,
+      loadingThread: true,
+      messages: [],
+      olderCursor: null,
+      loadingOlder: false,
+    });
     // The row carries the peer flag, title/subtitle, closed state and member names, so
     // fetch the list when it's missing — the normal case for a late open(id).
     if (!this.state.conversations.some((c) => c.id === id)) {
@@ -466,9 +475,50 @@ export class SildClient implements WidgetClient {
         .slice()
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .map((m) => mapMessage(m, this.selfId, this.activeNames));
-      this.patch({ messages, loadingThread: false, agentName: agentNameOf(messages) });
+      this.patch({
+        messages,
+        loadingThread: false,
+        agentName: agentNameOf(messages),
+        olderCursor: page.has_more ? page.next_cursor : null,
+      });
     } catch (e) {
       this.patch({ loadingThread: false, error: e instanceof Error ? e.message : "Failed to load" });
+    }
+  }
+
+  /** Map a page in thread order, dropping messages the thread already holds. */
+  private freshMessages(items: ApiMessage[] = []): WidgetMessage[] {
+    const have = new Set(this.state.messages.map((m) => m.id));
+    return items
+      .filter((m) => !have.has(m.id))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((m) => mapMessage(m, this.selfId, this.activeNames));
+  }
+
+  /** Prepend the next page of older messages to the open thread. */
+  async loadOlder(): Promise<void> {
+    const cursor = this.state.olderCursor;
+    const id = this.state.activeId;
+    if (!cursor || this.state.loadingOlder || !id) return;
+    this.patch({ loadingOlder: true });
+    try {
+      const page = await this.api<ApiPage<ApiMessage>>(
+        "GET",
+        `/conversations/${id}/messages?limit=100&cursor=${encodeURIComponent(cursor)}`
+      );
+      // The thread may have been switched or re-paged while this was in flight; applying
+      // it now would prepend one conversation's history into another's.
+      if (this.state.activeId !== id || this.state.olderCursor !== cursor) return;
+      const older = this.freshMessages(page.items);
+      this.patch({
+        messages: [...older, ...this.state.messages],
+        olderCursor: page.has_more ? page.next_cursor : null,
+        loadingOlder: false,
+      });
+    } catch {
+      if (this.state.activeId === id && this.state.olderCursor === cursor) {
+        this.patch({ loadingOlder: false }); // scrolling up again retries
+      }
     }
   }
 
@@ -570,6 +620,8 @@ export class PreviewClient implements WidgetClient {
     connection: "connected",
     conversations: [],
     activeId: "preview",
+    olderCursor: null,
+    loadingOlder: false,
     loadingThread: false,
     soundOn: true,
     agentName: "Eva",
@@ -586,6 +638,7 @@ export class PreviewClient implements WidgetClient {
   }
   start(): void {}
   openConversation(): void {}
+  loadOlder(): void {} // the preview thread is a fixed sample; nothing older exists
   openSupportRequest(): void {}
   send(): void {}
   backToList(): void {}

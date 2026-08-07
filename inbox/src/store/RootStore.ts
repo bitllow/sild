@@ -161,6 +161,7 @@ export class RootStore {
   nextCursor: string | null = null;
   hasMore = false;
   loadingMore = false;
+  loadingOlder = false;
   convError: string | null = null;
   // Generation token: bumped on every fresh queue load (filter change / reload)
   // so a slow in-flight request for a previous filter can't overwrite newer state.
@@ -469,6 +470,47 @@ export class RootStore {
     }
   };
 
+  // A thread may live in the queue, in search results, or in the contact-history
+  // list — readers that mutate one have to reach all three.
+  private get threadLists(): Conversation[][] {
+    // Same order as `active`, so the copy read here is the one being rendered.
+    return [this.convs, ...(this.searchResults ? [this.searchResults] : []), this.contactHistory];
+  }
+
+  /** Prepend the next page of older messages to the open thread. */
+  loadOlderMessages = async () => {
+    const conv = this.active;
+    if (!conv || this.loadingOlder || !conv.olderCursor) return;
+    const id = conv.id;
+    const cursor = conv.olderCursor;
+    runInAction(() => {
+      this.loadingOlder = true;
+    });
+    try {
+      const page = await adminApi.listMessages(id, cursor);
+      runInAction(() => {
+        for (const list of this.threadLists) {
+          // Skip a copy rebuilt while this was in flight — its cursor moved.
+          const target = list.find((c) => c.id === id);
+          if (!target || target.olderCursor !== cursor) continue;
+          const have = new Set(target.messages.map((m) => m.id));
+          const older = [...page.items]
+            .sort((x, y) => x.created_at.localeCompare(y.created_at))
+            .filter((m) => !have.has(m.id))
+            .map((m) => mapRealtimeMessage(m, target));
+          target.messages.unshift(...older);
+          target.olderCursor = page.has_more ? page.next_cursor : null;
+        }
+      });
+    } catch {
+      /* transient; scrolling up again retries */
+    } finally {
+      runInAction(() => {
+        this.loadingOlder = false;
+      });
+    }
+  };
+
   private refreshActiveMessages = async () => {
     const id = this.activeId;
     if (!id) return;
@@ -479,10 +521,16 @@ export class RootStore {
       ]);
       const rebuilt = buildConversation(conv, page);
       runInAction(() => {
-        // The open thread may live in the queue, in search results, or in the
-        // contact-history list — refresh it wherever it is.
-        for (const list of [this.convs, this.searchResults, this.contactHistory]) {
-          if (!list) continue;
+        // The reconcile refetches only the newest page: carry over whatever sits
+        // above it, or it would discard every older page already scrolled in.
+        const held = this.threadLists.flat().find((c) => c.id === id);
+        const have = new Set(rebuilt.messages.map((m) => m.id));
+        const overlap = held?.messages.findIndex((m) => have.has(m.id)) ?? -1;
+        if (held && overlap > 0) {
+          rebuilt.messages.unshift(...held.messages.slice(0, overlap));
+          rebuilt.olderCursor = held.olderCursor;
+        }
+        for (const list of this.threadLists) {
           const i = list.findIndex((c) => c.id === id);
           if (i >= 0) list[i] = rebuilt;
         }

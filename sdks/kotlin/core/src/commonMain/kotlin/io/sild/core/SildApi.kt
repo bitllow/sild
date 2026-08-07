@@ -96,9 +96,12 @@ internal class SildApi(
     suspend fun getConversation(id: String): ApiConversation =
         json.decodeFromString(api("GET", "/conversations/$id"))
 
-    /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope. */
-    suspend fun listMessages(id: String): ApiMessagesPage =
-        json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100"))
+    /** GET /v1/conversations/{id}/messages?limit=100 → the standard list envelope.
+     *  [cursor] pages BACKWARD (older); ?since= below is the opposite direction. */
+    suspend fun listMessages(id: String, cursor: String? = null): ApiMessagesPage {
+        val page = if (cursor == null) "" else "&cursor=${cursor.encodeURLParameter()}"
+        return json.decodeFromString(api("GET", "/conversations/$id/messages?limit=100$page"))
+    }
 
     /** GET /v1/conversations/{id}/messages?since={id} → messages after [since],
      *  OLDEST first. A sync read, not a page: next_cursor is always null and

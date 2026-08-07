@@ -166,6 +166,7 @@ export function buildConversation(
     lastActivity: lastTs,
     preview,
     messages: msgs,
+    olderCursor: page.has_more ? page.next_cursor : null,
   };
 }
 
