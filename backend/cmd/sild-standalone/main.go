@@ -16,6 +16,7 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/auth"
@@ -29,7 +30,6 @@ import (
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/server"
 	"github.com/bitllow/sild/backend/internal/store"
-	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -48,7 +48,8 @@ func main() {
 		if err := cfg.RequireProduction(); err != nil {
 			return err
 		}
-		selected, err = jobs.Parse(cfg.Jobs.Enabled)
+		parsed, err := jobs.Parse(cfg.Jobs.List(config.DefaultJobs))
+		selected = parsed
 		return err
 	})
 	if err != nil {
@@ -67,8 +68,7 @@ func main() {
 		}
 
 		// The whole product on one listener — what makes a single container enough.
-		srv.Engine().GET("/v1/ws", gin.WrapH(node.WSHandler()))
-		srv.Engine().GET("/v1/ws/sse", gin.WrapH(node.SSEHandler()))
+		node.Mount(srv.Engine())
 
 		if err := bootstrap(ctx, cfg, svc, st); err != nil {
 			return err
@@ -76,7 +76,7 @@ func main() {
 
 		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
 
-		if cfg.Jobs.SMTPIngest {
+		if cfg.Email.SMTPIngest {
 			go func() {
 				if err := mail.Serve(ctx, cfg.Email.SMTPListenAddr, svc.ForwardedMailHandler()); err != nil {
 					log.Printf("sild-standalone: smtp ingest: %v", err)
@@ -87,28 +87,29 @@ func main() {
 		log.Printf("sild-standalone: REST+WS on %s — db=%s broker=%s storage=%s jobs=%v smtp=%s",
 			cfg.ListenAddr(), cfg.DB.Driver, cfg.Realtime.Broker, cfg.Storage.Backend,
 			selected.Names(), smtpState(cfg))
-		return srv.Run(ctx)
+		err := srv.Run(ctx)
+		// The node holds the broker connections; sild-ws drains it the same way.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = node.Shutdown(shutdownCtx)
+		return err
 	})
 	if err != nil {
 		log.Fatalf("sild-standalone: %v", err)
 	}
 }
 
-// bootstrap creates the first tenant from env on an empty database, so a platform
-// with no shell still has a way in. Every later restart is a no-op.
+// bootstrap gives a platform with no shell a way in. See provision.Bootstrap.
 func bootstrap(ctx context.Context, cfg *config.Config, svc *domain.Service, st store.Store) error {
-	res, done, err := provision.Bootstrap(ctx, svc, st, provision.TenantSpec{
+	res, err := provision.Bootstrap(ctx, svc, st, provision.TenantSpec{
 		Name:          cfg.Bootstrap.TenantName,
 		AdminEmail:    cfg.Bootstrap.AdminEmail,
 		AdminName:     cfg.Bootstrap.AdminName,
 		AdminPassword: cfg.Bootstrap.AdminPassword,
 		APIKeyLabel:   "bootstrap",
 	})
-	if err != nil {
+	if err != nil || res == nil {
 		return err
-	}
-	if !done {
-		return nil
 	}
 	// One entry, not six: Cloud Run and k8s render each log call separately.
 	log.Printf("bootstrap created the first tenant\n"+
@@ -122,7 +123,7 @@ func bootstrap(ctx context.Context, cfg *config.Config, svc *domain.Service, st 
 }
 
 func smtpState(cfg *config.Config) string {
-	if !cfg.Jobs.SMTPIngest {
+	if !cfg.Email.SMTPIngest {
 		return "off (inbound mail via POST /v1/email/inbound)"
 	}
 	return cfg.Email.SMTPListenAddr

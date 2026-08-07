@@ -35,16 +35,16 @@ type Deps struct {
 var all = []struct {
 	name     string
 	interval time.Duration
-	run      func(context.Context, Deps) error
+	// run reports how much work the pass did, so RunOnce knows to come back.
+	run func(context.Context, Deps) (int, error)
 }{
 	{Webhook, 5 * time.Second, relayOnce},
 	{Archive, 1 * time.Hour, sweepOnce},
 }
 
-const (
-	relayBatch = 100
-	sweepBatch = 100
-)
+// batchSize bounds one pass of a job, so a tick stays short and a claim is not
+// held over more rows than it can deliver.
+const batchSize = 100
 
 // Set is the selected job names.
 type Set map[string]bool
@@ -60,7 +60,7 @@ func Parse(list string) (Set, error) {
 			continue
 		}
 		if !known(name) {
-			return nil, fmt.Errorf("unknown job %q: valid jobs are %s, %s (empty runs none)", name, Webhook, Archive)
+			return nil, fmt.Errorf("unknown job %q: valid jobs are %s (empty runs none)", name, strings.Join(allNames(), ", "))
 		}
 		s[name] = true
 	}
@@ -74,6 +74,14 @@ func known(name string) bool {
 		}
 	}
 	return false
+}
+
+func allNames() []string {
+	out := make([]string, len(all))
+	for i, j := range all {
+		out[i] = j.name
+	}
+	return out
 }
 
 // Names lists the enabled jobs in a stable order for logging.
@@ -94,46 +102,64 @@ func Start(ctx context.Context, s Set, deps Deps) {
 		if !s[j.name] {
 			continue
 		}
-		run, interval := j.run, j.interval
-		go loop(ctx, interval, func() {
-			if err := run(ctx, deps); err != nil {
+		run := j.run
+		go loop(ctx, j.interval, func() {
+			if _, err := run(ctx, deps); err != nil {
 				log.Printf("%v", err)
 			}
 		})
 	}
 }
 
-// RunOnce runs each selected job exactly once and returns. It is what a scheduled
-// runner needs — a Cloud Run Job, a k8s CronJob, `sild-worker --once` — where a
-// process that never exits is a task that never succeeds.
+// RunOnce drains each selected job and returns. It is what a scheduled runner
+// needs — a Cloud Run Job, a k8s CronJob, `sild-worker --once` — where a process
+// that never exits is a task that never succeeds. It drains rather than running a
+// single pass because one pass is sized for a 5-second tick: on a cron schedule
+// that caps throughput at a batch per run and the backlog grows unnoticed.
 func RunOnce(ctx context.Context, s Set, deps Deps) error {
 	var errs []error
 	for _, j := range all {
 		if s[j.name] {
-			errs = append(errs, j.run(ctx, deps))
+			errs = append(errs, drain(ctx, j.run, deps))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func relayOnce(ctx context.Context, deps Deps) error {
-	if _, err := deps.Relay.ProcessOnce(ctx, relayBatch); err != nil {
-		return fmt.Errorf("webhook relay: %w", err)
+// drain repeats a job until a pass does no work, ctx ends, or it errors. Both
+// jobs leave what they could not do rescheduled or unclaimed, so "no work" is a
+// terminating condition rather than "nothing is left".
+func drain(ctx context.Context, run func(context.Context, Deps) (int, error), deps Deps) error {
+	for {
+		n, err := run(ctx, deps)
+		if err != nil {
+			return err
+		}
+		if n == 0 || ctx.Err() != nil {
+			return nil
+		}
 	}
-	return nil
 }
 
-func sweepOnce(ctx context.Context, deps Deps) error {
-	n, ran, err := deps.Sweep.RunSweep(ctx, sweepBatch)
+func relayOnce(ctx context.Context, deps Deps) (int, error) {
+	n, err := deps.Relay.ProcessOnce(ctx, batchSize)
+	if err != nil {
+		return 0, fmt.Errorf("webhook relay: %w", err)
+	}
+	return n, nil
+}
+
+func sweepOnce(ctx context.Context, deps Deps) (int, error) {
+	n, ran, err := deps.Sweep.RunSweep(ctx, batchSize)
 	switch {
 	case err != nil:
-		return fmt.Errorf("archive sweep: %w", err)
+		return 0, fmt.Errorf("archive sweep: %w", err)
 	case !ran:
 		log.Printf("archive sweep: another process holds the lease — skipping")
 	case n > 0:
 		log.Printf("archive sweep: archived %d conversations", n)
 	}
-	return nil
+	return n, nil
 }
 
 // loop runs fn immediately, then every interval until ctx is done.

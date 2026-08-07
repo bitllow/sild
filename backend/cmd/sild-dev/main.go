@@ -66,8 +66,7 @@ func main() {
 		}
 
 		// Mount the WS/SSE transport on the same server (single port).
-		srv.Engine().GET("/v1/ws", gin.WrapH(node.WSHandler()))
-		srv.Engine().GET("/v1/ws/sse", gin.WrapH(node.SSEHandler()))
+		node.Mount(srv.Engine())
 
 		// Phase 3 drop-in: /widget.js is mounted from the embedded bundle in
 		// handler.Mount (so sild-api serves it too). Here we add the dev-only
@@ -152,8 +151,9 @@ func main() {
 			}
 		}()
 
-		// The same jobs, on the same schedule, as the deployed binaries.
-		selected, err := jobs.Parse(devJobs(cfg))
+		// The same jobs, on the same schedule, as the deployed binaries — but the
+		// relay only by default, since the archive sweep purges hot rows.
+		selected, err := jobs.Parse(cfg.Jobs.List(jobs.Webhook))
 		if err != nil {
 			return err
 		}
@@ -167,19 +167,10 @@ func main() {
 	}
 }
 
-// devJobs keeps `make dev` non-destructive: the relay only, since the archive
-// sweep purges hot rows. SILD_JOBS opts in.
-func devJobs(cfg *config.Config) string {
-	if _, set := os.LookupEnv("SILD_JOBS"); set {
-		return cfg.Jobs.Enabled
-	}
-	return jobs.Webhook
-}
-
 // devSeed creates a ready-to-use tenant + owner admin + API key on first run so
 // you can log into the inbox (email/password) and call the API immediately.
 func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *config.Config) {
-	res, done, err := provision.Bootstrap(ctx, svc, st, provision.TenantSpec{
+	res, err := provision.Bootstrap(ctx, svc, st, provision.TenantSpec{
 		Name: "Dev Tenant", AdminEmail: "admin@sild.local", AdminName: "Eva Marleen",
 		AdminPassword: "password123", APIKeyLabel: "dev",
 	})
@@ -187,7 +178,7 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *conf
 		log.Printf("dev seed: %v", err)
 		return
 	}
-	if !done { // already seeded
+	if res == nil { // already seeded
 		if ids, err := st.Tenants().AllIDs(ctx); err == nil && len(ids) > 0 {
 			if ch, err := svc.GetEmailChannel(ctx, ids[0]); err == nil {
 				log.Printf("sild-dev: forward email to %s (SMTP %s) to open a conversation", ch.ForwardingAddress, cfg.Email.SMTPListenAddr)

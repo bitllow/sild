@@ -58,7 +58,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	c, err := di.New()
+	// No broker: these commands write through domain.Service and publish nothing
+	// anyone is connected to receive, so the CLI must not need Redis to be up.
+	c, err := di.New(di.WithoutRealtime())
 	if err != nil {
 		log.Fatalf("di: %v", err)
 	}

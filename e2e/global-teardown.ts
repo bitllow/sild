@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { STANDALONE_TEMP_PATHS } from "./support/standalone";
 
 // Remove the per-run temp SQLite files + local upload dir. The backend process
 // itself is torn down by Playwright's webServer manager.
@@ -11,5 +12,6 @@ export default async function globalTeardown() {
     targets.push(db, `${db}-wal`, `${db}-shm`, `${db}-journal`);
   }
   targets.push(path.join(os.tmpdir(), `sild-e2e-uploads-${process.pid}`));
+  targets.push(...STANDALONE_TEMP_PATHS);
   await Promise.all(targets.map((t) => rm(t, { recursive: true, force: true }).catch(() => {})));
 }

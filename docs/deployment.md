@@ -70,6 +70,14 @@ different architecture. N standalone replicas behind a load balancer scale exact
 like N `api` + M `ws` pods, because each replica holds its own connections and
 fans out through the same Redis broker.
 
+> **Attachment storage caps this today.** `STORAGE_BACKEND=gcs` and `s3` are not
+> implemented — `storage.New` returns `"gcs storage backend not yet wired"` and the
+> process will not start. `local` is the only working backend, so every replica
+> needs one genuinely shared filesystem at `STORAGE_LOCAL_DIR` (a compose volume,
+> an RWX PVC). Where you cannot provide one — Cloud Run, multi-host — you are held
+> to a single replica until the object-storage backend lands. Everything below that
+> says `gcs` is what the topology wants, not what runs.
+
 It requires Postgres or MySQL and Redis, for the same reason the split deployment
 does: SQLite is single-node, and the memory broker never leaves the process, so
 events published by one replica would never reach clients connected to another.
@@ -101,10 +109,11 @@ docker compose -f deploy/standalone/compose.yaml up -d --scale sild=3
 Nothing else changes: the outbox claim and the archive lease already make the
 in-process jobs safe on every replica (ARCHITECTURE §4), and Redis already carries
 realtime between them. Each replica takes its own host port from the published
-range (8080, 8081, …) — put your own load balancer in front of them. On more than
-one host, switch `STORAGE_BACKEND` to `gcs`/`s3`: the compose volume is only shared
-within one Docker host, and `STORAGE_LOCAL_SHARED=true` is an assertion the backend
-takes at its word rather than something it can verify.
+range (8080, 8081, …) — put your own load balancer in front of them. Stay on one
+Docker host: the compose volume is shared only within it, and
+`STORAGE_LOCAL_SHARED=true` is an assertion the backend takes at its word rather
+than something it can verify. Spreading replicas across hosts needs the
+object-storage backend, which is not wired yet (see the note under Tiers).
 
 ## Kubernetes
 
@@ -114,8 +123,10 @@ split topology. Both read the same ConfigMap and Secret; see
 
 ## Cloud Run
 
-Cloud Run fits standalone well — one listener, one container, `$PORT` injected —
-with three caveats that come from Cloud Run, not from Sild.
+Cloud Run fits standalone well — one listener, one container, `$PORT` injected.
+Not yet, though: it needs object storage, and that backend is a stub (see Tiers),
+so this section is the shape to deploy once it lands rather than a working recipe.
+The caveats below come from Cloud Run, not from Sild.
 
 ```sh
 gcloud run deploy sild \
@@ -136,8 +147,9 @@ gcloud run deploy sild \
   timeout, Cloud Run cuts long-lived connections at the request deadline. Clients
   reconnect and catch up (§5.4), but affinity keeps a reconnect on the instance
   that already holds the subscription state.
-- **`STORAGE_BACKEND=gcs` is mandatory above one instance.** The local backend
-  writes to the container filesystem, which no other instance can read.
+- **`STORAGE_BACKEND=gcs` is mandatory at any instance count** — the local backend
+  writes to the container filesystem, which does not survive a revision — and it is
+  the piece that is not implemented yet.
 - **Cloud SQL** through the connector socket DSN
   (`host=/cloudsql/PROJECT:REGION:INSTANCE user=… dbname=…`), and **Memorystore**
   for Redis via a VPC connector.
@@ -246,7 +258,7 @@ mechanism.
 | `SILD_WS_ADDR` | — | ignored | ignored | `:8081` (`sild-ws`) |
 | `SILD_JOBS` | — | `webhook,archive` | `""` + a Job | — (`sild-worker`) |
 | `SILD_SMTP_INGEST` | — | `false` | `false` | — (`sild-mail`) |
-| `STORAGE_BACKEND` | `local` | `local` (shared volume) or `gcs` | `gcs` | `gcs`/`s3` |
+| `STORAGE_BACKEND` | `local` | `local` (shared volume) | `gcs` (not wired) | `local` (RWX) |
 | `STORAGE_SIGNING_KEY` | — | required with `local` | — | required with `local` |
 | `STORAGE_LOCAL_SHARED` | — | `true` (one volume) | — | `true` |
 

@@ -30,8 +30,9 @@ node-local `hostPath`, and `sild-config` asserts `STORAGE_LOCAL_SHARED=true` —
 which is a true statement at one replica on one node, and a false one the moment
 a second pod is scheduled elsewhere. `config.Validate` takes that assertion at
 its word, so it will *not* catch this for you: pods would start happily and
-answer 404 for each other's uploads. Set `STORAGE_BACKEND=gcs` (or `s3`) and drop
-the volume first.
+answer 404 for each other's uploads. Replace the `hostPath` with an RWX PVC
+mounted at the same path first. `STORAGE_BACKEND=gcs`/`s3` is the cleaner answer
+and is not implemented yet — the backend refuses to start on it.
 
 Then scale, and add an HPA if you want it:
 

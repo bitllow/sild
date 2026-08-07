@@ -16,9 +16,9 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-# build.mjs also syncs the bundle into ../backend/internal/webasset; that path
-# doesn't exist in this isolated context, so create it to keep the copy happy.
-RUN mkdir -p /backend/internal/webasset && npm run build
+# build.mjs also syncs the bundle into ../backend/internal/webasset/dist; that
+# path doesn't exist in this isolated context, so create it to keep the copy happy.
+RUN mkdir -p /backend/internal/webasset/dist && npm run build
 
 # 2. Compile the Go binaries with the freshly built widget embedded. Runs
 # natively on the BUILD platform and cross-compiles to the target arch — CGO is
@@ -33,14 +33,10 @@ COPY backend/ ./
 COPY --from=web /web/dist/widget.js   ./internal/webasset/dist/widget.js
 COPY --from=web /web/public/demo.html ./internal/webasset/demo.html
 ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH
-RUN go build -o /out/sild-api     ./cmd/sild-api     && \
-    go build -o /out/sild-ws      ./cmd/sild-ws      && \
-    go build -o /out/sild-worker  ./cmd/sild-worker  && \
-    go build -o /out/sild-migrate ./cmd/sild-migrate && \
-    go build -o /out/sild-mail    ./cmd/sild-mail    && \
-    go build -o /out/sild-dev     ./cmd/sild-dev     && \
-    go build -o /out/sild-admin   ./cmd/sild-admin   && \
-    go build -o /out/sild-standalone ./cmd/sild-standalone
+# One invocation over ./cmd/...: the package graph loads once, the mains link in
+# parallel, and no list of binaries needs maintaining as new ones land.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    go build -o /out/ ./cmd/...
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/ /usr/local/bin/

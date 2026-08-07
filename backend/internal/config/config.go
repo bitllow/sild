@@ -55,18 +55,24 @@ type Bootstrap struct {
 	AdminPassword string `env:"SILD_BOOTSTRAP_ADMIN_PASSWORD"`
 }
 
-// Jobs selects the background work a process runs in-process. Every job is
-// lease-guarded, so any number of processes may enable the same one.
+// Jobs selects the background work a process runs in-process (package jobs).
 type Jobs struct {
-	// Enabled has no envDefault because env would fill it in for an empty value
-	// too, and SILD_JOBS="" means something: a replica that runs no jobs.
 	Enabled string `env:"SILD_JOBS"`
-	// SMTPIngest runs the forwarded-mail receiver in-process. Off by default: the
-	// PaaS targets have no raw TCP ingress and use POST /v1/email/inbound.
-	SMTPIngest bool `env:"SILD_SMTP_INGEST" envDefault:"false"`
+	// Set records that SILD_JOBS was present, which env cannot express: it skips
+	// an empty value entirely, and SILD_JOBS="" means something — a replica that
+	// runs no jobs. Load fills this; each binary supplies its own default.
+	Set bool `env:"-"`
 }
 
-// DefaultJobs is what a process runs when SILD_JOBS is not set at all.
+// List is the job list, or def where SILD_JOBS is unset.
+func (j Jobs) List(def string) string {
+	if !j.Set {
+		return def
+	}
+	return j.Enabled
+}
+
+// DefaultJobs is what a serving or worker process runs when SILD_JOBS is unset.
 const DefaultJobs = "webhook,archive"
 
 // Email configures the forwarding ingestion daemon (inbound) and the outbound
@@ -79,6 +85,9 @@ type Email struct {
 	// SMTPListenAddr is where the sild-mail receiver daemon listens. Behind the
 	// MX in production (:25); a high port in dev so it needs no privileges.
 	SMTPListenAddr string `env:"SILD_SMTP_ADDR" envDefault:":2525"`
+	// SMTPIngest runs that receiver in-process (sild-standalone). Off by default:
+	// the PaaS targets have no raw TCP ingress and use POST /v1/email/inbound.
+	SMTPIngest bool `env:"SILD_SMTP_INGEST" envDefault:"false"`
 
 	// Outbound relay (agent replies leave through it). When RelayAddr is empty
 	// the mailer is a no-op (zero-config dev keeps working).
@@ -153,9 +162,7 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, set := os.LookupEnv("SILD_JOBS"); !set {
-		cfg.Jobs.Enabled = DefaultJobs
-	}
+	_, cfg.Jobs.Set = os.LookupEnv("SILD_JOBS")
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

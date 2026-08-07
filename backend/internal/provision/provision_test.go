@@ -106,11 +106,11 @@ func TestARejectedSpecWritesNothing(t *testing.T) {
 	assertTenantCount(t, h, 0)
 
 	// And bootstrap is still able to run, which is the property that matters.
-	_, done, err := provision.Bootstrap(context.Background(), h.Svc, h.Store, provision.TenantSpec{
+	res, err := provision.Bootstrap(context.Background(), h.Svc, h.Store, provision.TenantSpec{
 		Name: "Acme", AdminEmail: "owner@acme.test", AdminPassword: "correct-horse",
 	})
-	if err != nil || !done {
-		t.Fatalf("bootstrap after a rejected spec: done=%v err=%v", done, err)
+	if err != nil || res == nil {
+		t.Fatalf("bootstrap after a rejected spec: res=%v err=%v", res, err)
 	}
 }
 
@@ -122,16 +122,15 @@ func TestBootstrapOnlyFiresOnAnEmptyDatabase(t *testing.T) {
 	ctx := context.Background()
 	spec := provision.TenantSpec{Name: "Acme", AdminEmail: "owner@acme.test", AdminPassword: "correct-horse"}
 
-	res, done, err := provision.Bootstrap(ctx, h.Svc, h.Store, spec)
-	if err != nil || !done {
-		t.Fatalf("first bootstrap: done=%v err=%v", done, err)
+	if res, err := provision.Bootstrap(ctx, h.Svc, h.Store, spec); err != nil || res == nil {
+		t.Fatalf("first bootstrap: res=%v err=%v", res, err)
 	}
 
-	_, done, err = provision.Bootstrap(ctx, h.Svc, h.Store, spec)
+	again, err := provision.Bootstrap(ctx, h.Svc, h.Store, spec)
 	if err != nil {
 		t.Fatalf("second bootstrap: %v", err)
 	}
-	if done {
+	if again != nil {
 		t.Fatal("bootstrap ran again on a populated database")
 	}
 	assertTenantCount(t, h, 1)
@@ -140,18 +139,17 @@ func TestBootstrapOnlyFiresOnAnEmptyDatabase(t *testing.T) {
 	if _, _, err := h.Svc.CreateSessionWithPassword(ctx, "owner@acme.test", "correct-horse"); err != nil {
 		t.Fatalf("the bootstrapped owner stopped working: %v", err)
 	}
-	_ = res
 }
 
 // Unconfigured bootstrap must be a no-op, not an error: every standalone replica
 // runs this code path on every start, and most deployments never set the vars.
 func TestBootstrapWithoutConfigDoesNothing(t *testing.T) {
 	h := testutil.New(t)
-	_, done, err := provision.Bootstrap(context.Background(), h.Svc, h.Store, provision.TenantSpec{})
+	res, err := provision.Bootstrap(context.Background(), h.Svc, h.Store, provision.TenantSpec{})
 	if err != nil {
 		t.Fatalf("unconfigured bootstrap errored: %v", err)
 	}
-	if done {
+	if res != nil {
 		t.Fatal("bootstrapped with no configuration")
 	}
 	assertTenantCount(t, h, 0)
@@ -173,7 +171,8 @@ func TestConcurrentBootstrapCreatesOneTenant(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, created[i], errs[i] = provision.Bootstrap(context.Background(), h.Svc, h.Store, spec)
+			res, err := provision.Bootstrap(context.Background(), h.Svc, h.Store, spec)
+			created[i], errs[i] = res != nil, err
 		}()
 	}
 	close(start)

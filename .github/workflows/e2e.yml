@@ -240,17 +240,8 @@ jobs:
         working-directory: e2e
         run: npm install --no-audit --no-fund
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package.json') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Chromium
-        working-directory: e2e
-        run: npx playwright install --with-deps chromium
-
+      # No browser install: this suite asserts the deployment over `request`, and
+      # never opens a page.
       # webServer[] runs sild-migrate (the only thing that migrates, §4) and then
       # sild-standalone against the services above.
       - name: Run standalone deployment tests

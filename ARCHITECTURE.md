@@ -60,7 +60,11 @@ backend/
 ├── cmd/                      # one binary per service (see §3a)
 │   ├── sild-api/             #   REST (gin)        — stateless
 │   ├── sild-ws/              #   realtime (Centrifuge) — holds connections
-│   ├── sild-worker/          #   background jobs    — --jobs selects subset
+│   ├── sild-worker/          #   background jobs    — SILD_JOBS selects subset
+│   ├── sild-mail/            #   forwarded-mail SMTP ingest
+│   ├── sild-standalone/      #   every serving role in one process (§3a)
+│   ├── sild-admin/           #   operator CLI — tenants, operators, API keys
+│   ├── sild-dev/             #   zero-infra all-in-one, dev only
 │   └── sild-migrate/         #   AutoMigrate, then exit
 ├── internal/
 │   ├── config/               # env-driven config (driver + DSN + addr)
@@ -145,10 +149,11 @@ scale independently.
 
 - Email **inbound** (`POST /v1/email/inbound`) is an HTTP route with
   provider-signature auth → it lives **inside `sild-api`**.
-- Email **outbound**, **webhook outbox relay**, **push fan-out**, and the
-  **archival job** are background → **`sild-worker`**, selected via
-  `--jobs webhook,push,email,archive`. Archival may also be triggered
-  on-demand/cron (`sild-worker --jobs archive`).
+- The **webhook outbox relay** and the **archival job** are background →
+  **`sild-worker`**, selected via `SILD_JOBS` (default `webhook,archive`).
+  Archival may also be triggered on-demand/cron (`sild-worker --once` with
+  `SILD_JOBS=archive`). Outbound email and push fan-out still run inline on the
+  message path.
 - Each main.go stays thin: build the shared `di` container, then run its role.
   Shared providers (config, db, store, search, auth, broker) are registered
   once in `internal/di`; each binary differs only in which long-running
@@ -454,7 +459,7 @@ make test
 # run individually (REST-only works against just the DB):
 make run-api          # sild-api   :8080
 make run-ws           # sild-ws    :8081   (needs Redis broker)
-make run-worker       # sild-worker --jobs webhook,push,email
+make run-worker       # sild-worker (SILD_JOBS, default webhook,archive)
 make migrate          # sild-migrate, then exit
 
 # full stack the easy way — DB + Redis + all four binaries:

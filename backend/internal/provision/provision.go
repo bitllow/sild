@@ -83,15 +83,16 @@ func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result,
 }
 
 // Bootstrap creates spec's tenant only while no tenant exists, so restarts and
-// extra replicas are no-ops. done reports whether this call created it.
-func Bootstrap(ctx context.Context, svc *domain.Service, st store.Store, spec TenantSpec) (res *Result, done bool, err error) {
+// extra replicas are no-ops. A nil Result means this call did not create it.
+func Bootstrap(ctx context.Context, svc *domain.Service, st store.Store, spec TenantSpec) (*Result, error) {
 	if strings.TrimSpace(spec.Name) == "" {
-		return nil, false, nil // not configured
+		return nil, nil // not configured
 	}
 	empty, err := noTenants(ctx, st)
 	if err != nil || !empty {
-		return nil, false, err
+		return nil, err
 	}
+	var res *Result
 	// Skip rather than wait when another replica holds the lease: this runs before
 	// the listener binds, and blocking here would fail the startup probe.
 	_, err = store.RunLeased(ctx, st.Leases(), leaseBootstrap, leaseTTL, func(ctx context.Context) error {
@@ -100,13 +101,12 @@ func Bootstrap(ctx context.Context, svc *domain.Service, st store.Store, spec Te
 			return err
 		}
 		res, err = Tenant(ctx, svc, spec)
-		done = err == nil
 		return err
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return res, done, nil
+	return res, nil
 }
 
 func noTenants(ctx context.Context, st store.Store) (bool, error) {

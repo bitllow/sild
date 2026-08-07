@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { BACKEND_URL, uid } from "../../support/env";
-import { BOOTSTRAP, runAdmin } from "../../support/standalone";
+import { BOOTSTRAP, createTenant, runAdmin } from "../../support/standalone";
 
 // Covers the DEPLOYMENT, not the product: one process on one port, a production
 // posture, a way in on a fresh database, and a CLI that reaches the same store.
@@ -82,14 +82,10 @@ test.describe("sild-admin", () => {
   // proves the two agree on the schema sild-migrate gave them.
   test("creates a tenant whose API key works against the running server", async ({ request }) => {
     const name = uid("Acme");
-    const out = runAdmin(["tenant", "create", "--name", name, "--admin-email", `${name}@acme.test`]);
-
-    const tenantId = /tenant_id\s+(\S+)/.exec(out)?.[1];
-    const apiKey = /api_key\s+(\S+)/.exec(out)?.[1];
-    const forwarding = /forwarding_address\s+(\S+)/.exec(out)?.[1];
+    const { tenantId, apiKey, forwardingAddress } = createTenant(name, `${name}@acme.test`);
     expect(tenantId, "printed the tenant id").toBeTruthy();
     expect(apiKey, "printed the API key once").toBeTruthy();
-    expect(forwarding, "printed the forwarding address").toContain("@");
+    expect(forwardingAddress, "printed the forwarding address").toContain("@");
 
     // The key the CLI printed authenticates against the process already running.
     const created = await request.post(`${BACKEND_URL}/v1/conversations`, {
@@ -106,10 +102,7 @@ test.describe("sild-admin", () => {
 
     // A CLI-minted key is a tenant key: another tenant's must not reach this one.
     const other = uid("Other");
-    const otherOut = runAdmin([
-      "tenant", "create", "--name", other, "--admin-email", `${other}@acme.test`,
-    ]);
-    const otherKey = /api_key\s+(\S+)/.exec(otherOut)?.[1] as string;
+    const { apiKey: otherKey } = createTenant(other, `${other}@acme.test`);
     expect(otherKey, "second tenant has its own key").toBeTruthy();
     expect(otherKey).not.toBe(apiKey);
 
@@ -123,8 +116,7 @@ test.describe("sild-admin", () => {
   test("sets a password from stdin and refuses one from the command line", async ({ request }) => {
     const name = uid("Pw");
     const email = `${name}@acme.test`;
-    const out = runAdmin(["tenant", "create", "--name", name, "--admin-email", email]);
-    const tenantId = /tenant_id\s+(\S+)/.exec(out)?.[1] as string;
+    const tenantId = createTenant(name, email).tenantId as string;
 
     runAdmin(["agent", "set-password", "--tenant", tenantId, "--email", email, "--password", "-"], "from-stdin-pw\n");
 

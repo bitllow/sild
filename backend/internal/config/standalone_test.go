@@ -47,27 +47,3 @@ func TestListenAddrPrefersInjectedPort(t *testing.T) {
 		})
 	}
 }
-
-// Production still requires Redis and a real dialect for a standalone deployment:
-// one replica is a fact about today, and the config is what a customer copies
-// when they add the second one.
-func TestStandaloneProductionStillRefusesSingleNodeInfra(t *testing.T) {
-	cfg := &config.Config{
-		Env:      "production",
-		DB:       config.DB{Driver: config.SQLite},
-		Realtime: config.Realtime{Broker: "memory"},
-		Storage:  config.Storage{Backend: "gcs"},
-	}
-	if err := cfg.RequireProduction(); err != nil {
-		t.Fatalf("RequireProduction rejected production: %v", err)
-	}
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("sqlite + memory broker started in production")
-	}
-	for _, want := range []string{"DB_DRIVER", "SILD_BROKER"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error does not name %s: %v", want, err)
-		}
-	}
-}

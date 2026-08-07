@@ -1,5 +1,5 @@
 BIN := bin
-BINARIES := sild-api sild-ws sild-worker sild-migrate sild-mail
+BINARIES := sild-api sild-ws sild-worker sild-migrate sild-mail sild-standalone sild-admin
 
 .PHONY: build $(BINARIES) dev run-api run-ws run-worker run-mail migrate test test-pg tidy fmt vet docker clean
 
@@ -14,7 +14,7 @@ $(BINARIES):
 
 run-api: ; go run ./cmd/sild-api
 run-ws: ; go run ./cmd/sild-ws
-run-worker: ; go run ./cmd/sild-worker -jobs webhook,push,email
+run-worker: ; go run ./cmd/sild-worker
 run-mail: ; go run ./cmd/sild-mail
 migrate: ; go run ./cmd/sild-migrate
 
