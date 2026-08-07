@@ -67,11 +67,16 @@ func (b *gcsBucket) SignGet(_ context.Context, objectKey string, ttl time.Durati
 	return signed, nil
 }
 
+// defaultChunkSize mirrors the library's own default (storage.Writer.ChunkSize).
+const defaultChunkSize = 16 << 20
+
 func (b *gcsBucket) Put(ctx context.Context, objectKey string, data []byte, mimeType string) error {
 	w := b.handle.Object(objectKey).NewWriter(ctx)
 	w.ContentType = mimeType
-	// Default is a 16 MiB buffer per write; we already hold the whole object.
-	w.ChunkSize = len(data)
+	// The writer allocates a buffer of ChunkSize, so size it to the object we
+	// already hold — but never above the default, or a large archive pays for a
+	// retry buffer as big as itself on top of the bytes and the JSON.
+	w.ChunkSize = min(len(data), defaultChunkSize)
 	if _, err := w.Write(data); err != nil {
 		_ = w.Close()
 		return fmt.Errorf("gcs put %s: %w", objectKey, err)

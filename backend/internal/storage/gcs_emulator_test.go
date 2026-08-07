@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -62,5 +63,25 @@ func TestGCSGetMissingObjectIsNotFound(t *testing.T) {
 	_, err := bucket.Get(context.Background(), "t_round/does-not-exist.json")
 	if !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("missing object gave %v, want ErrObjectNotFound", err)
+	}
+}
+
+// A large object must not size the writer's retry buffer to itself: the archive
+// sweep already holds the conversation and its JSON, and a third copy of a long
+// history OOMs the worker.
+func TestGCSPutCapsTheWriterBuffer(t *testing.T) {
+	bucket := emulatorBucket(t)
+	big := bytes.Repeat([]byte("x"), defaultChunkSize+4096)
+	key := bucket.NewObjectKey("t_big", "big.bin")
+
+	if err := bucket.Put(context.Background(), key, big, "application/octet-stream"); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	got, err := bucket.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got) != len(big) {
+		t.Fatalf("round-tripped %d bytes, wrote %d", len(got), len(big))
 	}
 }
