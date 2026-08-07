@@ -41,6 +41,9 @@ spec:
             # the schema belongs to the sild-migrate Job (ARCHITECTURE §4) and a
             # demo restart mid-rollout would otherwise race an operator.
             - { name: SILD_DEV_MIGRATE, value: "false" }
+            # Demo-only: keep attachments on this pod's emptyDir rather than
+            # needing bucket credentials. One replica, throwaway data.
+            - { name: STORAGE_BACKEND, value: "local" }
             - { name: STORAGE_LOCAL_DIR, value: "/data/uploads" }
             - { name: STORAGE_PUBLIC_URL, value: "https://sild.bitllow.com" }
           ports:

@@ -62,7 +62,7 @@ and a replica count, not a rebuild. Full guide:
 |---|---|---|---|---|
 | **Dev** | `sild-dev` | SQLite | memory | 1, dev only |
 | **One container** | `sild-standalone` + Postgres + Redis (+ inbox) | Postgres | Redis | N |
-| **Cloud Run / PaaS** | same image, N revisions + a jobs runner | Cloud SQL | Memorystore | needs object storage — not wired yet |
+| **Cloud Run / PaaS** | same image, N revisions + a jobs runner | Cloud SQL | Memorystore | N |
 | **Split** | `api` / `ws` / `worker` / `mail` | Postgres | Redis | each on its own axis |
 
 ```bash

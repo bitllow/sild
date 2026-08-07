@@ -59,7 +59,7 @@ func TestRunOnceReturns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	sink, err := archive.New(h.Cfg)
+	sink, err := archive.New(h.Cfg, h.Bucket)
 	if err != nil {
 		t.Fatalf("sink: %v", err)
 	}

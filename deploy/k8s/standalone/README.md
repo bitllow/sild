@@ -25,24 +25,16 @@ kubectl -n sild exec -it deploy/sild-standalone -- \
 
 ## Scaling
 
-**Switch attachment storage before you add a replica.** The Deployment mounts a
-node-local `hostPath`, and `sild-config` asserts `STORAGE_LOCAL_SHARED=true` —
-which is a true statement at one replica on one node, and a false one the moment
-a second pod is scheduled elsewhere. `config.Validate` takes that assertion at
-its word, so it will *not* catch this for you: pods would start happily and
-answer 404 for each other's uploads. Replace the `hostPath` with an RWX PVC
-mounted at the same path first. `STORAGE_BACKEND=gcs`/`s3` is the cleaner answer
-and is not implemented yet — the backend refuses to start on it.
-
-Then scale, and add an HPA if you want it:
-
 ```sh
 kubectl -n sild scale deploy/sild-standalone --replicas=3
 ```
 
+Nothing else changes: attachments and archived conversations go to the bucket in
+`05-config.yaml`, so every replica reads what any other wrote. Add an HPA if you
+want one — long-lived WS connections make scale-down disruptive, so keep the
+stabilization window generous (clients reconnect and catch up, §5.4):
+
 ```yaml
-# Long-lived WS connections make scale-down disruptive — clients reconnect and
-# catch up (§5.4), but a generous stabilization window avoids churn.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata: { name: sild-standalone, namespace: sild }
@@ -57,9 +49,10 @@ spec:
     scaleDown: { stabilizationWindowSeconds: 600 }
 ```
 
-It is a snippet rather than a file in this directory on purpose: `kubectl apply -f
-deploy/k8s/standalone/` would otherwise install autoscaling over node-local
-storage in one command.
+Set `STORAGE_BUCKET`, then give the pods' service account the two IAM grants and
+the CORS policy in [The bucket](../../../docs/deployment.md#the-bucket) — signed
+URLs go through IAM SignBlob, so workload identity is enough and no key file is
+needed. Skipping the CORS policy leaves signed URLs that fail in the browser only.
 
 The jobs need no attention: the outbox claim and the archive lease make every
 replica safe to run them (ARCHITECTURE §4). If you would rather keep serving pods
