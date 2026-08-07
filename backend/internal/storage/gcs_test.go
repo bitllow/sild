@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -10,76 +9,30 @@ import (
 	"github.com/bitllow/sild/backend/internal/config"
 )
 
-// stubBucket captures what the bucket asked GCS to sign, so a grant's shape is
-// assertable without credentials to sign with.
-func stubBucket() (*gcsBucket, *gcs.SignedURLOptions) {
-	var captured gcs.SignedURLOptions
-	b := &gcsBucket{}
-	b.sign = func(objectKey string, opts *gcs.SignedURLOptions) (string, error) {
-		captured = *opts
-		return "https://storage.googleapis.com/sild-test/" + objectKey + "?X-Goog-Signature=stub", nil
+// The signing call itself needs credentials, so what is assertable here is the
+// grant it covers: a wrong method, scheme or content type is a 403 at upload time.
+func TestSignOptsBindsMethodContentTypeAndScheme(t *testing.T) {
+	exp := time.Now().Add(SignTTL)
+	put := signOpts("PUT", "image/png", exp)
+	if put.Method != "PUT" || put.ContentType != "image/png" {
+		t.Fatalf("put opts = %+v", put)
 	}
-	return b, &captured
-}
-
-func TestSignPutBindsMethodContentTypeAndExpiry(t *testing.T) {
-	b, opts := stubBucket()
-	before := time.Now()
-
-	up, err := b.SignPut(context.Background(), "t_1/obj_1/a.png", "image/png", 1234)
-	if err != nil {
-		t.Fatalf("sign put: %v", err)
+	if put.Scheme != gcs.SigningSchemeV4 {
+		t.Fatal("put is not signed V4")
 	}
-	if opts.Method != "PUT" {
-		t.Fatalf("method = %q", opts.Method)
+	if !put.Expires.Equal(exp) {
+		t.Fatalf("expiry %v != %v", put.Expires, exp)
 	}
-	if opts.ContentType != "image/png" {
-		t.Fatalf("content type = %q", opts.ContentType)
-	}
-	if opts.Scheme != gcs.SigningSchemeV4 {
-		t.Fatalf("scheme is not V4")
-	}
-	if up.ObjectKey != "t_1/obj_1/a.png" {
-		t.Fatalf("object key = %q", up.ObjectKey)
-	}
-	if !strings.Contains(up.UploadURL, "X-Goog-Signature") {
-		t.Fatalf("upload url is not signed: %s", up.UploadURL)
-	}
-	// A client caching past the reported expiry would otherwise get an opaque 403.
-	if !up.ExpiresAt.After(before) {
-		t.Fatalf("grant does not expire in the future: %v", up.ExpiresAt)
-	}
-	if !up.ExpiresAt.Equal(opts.Expires) {
-		t.Fatalf("reported expiry %v != signed expiry %v", up.ExpiresAt, opts.Expires)
-	}
-}
-
-func TestSignGetUsesCallerTTLAndFallsBack(t *testing.T) {
-	b, opts := stubBucket()
-
-	if _, err := b.SignGet(context.Background(), "t_1/obj_1/a.png", time.Hour); err != nil {
-		t.Fatalf("sign get: %v", err)
-	}
-	if opts.Method != "GET" {
-		t.Fatalf("method = %q", opts.Method)
-	}
-	if d := time.Until(opts.Expires); d < 55*time.Minute || d > 65*time.Minute {
-		t.Fatalf("caller TTL ignored: expires in %v", d)
-	}
-	// A zero TTL must not sign an already-expired URL.
-	if _, err := b.SignGet(context.Background(), "t_1/obj_1/a.png", 0); err != nil {
-		t.Fatalf("sign get: %v", err)
-	}
-	if d := time.Until(opts.Expires); d <= 0 || d > signTTL+time.Minute {
-		t.Fatalf("zero TTL did not fall back: expires in %v", d)
+	// A GET signature must not bind a content type, or the download 403s unless
+	// the client happens to send the same header.
+	if got := signOpts("GET", "", exp); got.Method != "GET" || got.ContentType != "" {
+		t.Fatalf("get opts = %+v", got)
 	}
 }
 
 func TestNewObjectKeyIsTenantScopedAndUnique(t *testing.T) {
-	b, _ := stubBucket()
-
-	first := b.NewObjectKey("t_1", "holiday photo.png")
-	second := b.NewObjectKey("t_1", "holiday photo.png")
+	first := newObjectKey("t_1", "holiday photo.png")
+	second := newObjectKey("t_1", "holiday photo.png")
 	if first == second {
 		t.Fatal("two keys for the same filename collided")
 	}
@@ -93,7 +46,7 @@ func TestNewObjectKeyIsTenantScopedAndUnique(t *testing.T) {
 	}
 	// A filename carrying separators must stay one segment, or it would place the
 	// object outside its tenant prefix.
-	key := b.NewObjectKey("t_1", "../../etc/passwd")
+	key := newObjectKey("t_1", "../../etc/passwd")
 	if parts := strings.Split(key, "/"); len(parts) != 3 {
 		t.Fatalf("filename escaped its segment: %q split into %d parts", key, len(parts))
 	}

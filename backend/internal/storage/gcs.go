@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,9 +18,17 @@ import (
 // rather than a key file.
 type gcsBucket struct {
 	handle *gcs.BucketHandle
-	// sign is BucketHandle.SignedURL in production and a stub in tests, which
-	// have no credentials to sign with.
-	sign func(objectKey string, opts *gcs.SignedURLOptions) (string, error)
+}
+
+// signOpts is the grant a signature covers. Split out from the signing call so
+// the shape is assertable without credentials to sign with.
+func signOpts(method, mimeType string, exp time.Time) *gcs.SignedURLOptions {
+	return &gcs.SignedURLOptions{
+		Scheme:      gcs.SigningSchemeV4,
+		Method:      method,
+		ContentType: mimeType,
+		Expires:     exp,
+	}
 }
 
 func newGCSBucket(cfg config.Storage) (Bucket, error) {
@@ -30,8 +39,7 @@ func newGCSBucket(cfg config.Storage) (Bucket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gcs: %w", err)
 	}
-	handle := client.Bucket(cfg.Bucket)
-	return &gcsBucket{handle: handle, sign: handle.SignedURL}, nil
+	return &gcsBucket{handle: client.Bucket(cfg.Bucket)}, nil
 }
 
 func (b *gcsBucket) NewObjectKey(tenantID, filename string) string {
@@ -40,13 +48,8 @@ func (b *gcsBucket) NewObjectKey(tenantID, filename string) string {
 
 // SignPut grants a direct PUT. The content type is part of the signature.
 func (b *gcsBucket) SignPut(_ context.Context, objectKey, mimeType string, _ int64) (SignedUpload, error) {
-	exp := time.Now().Add(signTTL)
-	signed, err := b.sign(objectKey, &gcs.SignedURLOptions{
-		Scheme:      gcs.SigningSchemeV4,
-		Method:      "PUT",
-		ContentType: mimeType,
-		Expires:     exp,
-	})
+	exp := time.Now().Add(SignTTL)
+	signed, err := b.handle.SignedURL(objectKey, signOpts("PUT", mimeType, exp))
 	if err != nil {
 		return SignedUpload{}, fmt.Errorf("gcs sign put %s: %w", objectKey, err)
 	}
@@ -55,13 +58,9 @@ func (b *gcsBucket) SignPut(_ context.Context, objectKey, mimeType string, _ int
 
 func (b *gcsBucket) SignGet(_ context.Context, objectKey string, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
-		ttl = signTTL
+		ttl = SignTTL
 	}
-	signed, err := b.sign(objectKey, &gcs.SignedURLOptions{
-		Scheme:  gcs.SigningSchemeV4,
-		Method:  "GET",
-		Expires: time.Now().Add(ttl),
-	})
+	signed, err := b.handle.SignedURL(objectKey, signOpts("GET", "", time.Now().Add(ttl)))
 	if err != nil {
 		return "", fmt.Errorf("gcs sign get %s: %w", objectKey, err)
 	}
@@ -71,6 +70,8 @@ func (b *gcsBucket) SignGet(_ context.Context, objectKey string, ttl time.Durati
 func (b *gcsBucket) Put(ctx context.Context, objectKey string, data []byte, mimeType string) error {
 	w := b.handle.Object(objectKey).NewWriter(ctx)
 	w.ContentType = mimeType
+	// Default is a 16 MiB buffer per write; we already hold the whole object.
+	w.ChunkSize = len(data)
 	if _, err := w.Write(data); err != nil {
 		_ = w.Close()
 		return fmt.Errorf("gcs put %s: %w", objectKey, err)
@@ -90,9 +91,9 @@ func (b *gcsBucket) Get(ctx context.Context, objectKey string) ([]byte, error) {
 		return nil, fmt.Errorf("gcs get %s: %w", objectKey, err)
 	}
 	defer r.Close()
-	data, err := io.ReadAll(r)
-	if err != nil {
+	buf := bytes.NewBuffer(make([]byte, 0, r.Attrs.Size)) // size is known before the first read
+	if _, err := io.Copy(buf, r); err != nil {
 		return nil, fmt.Errorf("gcs get %s: %w", objectKey, err)
 	}
-	return data, nil
+	return buf.Bytes(), nil
 }

@@ -31,8 +31,7 @@ func TestArchivedPeerConversationStillGatedOnPeerAccess(t *testing.T) {
 	}
 	// Archive it (idle clock far in the future so it's eligible) — purges the hot
 	// conversation row, leaving only the tombstone (which now carries the kind).
-	sink, _ := archive.New(h.Cfg, h.Bucket)
-	job := archive.NewJob(h.Store, sink, h.Cfg)
+	job := archive.NewJob(h.Store, h.Sink, h.Cfg)
 	job.SetClock(func() time.Time { return time.Now().Add(60 * 24 * time.Hour) })
 	if n, err := job.RunOnce(ctx, tenant.ID, 100); err != nil || n != 1 {
 		t.Fatalf("archive: n=%d err=%v", n, err)

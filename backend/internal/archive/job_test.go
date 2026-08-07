@@ -35,11 +35,7 @@ func TestArchiveWriteThenDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sink, err := archive.New(h.Cfg, h.Bucket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	job := archive.NewJob(h.Store, sink, h.Cfg)
+	job := archive.NewJob(h.Store, h.Sink, h.Cfg)
 	job.SetClock(func() time.Time { return time.Now().Add(60 * 24 * time.Hour) }) // make it idle
 
 	n, err := job.RunOnce(ctx, tenant.ID, 100)
@@ -69,7 +65,7 @@ func TestArchiveWriteThenDelete(t *testing.T) {
 		t.Fatalf("bad tombstone: count=%d snapshot=%s", tomb.MessageCount, tomb.MembersSnapshot)
 	}
 	// sink rehydrates the conversation
-	ser, err := sink.Read(ctx, tomb.SinkRef)
+	ser, err := h.Sink.Read(ctx, tomb.SinkRef)
 	if err != nil || ser.MessageCount != 1 || len(ser.Messages) != 1 {
 		t.Fatalf("sink read: %+v err=%v", ser, err)
 	}
@@ -85,8 +81,7 @@ func TestArchiveSkipsOpen(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sink, _ := archive.New(h.Cfg, h.Bucket)
-	job := archive.NewJob(h.Store, sink, h.Cfg)
+	job := archive.NewJob(h.Store, h.Sink, h.Cfg)
 	job.SetClock(func() time.Time { return time.Now().Add(60 * 24 * time.Hour) })
 	n, err := job.RunOnce(ctx, tenant.ID, 100)
 	if err != nil || n != 0 {

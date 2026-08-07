@@ -195,6 +195,9 @@ func (c *Config) Validate() error {
 	if c.DB.Driver == SQLite {
 		bad = append(bad, "DB_DRIVER must be postgres or mysql: sqlite is single-node")
 	}
+	if c.Storage.Backend != "local" && c.Storage.Bucket == "" {
+		bad = append(bad, "STORAGE_BUCKET must be set with STORAGE_BACKEND="+c.Storage.Backend+": there is no bucket to write attachments or archives to")
+	}
 	if c.Storage.Backend == "local" {
 		if c.Storage.SigningKey == "" {
 			bad = append(bad, "STORAGE_SIGNING_KEY must be set with STORAGE_BACKEND=local: a per-process key makes every other replica reject the URLs this one signs")

@@ -2,9 +2,9 @@ package domain
 
 import (
 	"context"
-	"time"
 
 	"github.com/bitllow/sild/backend/internal/realtime"
+	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
@@ -191,7 +191,7 @@ func (s *Service) attachmentURLFunc() views.URLFunc {
 		if s.bucket == nil {
 			return ""
 		}
-		u, err := s.bucket.SignGet(context.Background(), objectKey, 15*time.Minute)
+		u, err := s.bucket.SignGet(context.Background(), objectKey, storage.SignTTL)
 		if err != nil {
 			return ""
 		}

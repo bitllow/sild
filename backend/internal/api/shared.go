@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
 	"github.com/bitllow/sild/backend/internal/domain"
@@ -10,6 +9,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/principal"
+	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
@@ -343,7 +343,7 @@ func (h *Handler) attachmentURL(c *gin.Context) views.URLFunc {
 		if h.bucket == nil {
 			return ""
 		}
-		u, err := h.bucket.SignGet(c.Request.Context(), objectKey, 15*time.Minute)
+		u, err := h.bucket.SignGet(c.Request.Context(), objectKey, storage.SignTTL)
 		if err != nil {
 			return ""
 		}

@@ -121,6 +121,7 @@ type Harness struct {
 	Mailer *CaptureMailer
 	Engine *gin.Engine
 	Bucket storage.Bucket
+	Sink   archive.Sink
 }
 
 // New builds a harness backed by a fresh SQLite file (default). Pass a DSN/driver
@@ -179,7 +180,7 @@ func NewWithConfig(t *testing.T, cfg *config.Config) *Harness {
 	e.Use(gin.Recovery())
 	h.Mount(e)
 
-	return &Harness{T: t, Cfg: cfg, DB: db, Store: st, Svc: svc, Search: searchSvc, KM: km, Pub: pub, Mailer: mailer, Engine: e, Bucket: bucket}
+	return &Harness{T: t, Cfg: cfg, DB: db, Store: st, Svc: svc, Search: searchSvc, KM: km, Pub: pub, Mailer: mailer, Engine: e, Bucket: bucket, Sink: sink}
 }
 
 // ── Seed helpers ────────────────────────────────────────────────────────────

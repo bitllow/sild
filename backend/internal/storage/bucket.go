@@ -1,6 +1,7 @@
-// Package storage abstracts the attachment bucket (§11): clients upload direct
-// via a signed PUT and download via a signed GET; bytes never transit the chat
-// backend. GCS, S3, and a local dev backend implement one interface.
+// Package storage abstracts the object bucket holding attachments (§11) and
+// archived conversations (§12): clients upload direct via a signed PUT and
+// download via a signed GET; bytes never transit the chat backend. GCS and a
+// local dev backend implement one interface; s3 is not wired.
 package storage
 
 import (
@@ -13,8 +14,9 @@ import (
 	"github.com/bitllow/sild/backend/internal/id"
 )
 
-// How long an upload or download grant stays valid.
-const signTTL = 15 * time.Minute
+// SignTTL is how long an upload or download grant stays valid. Exported so the
+// render paths asking for a default grant agree with the backends issuing it.
+const SignTTL = 15 * time.Minute
 
 // newObjectKey is shared by the backends so a key is portable between them; the
 // local PUT/GET routes parse this shape (see api/uploads_local.go).

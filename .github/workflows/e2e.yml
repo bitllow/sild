@@ -14,14 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Ahead of setup-go so the image pull overlaps the toolchain and module
-      # download. A step, not a service: `services:` cannot pass container
-      # arguments, and without -scheme http and a -public-host matching the host
-      # we reach it on, the emulator serves reads its clients cannot resolve.
+      # Backgrounded ahead of setup-go so the image pull overlaps the toolchain and
+      # module download — `docker run -d` returns only after pulling, so without
+      # the `&` this step just blocks. The wait below gates readiness. A step, not
+      # a service: `services:` cannot pass container arguments, and without
+      # -scheme http and a -public-host matching the host we reach it on, the
+      # emulator serves reads its clients cannot resolve.
       - name: Start GCS emulator
         run: |
-          docker run -d --name fake-gcs -p 4443:4443 fsouza/fake-gcs-server \
-            -scheme http -backend memory -public-host localhost:4443
+          nohup docker run -d --name fake-gcs -p 4443:4443 fsouza/fake-gcs-server \
+            -scheme http -backend memory -public-host localhost:4443 \
+            > /tmp/fake-gcs-start.log 2>&1 &
 
       - uses: actions/setup-go@v5
         with:
@@ -34,7 +37,11 @@ jobs:
             curl -sf http://localhost:4443/storage/v1/b >/dev/null && exit 0
             sleep 1
           done
-          echo "GCS emulator did not become ready"; docker logs fake-gcs; exit 1
+          # Backgrounded above, so a pull or start failure surfaces here.
+          echo "GCS emulator did not become ready"
+          cat /tmp/fake-gcs-start.log || true
+          docker logs fake-gcs || true
+          exit 1
 
       - name: go test
         working-directory: backend

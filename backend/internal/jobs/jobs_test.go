@@ -59,11 +59,7 @@ func TestRunOnceReturns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	sink, err := archive.New(h.Cfg, h.Bucket)
-	if err != nil {
-		t.Fatalf("sink: %v", err)
-	}
-	deps := jobs.Deps{Relay: webhook.NewRelay(h.Store), Sweep: archive.NewJob(h.Store, sink, h.Cfg)}
+	deps := jobs.Deps{Relay: webhook.NewRelay(h.Store), Sweep: archive.NewJob(h.Store, h.Sink, h.Cfg)}
 	if err := jobs.RunOnce(context.Background(), set, deps); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}

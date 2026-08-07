@@ -13,7 +13,7 @@ import (
 )
 
 // New returns the configured bucket backend. dig binds the result to Bucket.
-// local is the dev/OSS default; gcs/s3 are wired in the storage buildout.
+// local is the dev/OSS default; s3 is not wired.
 func New(cfg *config.Config) (Bucket, error) {
 	switch cfg.Storage.Backend {
 	case "local", "":
@@ -44,7 +44,7 @@ func (b *localBucket) NewObjectKey(tenantID, filename string) string {
 }
 
 func (b *localBucket) SignPut(_ context.Context, objectKey, _ string, _ int64) (SignedUpload, error) {
-	exp := time.Now().Add(signTTL)
+	exp := time.Now().Add(SignTTL)
 	return SignedUpload{
 		ObjectKey: objectKey,
 		UploadURL: b.publicURL + "/v1/uploads/local/" + objectKey + "?" + b.signer.Sign("PUT", objectKey, exp),
@@ -54,7 +54,7 @@ func (b *localBucket) SignPut(_ context.Context, objectKey, _ string, _ int64) (
 
 func (b *localBucket) SignGet(_ context.Context, objectKey string, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
-		ttl = signTTL
+		ttl = SignTTL
 	}
 	exp := time.Now().Add(ttl)
 	return b.publicURL + "/v1/uploads/local/" + objectKey + "?" + b.signer.Sign("GET", objectKey, exp), nil
