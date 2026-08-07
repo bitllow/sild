@@ -427,13 +427,23 @@ that ignores `has_more` silently loses history, which is exactly what the old
 unbounded-looking `after=` did at its hidden 500-row cap.
 
 ### 5.5 Push (offline delivery)
-- SDK registers the device token on connect + OS rotation (`POST /v1/push-tokens`), deregisters on
-  logout (so a signed-out device can't receive the next user's messages).
-- Fan-out only to members with **no live connection** (Centrifuge presence) — connected clients already
-  got the event; no double-notify.
-- Payload is a nudge: `{ conversation_id, message_id, preview?, unread_count }`. Body inclusion is a
-  per-tenant flag. SDK `onPush` builds/suppresses the notification; tap → open → `since=` catch-up.
-- Transport: FCM (Android/web) + APNs (iOS).
+- The HOST app owns push registration and forwards the token it was issued; the SDK registers it
+  (`POST /v1/push-tokens`) and releases it on logout, so a signed-out device can't receive the next
+  user's messages. The SDK bundles no push library — a second one inside an app silently loses the
+  race with the host's own (ADR 0001).
+- Fan-out goes to every member except the sender, and skips anyone the tenant's backend has opted
+  out. No presence check: both platforms hand a notification to a foregrounded app rather than
+  displaying it, so the device suppresses what is already on screen (ADR 0002).
+- The nudge is `{ conversation_id, conversation_kind, message_id, unread_count }` plus text composed
+  server-side — a backgrounded device displays what arrived and runs no app code. Two per-tenant
+  flags shape it: name the sender, and carry the message. A third picks whose name a support reply
+  uses (the brand, or the agent). Tap → open → `since=` catch-up.
+- Nudges are queued in the same transaction as the message and delivered by the `push` job. Dead
+  tokens are pruned on the provider's say-so; delivery retries briefly and then gives up, because a
+  notification about an hour-old message is worse than none.
+- Transport: FCM v1, through each TENANT's own push project — Sild cannot address an app it does not
+  own. iOS goes through the tenant's APNs key held in that project, so Sild stores no platform keys.
+  The credential is sealed at rest and never readable back out.
 
 ### 5.6 Internal notes — enforced by the channel split
 A `visibility=internal` message is published only to the tenant channels operators watch, and to no

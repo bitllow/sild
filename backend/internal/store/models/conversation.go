@@ -140,3 +140,12 @@ func (p *PushToken) BeforeCreate(*gorm.DB) error {
 	}
 	return nil
 }
+
+// PushOptOut suppresses nudges for one user, set by the tenant's own backend
+// (§5.5). A table because end users have no row of their own — only external ids
+// on membership, receipt and token rows.
+type PushOptOut struct {
+	TenantID       string `gorm:"primaryKey;size:40"`
+	ExternalUserID string `gorm:"primaryKey;size:255"`
+	CreatedAt      time.Time
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/push"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/search"
+	"github.com/bitllow/sild/backend/internal/secrets"
 	"github.com/bitllow/sild/backend/internal/server"
 	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -68,7 +69,7 @@ func New(opts ...Option) (*dig.Container, error) {
 		archive.New,         // archive.Sink
 		archive.NewJob,      // *archive.Job
 		providePushNotifier, // push.Notifier
-		providePresence,     // push.PresenceChecker
+		provideSecrets,      // *secrets.Box
 		push.NewFanOut,      // *push.FanOut
 	}
 	for _, p := range providers {
@@ -99,13 +100,17 @@ func provideMailer(cfg *config.Config) mail.Mailer {
 	return mail.NewSMTPMailer(cfg.Email.RelayAddr, cfg.Email.RelayUser, cfg.Email.RelayPass, cfg.Email.From)
 }
 
-// providePushNotifier supplies the push transport. NoopNotifier until FCM/APNs
-// are configured.
-func providePushNotifier() push.Notifier { return push.NoopNotifier{} }
+// providePushNotifier supplies the push transport. Credentials are per-tenant,
+// so one transport serves every tenant — it is handed the credential per send.
+func providePushNotifier() push.Notifier { return push.NewFCM() }
 
-// providePresence supplies the presence checker. AlwaysOffline until wired to
-// Centrifuge presence (Redis) in sild-worker.
-func providePresence() push.PresenceChecker { return push.AlwaysOffline{} }
+// provideSecrets supplies the box that seals tenant credentials. An unset key
+// yields a box that fails every call: production refuses to start without one
+// (config.Validate), and development gets a clear error at the write rather than
+// a column that silently holds plaintext.
+func provideSecrets(cfg *config.Config) (*secrets.Box, error) {
+	return secrets.New(cfg.Secrets.Key)
+}
 
 // Provide registers additional providers (role-specific wiring).
 func Provide(c *dig.Container, providers ...any) error {
@@ -122,9 +127,10 @@ func Provide(c *dig.Container, providers ...any) error {
 // store, and a constructor dependency between them would be cyclic.
 func newService(
 	st store.Store, pub realtime.Publisher, km *auth.KeyManager, bucket storage.Bucket,
-	mailer mail.Mailer, sink archive.Sink, cfg *config.Config, ss *domain.SearchService,
+	mailer mail.Mailer, sink archive.Sink, notifier push.Notifier, box *secrets.Box,
+	cfg *config.Config, ss *domain.SearchService,
 ) *domain.Service {
-	svc := domain.New(st, pub, km, bucket, mailer, sink, cfg)
+	svc := domain.New(st, pub, km, bucket, mailer, sink, notifier, box, cfg)
 	svc.UseSearch(ss)
 	return svc
 }

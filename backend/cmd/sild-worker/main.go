@@ -14,6 +14,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/connector/webhook"
 	"github.com/bitllow/sild/backend/internal/di"
 	"github.com/bitllow/sild/backend/internal/jobs"
+	"github.com/bitllow/sild/backend/internal/push"
 )
 
 func main() {
@@ -34,7 +35,7 @@ func main() {
 		log.Fatalf("di: %v", err)
 	}
 
-	err = c.Invoke(func(cfg *config.Config, relay *webhook.Relay, sweep *archive.Job) error {
+	err = c.Invoke(func(cfg *config.Config, relay *webhook.Relay, sweep *archive.Job, nudges *push.FanOut) error {
 		list := cfg.Jobs.List(config.DefaultJobs)
 		if *jobsFlag != "" {
 			list = *jobsFlag
@@ -45,9 +46,9 @@ func main() {
 		}
 		log.Printf("sild-worker: jobs=%v once=%v (driver=%s)", selected.Names(), *once, cfg.DB.Driver)
 		if *once {
-			return jobs.RunOnce(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
+			return jobs.RunOnce(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep, Push: nudges})
 		}
-		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
+		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep, Push: nudges})
 
 		<-ctx.Done()
 		log.Printf("sild-worker: shutting down")

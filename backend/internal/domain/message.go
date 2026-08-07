@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 
+	"github.com/bitllow/sild/backend/internal/id"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -87,17 +88,13 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		Body: in.Body, ClientMsgID: in.ClientMsgID, CreatedAt: s.now(),
 		Attachments: atts,
 	}
-	if err := s.store.Messages().Create(ctx, msg); err != nil {
-		// A concurrent retry of the same client_msg_id lost the race to the unique
-		// index; the winner's message is the answer both callers must get.
-		if existing, ok := s.findByClientMsgID(ctx, tenantID, convID, in.ClientMsgID); ok {
-			return existing, nil
-		}
-		return nil, err
-	}
+	// internal notes go ONLY to agent channels (§5.6) — never webhooked/pushed/emailed.
+	internal := in.Visibility == models.VisibilityInternal
 
-	_ = applyMessageActivity(ctx, s.store, msg)
-
+	// The view is built before the transaction opens: signing an attachment URL
+	// can be a network round-trip, and holding the message row's lock across it
+	// would put a bucket's latency inside every send.
+	msg.ID = id.New(id.Message)
 	data := views.Message(msg, s.attachmentURLFunc())
 	// Surface the agent's display name so end-user surfaces (the web widget)
 	// render the operator's first name instead of a generic "Support".
@@ -106,12 +103,35 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 			data["author_name"] = name
 		}
 	}
-	// internal notes go ONLY to agent channels (§5.6) — never webhooked/pushed/emailed.
-	internal := in.Visibility == models.VisibilityInternal
+
+	// The message and everything queued off it commit together: a crash between
+	// the insert and the enqueue would otherwise drop the notification and the
+	// webhook, weakening the at-least-once guarantee both document.
+	err = s.store.Tx(ctx, func(tx store.Store) error {
+		if err := tx.Messages().Create(ctx, msg); err != nil {
+			return err
+		}
+		_ = applyMessageActivity(ctx, tx, msg)
+		if internal {
+			return nil
+		}
+		if err := s.enqueuePush(ctx, tx, msg); err != nil {
+			return err
+		}
+		return s.enqueueWebhook(ctx, tx, tenantID, convID, "message.created", data)
+	})
+	if err != nil {
+		// A concurrent retry of the same client_msg_id lost the race to the unique
+		// index; the winner's message is the answer both callers must get.
+		if existing, ok := s.findByClientMsgID(ctx, tenantID, convID, in.ClientMsgID); ok {
+			return existing, nil
+		}
+		return nil, err
+	}
+
 	s.emitObserved(ctx, realtime.Target{Conversation: convID, Internal: internal},
 		tenantID, conv, realtime.EventMessageCreated, data)
 	if !internal {
-		_ = s.fireWebhook(ctx, tenantID, convID, "message.created", data)
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}
 	return msg, nil

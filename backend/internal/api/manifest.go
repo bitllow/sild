@@ -161,6 +161,13 @@ func routeManifest() []routeSpec {
 		{Method: "DELETE", Path: "/v1/push-tokens", Class: classAction,
 			Actions: []policy.Action{policy.PushTokensManage}, Principals: userOnly, Handler: (*Handler).deregisterPush, Success: http.StatusNoContent},
 
+		// Push control for the host's own backend: acting for one of its users,
+		// so a server credential rather than that user's token.
+		{Method: "PUT", Path: "/v1/users/:userID/push", Class: classAction,
+			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).setPushOptOut, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/users/:userID/push-tokens", Class: classAction,
+			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).deleteUserPushTokens},
+
 		// Brands: active is optional-auth, the set is owner/admin.
 		{Method: "GET", Path: "/v1/brands/active", Class: classPublic,
 			Actions: []policy.Action{policy.BrandsReadActive}, Principals: anyPrincipal, Handler: (*Handler).getActiveBrand},
@@ -174,6 +181,18 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.SettingsRead}, Principals: adminOnly, Handler: (*Handler).getEmailChannel},
 		{Method: "PATCH", Path: "/v1/channels/email", Class: classAction,
 			Actions: []policy.Action{policy.SettingsWrite}, Principals: adminOnly, Handler: (*Handler).updateEmailChannel},
+		// Push setup. The credential carries its own action rather than
+		// SettingsWrite: supplying it confers the ability to notify every user.
+		{Method: "GET", Path: "/v1/channels/push", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).getPushConfig},
+		{Method: "PATCH", Path: "/v1/channels/push", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).updatePushSettings, Success: http.StatusNoContent},
+		{Method: "PUT", Path: "/v1/channels/push/credential", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).setPushCredential, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/channels/push/credential", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).deletePushCredential, Success: http.StatusNoContent},
+		{Method: "POST", Path: "/v1/channels/push/test", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).testPushSend, Success: http.StatusNoContent},
 		{Method: "GET", Path: "/v1/api-keys", Class: classAction,
 			Actions: []policy.Action{policy.APIKeysManage}, Principals: adminOnly, Handler: (*Handler).listAPIKeys},
 		{Method: "POST", Path: "/v1/api-keys", Class: classAction,

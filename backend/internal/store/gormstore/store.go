@@ -41,6 +41,9 @@ func (s *Store) Messages() store.MessageRepo           { return &messageRepo{s.d
 func (s *Store) Receipts() store.ReceiptRepo           { return &receiptRepo{s.db} }
 func (s *Store) Uploads() store.UploadRepo             { return &uploadRepo{s.db} }
 func (s *Store) PushTokens() store.PushTokenRepo       { return &pushTokenRepo{s.db} }
+func (s *Store) PushConfigs() store.PushConfigRepo     { return &pushConfigRepo{s.db} }
+func (s *Store) PushOptOuts() store.PushOptOutRepo     { return &pushOptOutRepo{s.db} }
+func (s *Store) PushOutbox() store.PushOutboxRepo      { return &pushOutboxRepo{s.db} }
 func (s *Store) Webhooks() store.WebhookRepo           { return &webhookRepo{s.db} }
 func (s *Store) Outbox() store.OutboxRepo              { return &outboxRepo{s.db} }
 func (s *Store) Email() store.EmailRepo                { return &emailRepo{s.db} }

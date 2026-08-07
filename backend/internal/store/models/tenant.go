@@ -17,6 +17,12 @@ type Tenant struct {
 	MaxAttachmentBytes int64 `gorm:"not null;default:10485760"`
 	// PushIncludeBody toggles message-body inclusion in push payloads (§5.5).
 	PushIncludeBody bool `gorm:"not null;default:false"`
+	// PushIncludeSender toggles naming the sender. Separate from the body so a
+	// tenant can show who wrote without showing what.
+	PushIncludeSender bool `gorm:"not null;default:false"`
+	// PushSenderSource picks whose name a support nudge carries: the brand, or
+	// the agent who replied. Peer nudges always name the member.
+	PushSenderSource PushSenderSource `gorm:"size:16;not null;default:'brand'"`
 
 	CreatedAt time.Time
 
@@ -64,6 +70,28 @@ type TenantEmailConfig struct {
 	SpamFilter bool `gorm:"not null;default:true"`
 
 	AllowedDomains []TenantEmailDomain `gorm:"foreignKey:TenantID;references:TenantID;constraint:OnDelete:CASCADE"`
+}
+
+// TenantPushConfig is a tenant's credential for their own push project (§5.5) —
+// only its owner can address that app. Sealed with a key from the environment;
+// CredentialKeyID names which one, so a rotation needs no migration.
+type TenantPushConfig struct {
+	TenantID string `gorm:"primaryKey;size:40"`
+	// ProjectID and ClientEmail are the non-secret identity of the credential,
+	// shown back to the tenant so they can confirm which project is wired up.
+	ProjectID   string `gorm:"size:255;not null"`
+	ClientEmail string `gorm:"size:255;not null"`
+
+	// No explicit column type: a named one is passed through verbatim, and `blob`
+	// does not exist on postgres.
+	CredentialSealed []byte `gorm:"not null"`
+	CredentialKeyID  string `gorm:"size:32;not null"`
+
+	// Verified flips true the first time a nudge is delivered — proof the whole
+	// path works, not just that the credential parsed.
+	Verified  bool `gorm:"not null;default:false"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // TenantEmailDomain is the inbound recipient-domain allowlist (§6.2).

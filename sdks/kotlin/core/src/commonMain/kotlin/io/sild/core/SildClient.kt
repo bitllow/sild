@@ -88,6 +88,49 @@ class SildClient internal constructor(
         }
     }
 
+    // ── push (§5.5) ────────────────────────────────────────────────────────
+
+    /**
+     * Registers this device for notifications with the token the HOST's push
+     * integration was issued. Call again whenever that token rotates.
+     */
+    fun setPushToken(token: String, platform: String = SDK_PLATFORM, onResult: (Boolean) -> Unit = {}) {
+        if (token.isEmpty()) {
+            onResult(false)
+            return
+        }
+        scope.launch { onResult(runCatching { api.registerPushToken(platform, token) }.isSuccess) }
+    }
+
+    /**
+     * Releases this device on sign-out.
+     *
+     * [onResult] matters more here than on registration: a token outlives the
+     * session, so a release that quietly failed leaves this device receiving the
+     * previous user's messages. A host signing someone out should retry until
+     * this succeeds.
+     */
+    fun clearPushToken(token: String, onResult: (Boolean) -> Unit = {}) {
+        if (token.isEmpty()) {
+            onResult(false)
+            return
+        }
+        scope.launch { onResult(runCatching { api.deletePushToken(token) }.isSuccess) }
+    }
+
+    /**
+     * Reports whether the host should display a notification for this payload.
+     *
+     * The host only reaches its own handler while the app is in the foreground —
+     * backgrounded, the system displays the notification and no app code runs —
+     * so the only question left is whether the user is already looking at that
+     * conversation.
+     */
+    fun shouldShow(data: Map<String, String>): Boolean {
+        val push = SildPush.parse(data) ?: return false
+        return _state.value.activeId != push.conversationId
+    }
+
     private suspend fun loadBrand() {
         runCatching { api.fetchBrand() }.onSuccess { res ->
             _state.update { it.copy(brand = res.config, brandName = res.name) }

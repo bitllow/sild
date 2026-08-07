@@ -558,6 +558,19 @@ func (r *pushTokenRepo) ListForUser(ctx context.Context, tenantID, externalUserI
 	return ts, err
 }
 
+func (r *pushTokenRepo) DeleteForUser(ctx context.Context, tenantID, externalUserID string) (int, error) {
+	res := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).
+		Delete(&models.PushToken{})
+	return int(res.RowsAffected), res.Error
+}
+
+func (r *pushTokenRepo) Prune(ctx context.Context, tenantID, token string) error {
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND token = ?", tenantID, token).
+		Delete(&models.PushToken{}).Error
+}
+
 var (
 	_ store.ConversationRepo = (*conversationRepo)(nil)
 	_ store.MemberRepo       = (*memberRepo)(nil)

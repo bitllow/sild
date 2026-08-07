@@ -22,6 +22,9 @@ x-backend-env: &backend-env
   STORAGE_PUBLIC_URL: http://localhost:8080
   # Change this: it signs upload URLs, and every replica must agree on it.
   STORAGE_SIGNING_KEY: please-change-me
+  # Seals tenant push credentials at rest (§5.5). Production will not start
+  # without it. Generate with: openssl rand -base64 32
+  SILD_SECRETS_KEY: cGxlYXNlLWNoYW5nZS1tZS0zMi1ieXRlLWtleS0xMjM=
   SILD_JWT_ISSUER: http://localhost:8080
 
 services:

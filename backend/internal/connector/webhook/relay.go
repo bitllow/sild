@@ -32,7 +32,7 @@ func NewRelay(st store.Store) *Relay {
 
 // renewAfter is when a running batch starts re-locking its rows: early enough to
 // stay well inside the claim, late enough that a normal fast pass never writes.
-const renewAfter = store.OutboxClaimTTL / 2
+const renewAfter = store.ClaimTTL / 2
 
 // ProcessOnce delivers up to `limit` due events. Returns the number processed.
 // Events abandoned by a relay that died need no sweep — ClaimDue treats a lapsed

@@ -28,6 +28,9 @@ type TenantRepo interface {
 	Exists(ctx context.Context) (bool, error)
 	SearchableKeys(ctx context.Context, tenantID string) ([]string, error)
 	SetSearchableKeys(ctx context.Context, tenantID string, keys []string) error
+	// SetPushSettings writes the booleans explicitly, so turning one off still
+	// persists (GORM omits a false that matches a non-zero default).
+	SetPushSettings(ctx context.Context, tenantID string, includeSender, includeBody bool, source models.PushSenderSource) error
 	GetEmailConfig(ctx context.Context, tenantID string) (*models.TenantEmailConfig, error)
 	SetEmailConfig(ctx context.Context, cfg *models.TenantEmailConfig) error
 	FindByInboundDomain(ctx context.Context, domain string) (*models.TenantEmailConfig, error)
@@ -259,6 +262,41 @@ type PushTokenRepo interface {
 	Upsert(ctx context.Context, t *models.PushToken) error
 	DeleteByToken(ctx context.Context, tenantID, token string, owner Participant) error
 	ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.PushToken, error)
+	// DeleteForUser drops every device a user registered — the host's
+	// account-deletion call. Unlike an opt-out, the app can register again.
+	DeleteForUser(ctx context.Context, tenantID, externalUserID string) (int, error)
+	// Prune removes a token the push service reported dead. Not owner-scoped:
+	// the provider, not a caller, is the authority that it no longer exists.
+	Prune(ctx context.Context, tenantID, token string) error
+}
+
+// PushConfigRepo stores the tenant's own push-project credential (§5.5).
+type PushConfigRepo interface {
+	Get(ctx context.Context, tenantID string) (*models.TenantPushConfig, error)
+	Upsert(ctx context.Context, c *models.TenantPushConfig) error
+	Delete(ctx context.Context, tenantID string) error
+	// MarkVerified records the first successful delivery.
+	MarkVerified(ctx context.Context, tenantID string) error
+}
+
+// PushOptOutRepo records users the tenant's backend has suppressed (§5.5).
+type PushOptOutRepo interface {
+	Set(ctx context.Context, tenantID, externalUserID string) error
+	Clear(ctx context.Context, tenantID, externalUserID string) error
+	// OptedOut answers for a whole conversation's membership at once, so fan-out
+	// costs one query rather than one per member.
+	OptedOut(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]bool, error)
+}
+
+// PushOutboxRepo is the nudge queue. Same claim protocol as OutboxRepo — see
+// models.PushOutbox for why it is a separate table.
+type PushOutboxRepo interface {
+	Enqueue(ctx context.Context, p *models.PushOutbox) error
+	ClaimDue(ctx context.Context, limit int) (rows []models.PushOutbox, claimToken string, err error)
+	RenewClaim(ctx context.Context, id, claimToken string) (bool, error)
+	MarkDelivered(ctx context.Context, id string) error
+	Reschedule(ctx context.Context, id string, attempts int, availableInSeconds int) error
+	MarkFailed(ctx context.Context, id string) error
 }
 
 type WebhookRepo interface {
@@ -278,7 +316,7 @@ type OutboxRepo interface {
 	// never deliver the same event twice.
 	ClaimDue(ctx context.Context, limit int) (events []models.Outbox, claimToken string, err error)
 	// RenewClaim extends this claim on one row, reporting false when the row is
-	// no longer ours — a delivery pass longer than OutboxClaimTTL must not keep
+	// no longer ours — a delivery pass longer than ClaimTTL must not keep
 	// sending events another relay has since taken.
 	RenewClaim(ctx context.Context, id, claimToken string) (bool, error)
 	MarkDelivered(ctx context.Context, id string) error

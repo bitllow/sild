@@ -59,7 +59,8 @@ internal class SildApi(
             header(HttpHeaders.Authorization, "Bearer $tok")
             // API surface only — an extra header can break a signed upload URL.
             header("X-Sild-SDK", "$SDK_PLATFORM/$SDK_VERSION")
-            if (method == "POST") setBody(TextContent(body.orEmpty(), ContentType.Application.Json))
+            // Any method that was given one: DELETE /push-tokens carries the token.
+            if (body != null) setBody(TextContent(body, ContentType.Application.Json))
         }
 
         var res = send(bearer())
@@ -135,6 +136,20 @@ internal class SildApi(
             }
         }
         return json.decodeFromString(api("POST", "/conversations/$id/messages", body.toString()))
+    }
+
+    /** POST /v1/push-tokens { platform, token }. Idempotent: the server upserts. */
+    suspend fun registerPushToken(platform: String, token: String) {
+        val body = buildJsonObject {
+            put("platform", platform)
+            put("token", token)
+        }
+        api("POST", "/push-tokens", body.toString())
+    }
+
+    /** DELETE /v1/push-tokens { token }, scoped to the signed-in user. */
+    suspend fun deletePushToken(token: String) {
+        api("DELETE", "/push-tokens", buildJsonObject { put("token", token) }.toString())
     }
 
     /** POST /v1/uploads then PUT the file to the signed URL (with the local-dev rewrite). */

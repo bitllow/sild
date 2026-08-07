@@ -19,10 +19,13 @@ import (
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/jobs"
 	"github.com/bitllow/sild/backend/internal/mail"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/push"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/search"
+	"github.com/bitllow/sild/backend/internal/secrets"
 	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/gormstore"
@@ -108,20 +111,68 @@ func (m *CaptureMailer) Messages() []mail.OutboundEmail {
 	return append([]mail.OutboundEmail(nil), m.Sent...)
 }
 
+// SentNudge is one nudge as it reached a device.
+type SentNudge struct {
+	ProjectID string
+	Target    push.Target
+	Nudge     push.Nudge
+}
+
+// CaptureNotifier records nudges for assertions (§5.5), the push counterpart of
+// CaptureMailer. Fail makes the next Notify return that error, so a test can
+// drive the dead-token and retry paths without a transport.
+type CaptureNotifier struct {
+	mu   sync.Mutex
+	Sent []SentNudge
+	// Fail, when set, is returned by Notify instead of delivering.
+	Fail error
+	// CheckErr, when set, is returned by Check — a credential the provider rejects.
+	CheckErr error
+}
+
+func (n *CaptureNotifier) Notify(_ context.Context, cred push.Credential, tgt push.Target, nu push.Nudge) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.Fail != nil {
+		return n.Fail
+	}
+	n.Sent = append(n.Sent, SentNudge{ProjectID: cred.ProjectID, Target: tgt, Nudge: nu})
+	return nil
+}
+
+func (n *CaptureNotifier) Check(context.Context, push.Credential) error { return n.CheckErr }
+
+// Nudges returns a copy of what was delivered.
+func (n *CaptureNotifier) Nudges() []SentNudge {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]SentNudge(nil), n.Sent...)
+}
+
+// Reset clears captured nudges and any injected failure.
+func (n *CaptureNotifier) Reset() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.Sent, n.Fail = nil, nil
+}
+
 // Harness is a fully wired backend for a single test.
 type Harness struct {
-	T      *testing.T
-	Cfg    *config.Config
-	DB     *gorm.DB
-	Store  store.Store
-	Svc    *domain.Service
-	Search *domain.SearchService
-	KM     *auth.KeyManager
-	Pub    *CapturePublisher
-	Mailer *CaptureMailer
-	Engine *gin.Engine
-	Bucket storage.Bucket
-	Sink   archive.Sink
+	T        *testing.T
+	Cfg      *config.Config
+	DB       *gorm.DB
+	Store    store.Store
+	Svc      *domain.Service
+	Search   *domain.SearchService
+	KM       *auth.KeyManager
+	Pub      *CapturePublisher
+	Mailer   *CaptureMailer
+	Notifier *CaptureNotifier
+	Secrets  *secrets.Box
+	Push     *push.FanOut
+	Engine   *gin.Engine
+	Bucket   storage.Bucket
+	Sink     archive.Sink
 }
 
 // New builds a harness backed by a fresh SQLite file (default). Pass a DSN/driver
@@ -138,6 +189,8 @@ func New(t *testing.T) *Harness {
 		Realtime: config.Realtime{Broker: "memory"},
 		Archive:  config.Archive{Sink: "gcs_json", IdleDays: 30},
 		Email:    config.Email{InboundDomain: "inbound.test", SMTPListenAddr: ":0", From: "support@inbound.test"},
+		// A fixed key so tests exercise real sealing rather than the no-key path.
+		Secrets: config.Secrets{Key: "ZGV2LW9ubHktdGVzdC1rZXktMzJieXRlcy1sb25nISE="},
 	}
 	return NewWithConfig(t, cfg)
 }
@@ -165,11 +218,17 @@ func NewWithConfig(t *testing.T, cfg *config.Config) *Harness {
 		t.Fatalf("ensure key: %v", err)
 	}
 	mailer := &CaptureMailer{}
+	notifier := &CaptureNotifier{}
+	box, err := secrets.New(cfg.Secrets.Key)
+	if err != nil {
+		t.Fatalf("secrets: %v", err)
+	}
 	sink, err := archive.New(cfg, bucket)
 	if err != nil {
 		t.Fatalf("archive sink: %v", err)
 	}
-	svc := domain.New(st, pub, km, bucket, mailer, sink, cfg)
+	svc := domain.New(st, pub, km, bucket, mailer, sink, notifier, box, cfg)
+	fanout := push.NewFanOut(st, notifier, box)
 	searchSvc := domain.NewSearch(st, search.New(db))
 	svc.UseSearch(searchSvc)                 // GET /v1/conversations?q= runs search through the service
 	authn := auth.NewAdminAuthenticator(cfg) // dev stub (no Google configured)
@@ -180,7 +239,7 @@ func NewWithConfig(t *testing.T, cfg *config.Config) *Harness {
 	e.Use(gin.Recovery())
 	h.Mount(e)
 
-	return &Harness{T: t, Cfg: cfg, DB: db, Store: st, Svc: svc, Search: searchSvc, KM: km, Pub: pub, Mailer: mailer, Engine: e, Bucket: bucket, Sink: sink}
+	return &Harness{T: t, Cfg: cfg, DB: db, Store: st, Svc: svc, Search: searchSvc, KM: km, Pub: pub, Mailer: mailer, Notifier: notifier, Secrets: box, Push: fanout, Engine: e, Bucket: bucket, Sink: sink}
 }
 
 // ── Seed helpers ────────────────────────────────────────────────────────────
@@ -291,5 +350,43 @@ func DecodeJSON(t *testing.T, w *httptest.ResponseRecorder, v any) {
 	t.Helper()
 	if err := json.Unmarshal(w.Body.Bytes(), v); err != nil {
 		t.Fatalf("decode json (%d): %v\nbody: %s", w.Code, err, w.Body.String())
+	}
+}
+
+// RunPushJob drains the nudge queue the way the background job does, so a test
+// asserts on what a deployment would actually deliver rather than on the queue.
+func (h *Harness) RunPushJob() {
+	h.T.Helper()
+	if err := jobs.RunOnce(context.Background(), jobs.Set{jobs.Push: true}, jobs.Deps{Push: h.Push}); err != nil {
+		h.T.Fatalf("push job: %v", err)
+	}
+}
+
+// SeedPushCredential configures a tenant's push credential directly, skipping
+// the provider check a real save performs.
+func (h *Harness) SeedPushCredential(tenantID, projectID string) {
+	h.T.Helper()
+	sealed, err := h.Secrets.Seal([]byte(`{"type":"service_account","project_id":"` + projectID + `"}`))
+	if err != nil {
+		h.T.Fatalf("seal credential: %v", err)
+	}
+	err = h.Store.PushConfigs().Upsert(context.Background(), &models.TenantPushConfig{
+		TenantID: tenantID, ProjectID: projectID, ClientEmail: "push@" + projectID + ".iam.gserviceaccount.com",
+		CredentialSealed: sealed, CredentialKeyID: h.Secrets.KeyID(),
+	})
+	if err != nil {
+		h.T.Fatalf("seed push credential: %v", err)
+	}
+}
+
+// SeedPushToken registers a device for a user.
+func (h *Harness) SeedPushToken(tenantID, userID, token string, platform models.PushPlatform) {
+	h.T.Helper()
+	err := h.Store.PushTokens().Upsert(context.Background(), &models.PushToken{
+		TenantID: tenantID, MemberKind: models.MemberUser, ExternalUserID: &userID,
+		Platform: platform, Token: token,
+	})
+	if err != nil {
+		h.T.Fatalf("seed push token: %v", err)
 	}
 }

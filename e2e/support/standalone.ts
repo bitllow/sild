@@ -43,6 +43,8 @@ export const STANDALONE_ENV: Record<string, string> = {
   STORAGE_BACKEND: "local",
   STORAGE_LOCAL_SHARED: "true",
   STORAGE_SIGNING_KEY: "e2e-standalone-signing-key",
+  // Seals tenant push credentials; production refuses to start without one.
+  SILD_SECRETS_KEY: "ZTJlLXN0YW5kYWxvbmUtc2VjcmV0cy1rZXktMzJieXQ=",
   STORAGE_LOCAL_DIR: UPLOAD_DIR,
   SILD_BOOTSTRAP_TENANT: BOOTSTRAP.tenant,
   SILD_BOOTSTRAP_ADMIN_EMAIL: BOOTSTRAP.email,

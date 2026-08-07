@@ -108,6 +108,13 @@ export function switchAt(page: Page, n = 0): { label: Locator; input: Locator } 
   return { label, input: label.locator('input[role="switch"]') };
 }
 
+// A Switch hides its input inside the label, so assertions read the input and
+// clicks go to the label.
+export function switchByTestId(root: Page | Locator, testId: string): { label: Locator; input: Locator } {
+  const input = root.getByTestId(testId);
+  return { input, label: input.locator("xpath=ancestor::label[1]") };
+}
+
 // Toggle a switch and assert it flipped. Returns the new checked state.
 export async function toggleSwitch(page: Page, n = 0): Promise<boolean> {
   const { label, input } = switchAt(page, n);

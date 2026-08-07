@@ -15,9 +15,9 @@ const (
 	LeaseSigningKey = "signing-key-bootstrap"
 )
 
-// OutboxClaimTTL bounds how long one relay may hold a claimed outbox row before
+// ClaimTTL bounds how long one worker may hold a claimed delivery-queue row before
 // another may take it. Relays renew within it while a batch is still running.
-const OutboxClaimTTL = 5 * time.Minute
+const ClaimTTL = 5 * time.Minute
 
 const (
 	leaseTTL  = 5 * time.Minute

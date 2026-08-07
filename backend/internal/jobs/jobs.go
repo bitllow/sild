@@ -16,18 +16,21 @@ import (
 
 	"github.com/bitllow/sild/backend/internal/archive"
 	"github.com/bitllow/sild/backend/internal/connector/webhook"
+	"github.com/bitllow/sild/backend/internal/push"
 )
 
 // Job names accepted in SILD_JOBS / --jobs.
 const (
 	Webhook = "webhook"
 	Archive = "archive"
+	Push    = "push"
 )
 
 // Deps are the components the jobs run against.
 type Deps struct {
 	Relay *webhook.Relay
 	Sweep *archive.Job
+	Push  *push.FanOut
 }
 
 // all is the single definition of what a job is called, how often it runs, and
@@ -40,6 +43,7 @@ var all = []struct {
 }{
 	{Webhook, 5 * time.Second, relayOnce},
 	{Archive, 1 * time.Hour, sweepOnce},
+	{Push, 5 * time.Second, pushOnce},
 }
 
 // batchSize bounds one pass of a job, so a tick stays short and a claim is not
@@ -145,6 +149,14 @@ func relayOnce(ctx context.Context, deps Deps) (int, error) {
 	n, err := deps.Relay.ProcessOnce(ctx, batchSize)
 	if err != nil {
 		return 0, fmt.Errorf("webhook relay: %w", err)
+	}
+	return n, nil
+}
+
+func pushOnce(ctx context.Context, deps Deps) (int, error) {
+	n, err := deps.Push.ProcessOnce(ctx, batchSize)
+	if err != nil {
+		return 0, fmt.Errorf("push fan-out: %w", err)
 	}
 	return n, nil
 }

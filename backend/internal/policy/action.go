@@ -41,6 +41,12 @@ const (
 	PrincipalRead Action = "principal.read"
 
 	PushTokensManage Action = "push_tokens.manage"
+	// PushConfigManage is separate from SettingsWrite: the credential it accepts
+	// confers the ability to notify every one of the tenant's users.
+	PushConfigManage Action = "push_config.manage"
+	// PushRecipientsManage is the host backend acting for one of its users —
+	// suppressing nudges or dropping their devices.
+	PushRecipientsManage Action = "push_recipients.manage"
 
 	// Separate from BrandsRead: reachable with no credential at all.
 	BrandsReadActive Action = "brands.read_active"
@@ -99,7 +105,9 @@ var capabilities = map[Action]grant{
 	RealtimeToken: {admin: true},
 	PrincipalRead: {apiKey: true, user: true, admin: true},
 
-	PushTokensManage: {user: true},
+	PushTokensManage:     {user: true},
+	PushConfigManage:     {adminPriv: true},
+	PushRecipientsManage: {apiKey: true},
 
 	BrandsReadActive: {apiKey: true, user: true, admin: true},
 	BrandsRead:       {adminPriv: true},

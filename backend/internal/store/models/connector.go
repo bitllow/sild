@@ -55,6 +55,33 @@ type Outbox struct {
 	LockedUntil *time.Time
 }
 
+// PushOutbox queues one message's nudge for fan-out (§5.5), written in the same
+// transaction as the message. A separate table from Outbox because the relay
+// claims pending rows by status alone and would deliver these as webhooks
+// (ARCHITECTURE §4).
+type PushOutbox struct {
+	ID             string `gorm:"primaryKey;size:40"`
+	TenantID       string `gorm:"size:40;not null;index:idx_push_outbox_pending,priority:2"`
+	ConversationID string `gorm:"size:40;not null"`
+	// MessageID is unique: a retried send that resolves to the same message must
+	// not queue a second nudge for it.
+	MessageID string         `gorm:"size:40;not null;uniqueIndex"`
+	Status    DeliveryStatus `gorm:"size:16;not null;default:'pending';index:idx_push_outbox_pending,priority:1"`
+	Attempts  int            `gorm:"not null;default:0"`
+	// AvailableAt is the next eligible send time (backoff).
+	AvailableAt time.Time `gorm:"index"`
+	CreatedAt   time.Time
+	ClaimToken  *string `gorm:"size:40;index"`
+	LockedUntil *time.Time
+}
+
+func (p *PushOutbox) BeforeCreate(*gorm.DB) error {
+	if p.ID == "" {
+		p.ID = id.New(id.PushOutbox)
+	}
+	return nil
+}
+
 func (o *Outbox) BeforeCreate(*gorm.DB) error {
 	if o.ID == "" {
 		o.ID = id.New(id.Outbox)

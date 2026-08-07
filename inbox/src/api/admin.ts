@@ -234,6 +234,24 @@ export interface EmailChannelPatch {
   from_address?: string;
 }
 
+// Push setup (§5.5). The credential itself is write-only — a read gives the
+// project identity so you can confirm which project is wired up, never the key.
+export interface ApiPushChannel {
+  project_id: string;
+  client_email: string;
+  verified: boolean;
+  updated_at: string;
+  include_sender: boolean;
+  include_body: boolean;
+  sender_source: "brand" | "agent";
+}
+
+export interface PushSettingsPatch {
+  include_sender: boolean;
+  include_body: boolean;
+  sender_source: "brand" | "agent";
+}
+
 // ── Appearance: web/SDK messenger branding (§8) ─────────────────────────────
 // One brand profile's config — the messenger look the widget + SDK render.
 // Mirrors domain.BrandConfig on the Go side.
@@ -370,6 +388,17 @@ export const adminApi = {
   getEmailChannel: () => api.getVersioned<ApiEmailChannel>("/channels/email"),
   updateEmailChannel: (patch: EmailChannelPatch, etag: string) =>
     api.patchIfMatch<ApiEmailChannel>("/channels/email", patch as Record<string, unknown>, etag),
+
+  // ── Settings: push (§5.5) ─────────────────────────────────────────────
+  getPushChannel: () => api.get<ApiPushChannel>("/channels/push"),
+  updatePushSettings: (patch: PushSettingsPatch) =>
+    api.patch<void>("/channels/push", patch as unknown as Record<string, unknown>),
+  // The credential is checked against the provider before it is stored, so a
+  // rejection here means the credential, not the network.
+  setPushCredential: (credential: unknown) =>
+    api.put<void>("/channels/push/credential", { credential }),
+  deletePushCredential: () => api.del<void>("/channels/push/credential"),
+  testPushSend: (token: string) => api.post<void>("/channels/push/test", { token }),
 
   // ── Settings: appearance (§8) — brands saved as one staged set ─────────
   getBrands: () => api.getVersioned<ApiBrands>("/brands"),

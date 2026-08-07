@@ -50,6 +50,15 @@ func (r *tenantRepo) SearchableKeys(ctx context.Context, tenantID string) ([]str
 	return keys, err
 }
 
+func (r *tenantRepo) SetPushSettings(ctx context.Context, tenantID string, includeSender, includeBody bool, source models.PushSenderSource) error {
+	return r.db.WithContext(ctx).Model(&models.Tenant{}).Where("id = ?", tenantID).
+		Updates(map[string]any{
+			"push_include_sender": includeSender,
+			"push_include_body":   includeBody,
+			"push_sender_source":  source,
+		}).Error
+}
+
 func (r *tenantRepo) SetSearchableKeys(ctx context.Context, tenantID string, keys []string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.TenantSearchableKey{}).Error; err != nil {
