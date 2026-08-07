@@ -137,6 +137,9 @@ export interface WidgetState {
   activeId: string | null;
   messages: WidgetMessage[];
   loadingThread: boolean;
+  /** Cursor for the next page of OLDER messages; null when the thread is whole. */
+  olderCursor: string | null;
+  loadingOlder: boolean;
   /** Reply-notification sound: chimes on incoming agent messages when true.
    *  Toggled from either header (home + thread), so it lives in shared state. */
   soundOn: boolean;

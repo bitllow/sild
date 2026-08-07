@@ -299,7 +299,12 @@ export const adminApi = {
     return api.get<ApiQueuePage>(`/conversations${qs ? `?${qs}` : ""}`);
   },
   getConversation: (id: string) => api.get<ApiConversation>(`/conversations/${id}`),
-  listMessages: (id: string) => api.get<ApiMessagesPage>(`/conversations/${id}/messages?limit=100`),
+  // cursor pages BACKWARD (older); ?since= below is the opposite direction.
+  listMessages: (id: string, cursor?: string) =>
+    api.get<ApiMessagesPage>(
+      `/conversations/${id}/messages?limit=100` +
+        (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "")
+    ),
   // ?since= is a sync read, not a page: oldest-first, next_cursor always null, and
   // continuation is `since=<last id received>` while has_more holds.
   catchUpMessages: (id: string, since: string, limit = 100) =>

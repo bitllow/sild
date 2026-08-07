@@ -335,9 +335,22 @@ function Thread({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Keyed on the newest id, not the count, so loading older pages does not scroll the
+  // reader back down.
+  const newestId = state.messages.length ? state.messages[state.messages.length - 1].id : "";
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-  }, [state.messages.length, state.loadingThread]);
+  }, [newestId, state.loadingThread]);
+
+  const onScroll = async () => {
+    const el = scroller.current;
+    if (!el || el.scrollTop > 120 || !state.olderCursor || state.loadingOlder) return;
+    // Prepending grows the list above the viewport, so hold the distance from the
+    // bottom — anchoring on scrollTop would jump the reader to the new oldest message.
+    const fromBottom = el.scrollHeight - el.scrollTop;
+    await client.loadOlder();
+    el.scrollTop = el.scrollHeight - fromBottom;
+  };
 
   const closed = !draft && state.conversations.find((c) => c.id === state.activeId)?.closed;
   const canSend = (!!text.trim() || atts.length > 0) && !closed && uploading === 0;
@@ -408,8 +421,13 @@ function Thread({
         </div>
         <div style={{ flex: 1 }} />
       </div>
-      <div class="body" ref={scroller}>
+      <div class="body" ref={scroller} onScroll={() => void onScroll()}>
         {state.loadingThread && <div class="note">Loading…</div>}
+        {state.olderCursor && !state.loadingThread && (
+          <div class="note" data-sild-older>
+            {state.loadingOlder ? "Loading earlier messages…" : "Scroll up for earlier messages"}
+          </div>
+        )}
         {state.messages.map((m) => {
           const images = (m.attachments || []).filter(isInlineImage);
           const files = (m.attachments || []).filter((a) => !isInlineImage(a));
