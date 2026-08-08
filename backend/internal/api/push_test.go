@@ -3,7 +3,9 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -211,6 +213,60 @@ func TestNudgeTextFollowsTenantSettings(t *testing.T) {
 	}
 }
 
+// Whose name a support reply carries is the tenant's third setting: the brand,
+// which stays the same across whoever picks the ticket up, or the agent who typed.
+func TestSupportNudgeNamesTheBrandOrTheAgent(t *testing.T) {
+	for _, source := range []models.PushSenderSource{models.PushSenderBrand, models.PushSenderAgent} {
+		t.Run(string(source), func(t *testing.T) {
+			ctx := context.Background()
+			h := testutil.New(t)
+			tenant := h.SeedTenant()
+			h.SeedPushCredential(tenant.ID, "acme-app")
+			agent := h.SeedAdmin(tenant.ID, "ada@acme.test", models.PlatformAgent)
+			conv, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
+				OpenAssignment: true,
+				Members:        []domain.MemberInput{{UserID: "u_alice", ConvRole: models.RoleClient}},
+			})
+			if err != nil {
+				t.Fatalf("create conversation: %v", err)
+			}
+			h.SeedPushToken(tenant.ID, "u_alice", "device-alice", models.PushIOS)
+			if err := h.Svc.SetPushSettings(ctx, tenant.ID, domain.PushSettings{
+				IncludeSender: true, IncludeBody: true, SenderSource: source,
+			}); err != nil {
+				t.Fatalf("settings: %v", err)
+			}
+			brands, version, err := h.Svc.ListBrandsVersioned(ctx, tenant.ID)
+			if err != nil {
+				t.Fatalf("brands: %v", err)
+			}
+			brands[0].Name = "Acme Rides"
+			if _, err := h.Svc.SaveBrands(ctx, tenant.ID, brands, brands[0].ID, version); err != nil {
+				t.Fatalf("save brands: %v", err)
+			}
+
+			if _, err := h.Svc.SendMessage(ctx, tenant.ID, conv.ID, domain.SendInput{
+				SenderKind: models.SenderAgent, Internal: &agent.ID, Body: "on it",
+			}); err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			h.RunPushJob()
+
+			want := "Acme Rides"
+			if source == models.PushSenderAgent {
+				want = agent.DisplayName()
+			}
+			sent := h.Notifier.Nudges()
+			if len(sent) != 1 {
+				t.Fatalf("expected 1 nudge, got %d", len(sent))
+			}
+			if sent[0].Nudge.Title != want {
+				t.Fatalf("support nudge named %q, want %q", sent[0].Nudge.Title, want)
+			}
+		})
+	}
+}
+
 // A dead device is the only thing that shrinks the token table besides an
 // explicit deregistration, so the pruning is load-bearing rather than tidiness.
 func TestDeadTokensArePruned(t *testing.T) {
@@ -367,12 +423,41 @@ func TestPushControlRejectsAUserToken(t *testing.T) {
 	}
 }
 
+// One tenant's backend cannot reach another's devices, even naming a user id it
+// happens to share.
+func TestPushControlIsScopedToTheCallersTenant(t *testing.T) {
+	f := newPushFixture(t)
+	other := f.h.SeedTenant()
+	key := f.h.SeedAPIKey(other.ID)
+
+	w := f.h.Request("DELETE", "/v1/users/u_bob/push-tokens").Bearer(key).Do()
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete tokens = %d: %s", w.Code, w.Body)
+	}
+	var body struct {
+		Deleted int `json:"deleted"`
+	}
+	testutil.DecodeJSON(t, w, &body)
+	if body.Deleted != 0 {
+		t.Fatalf("another tenant deleted %d of this tenant's devices", body.Deleted)
+	}
+
+	// Nor can it silence them.
+	if w := f.h.Request("PUT", "/v1/users/u_bob/push").Bearer(key).
+		JSON(map[string]any{"enabled": false}).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("opt out = %d: %s", w.Code, w.Body)
+	}
+	f.send(t, "u_alice", "hi")
+	if got := f.h.Notifier.Nudges(); len(got) != 1 {
+		t.Fatalf("a cross-tenant opt-out changed delivery: %d nudges", len(got))
+	}
+}
+
 // The credential is write-only: a read gives the project identity so a tenant
 // can confirm the wiring, and never the secret.
 func TestPushConfigNeverReturnsTheCredential(t *testing.T) {
 	f := newPushFixture(t)
-	f.h.SeedAdmin(f.tenant.ID, "owner@acme.test", models.PlatformOwner)
-	sess := loginAs(t, f.h, "owner@acme.test")
+	sess := f.owner(t)
 
 	w := f.h.Request("GET", "/v1/channels/push").Cookie("sild_admin", sess).Do()
 	if w.Code != http.StatusOK {
@@ -389,16 +474,61 @@ func TestPushConfigNeverReturnsTheCredential(t *testing.T) {
 	}
 }
 
-// Uploading a credential is more than a settings write — it confers the ability
-// to notify every user of the tenant — so an agent must not hold it.
-func TestPushCredentialIsOwnerOnly(t *testing.T) {
-	f := newPushFixture(t)
-	f.h.SeedAdmin(f.tenant.ID, "agent@acme.test", models.PlatformAgent)
-	sess := loginAs(t, f.h, "agent@acme.test")
+// owner logs in as the tenant's owner, the only role push setup answers to.
+func (f *pushFixture) owner(t *testing.T) string {
+	t.Helper()
+	f.h.SeedAdmin(f.tenant.ID, "owner@acme.test", models.PlatformOwner)
+	return loginAs(t, f.h, "owner@acme.test")
+}
 
-	w := f.h.Request("PUT", "/v1/channels/push/credential").Cookie("sild_admin", sess).
-		JSON(map[string]any{"credential": json.RawMessage(`{"type":"service_account"}`)}).Do()
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("agent setting a push credential = %d, want 403", w.Code)
+func (f *pushFixture) testSend(sess, token string) *httptest.ResponseRecorder {
+	return f.h.Request("POST", "/v1/channels/push/test").Cookie("sild_admin", sess).
+		JSON(map[string]any{"token": token}).Do()
+}
+
+func TestTestSendMarksTheIntegrationVerified(t *testing.T) {
+	f := newPushFixture(t)
+	sess := f.owner(t)
+
+	if w := f.testSend(sess, "device-alice"); w.Code != http.StatusNoContent {
+		t.Fatalf("test send = %d: %s", w.Code, w.Body)
+	}
+	w := f.h.Request("GET", "/v1/channels/push").Cookie("sild_admin", sess).Do()
+	if !strings.Contains(w.Body.String(), `"verified":true`) {
+		t.Fatalf("test send did not mark the config verified: %s", w.Body)
+	}
+}
+
+// The tenant fixes a rejected device and a rejected credential in different
+// places, so the setup screen has to be able to tell the two apart.
+func TestTestSendTellsABadDeviceFromABadCredential(t *testing.T) {
+	f := newPushFixture(t)
+	sess := f.owner(t)
+
+	for _, tc := range []struct {
+		name string
+		fail error
+		want string
+	}{
+		{"dead token", fmt.Errorf("%w: 404 UNREGISTERED", push.ErrTokenDead), "device token"},
+		{"rejected credential", fmt.Errorf("%w: 401", push.ErrCredential), "credential"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f.h.Notifier.Fail = tc.fail
+			defer f.h.Notifier.Reset()
+
+			w := f.testSend(sess, "device-alice")
+			if w.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("test send = %d, want 422: %s", w.Code, w.Body)
+			}
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("error does not name the %s: %s", tc.want, w.Body)
+			}
+		})
+	}
+
+	got := f.h.Request("GET", "/v1/channels/push").Cookie("sild_admin", sess).Do()
+	if strings.Contains(got.Body.String(), `"verified":true`) {
+		t.Fatalf("a failed test send must not claim delivery: %s", got.Body)
 	}
 }

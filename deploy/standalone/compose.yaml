@@ -50,8 +50,8 @@ services:
       <<: *backend-env
       # REST + /v1/ws + /v1/ws/sse on this one port.
       SILD_HTTP_ADDR: ":8080"
-      # Lease-guarded, so leaving them on is safe at any replica count.
-      SILD_JOBS: webhook,archive
+      # SILD_JOBS unset runs every job, which is lease-guarded and so safe at any
+      # replica count. Set it to "" for a replica that only serves.
       # First run only, while the database is empty. Prefer sild-admin.
       SILD_BOOTSTRAP_TENANT: Acme
       SILD_BOOTSTRAP_ADMIN_EMAIL: admin@acme.test

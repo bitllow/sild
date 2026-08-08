@@ -33,6 +33,16 @@ object SildPush {
      */
     fun isSildPush(data: Map<String, String>): Boolean = data[KEY] == "1"
 
+    /**
+     * The suppression rule, in one place: display a nudge of ours unless it is for
+     * [openConversationId] — the thread the user is looking at. Null when nothing
+     * is open, which is every case where no client is running.
+     */
+    fun shouldShow(data: Map<String, String>, openConversationId: String?): Boolean {
+        val push = parse(data) ?: return false
+        return push.conversationId != openConversationId
+    }
+
     /** Decodes a nudge, or null when the payload is not ours or is malformed. */
     fun parse(data: Map<String, String>): SildPushMessage? {
         if (!isSildPush(data)) return null

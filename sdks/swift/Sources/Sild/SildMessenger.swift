@@ -87,7 +87,15 @@ public struct SildMessenger: View {
             } else {
                 model.start()
             }
+            // On screen, so it answers whether an arriving nudge is one the user
+            // is already looking at (§5.5). A host that only presents the messenger
+            // never called Sild.initialize, so its config is the SDK's config.
+            if SildHost.shared.config == nil { SildHost.shared.config = model.pushConfig }
+            SildHost.shared.onScreen = model.pushClient
         }
-        .onDisappear { model.close() }
+        .onDisappear {
+            if SildHost.shared.onScreen === model.pushClient { SildHost.shared.onScreen = nil }
+            model.close()
+        }
     }
 }

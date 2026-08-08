@@ -91,7 +91,7 @@ services:
 
   worker:
     build: {context: ., dockerfile: deploy/backend.Dockerfile}
-    command: ["/usr/local/bin/sild-worker", "-jobs", "webhook,archive"]
+    command: ["/usr/local/bin/sild-worker"]
     environment: *backend-env
     depends_on:
       migrate: {condition: service_completed_successfully}

@@ -126,10 +126,8 @@ class SildClient internal constructor(
      * so the only question left is whether the user is already looking at that
      * conversation.
      */
-    fun shouldShow(data: Map<String, String>): Boolean {
-        val push = SildPush.parse(data) ?: return false
-        return _state.value.activeId != push.conversationId
-    }
+    fun shouldShow(data: Map<String, String>): Boolean =
+        SildPush.shouldShow(data, _state.value.activeId)
 
     private suspend fun loadBrand() {
         runCatching { api.fetchBrand() }.onSuccess { res ->

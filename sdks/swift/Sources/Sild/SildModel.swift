@@ -88,6 +88,14 @@ public final class SildModel {
 
     public func toggleSound() { session?.client.toggleSound() }
 
+    /// The live client, for the push suppression check — it is the only thing that
+    /// knows which conversation is open. Nil before `start()`.
+    var pushClient: SildClient? { session?.client }
+
+    /// What this messenger was configured with, so push registration can use it
+    /// when the host never called `Sild.initialize`.
+    var pushConfig: SildConfig { config }
+
     /// Send into the active thread, creating the support request first when this is a
     /// draft — the same lazy-create order the Android `ThreadScreen` uses.
     ///

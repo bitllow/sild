@@ -46,7 +46,7 @@ docker compose up -d        # postgres + redis + api + ws + worker + migrate
 |---|---|
 | `sild-api` | REST API (§4), stateless |
 | `sild-ws` | Centrifuge WS/SSE egress (§5), holds connections |
-| `sild-worker` | webhook relay, archival — `--jobs` / `SILD_JOBS` selects; `--once` for cron |
+| `sild-worker` | webhook relay, archival, push nudges — `--jobs` / `SILD_JOBS` selects a subset; `--once` for cron |
 | `sild-mail` | forwarded-mail SMTP ingest (§6.2) |
 | `sild-migrate` | AutoMigrate + dialect index hook, then exits — the **only** thing that changes the schema (ARCHITECTURE §4) |
 | `sild-standalone` | all serving roles in one process on one port — a packaging choice, still scales to N replicas |

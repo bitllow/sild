@@ -53,6 +53,47 @@ func isLive(_ state: SildState, _ config: SildConfig) -> Bool {
 `SildConfig.make(baseUrl:token:)` builds a config directly when a host needs one; every
 optional field keeps the SDK default, which is declared once on the Kotlin side.
 
+## Push notifications
+
+Your app keeps its own Firebase integration and the SDK adds none
+(`docs/adr/0001-host-app-owns-fcm-sdk-takes-the-token.md`). Registration takes the
+**FCM** token — delivery goes through the tenant's Firebase project, which
+addresses devices by registration token, not the raw APNs one.
+
+```swift
+// Once at launch — the peer of the Android `Sild.init`. Presenting the messenger
+// still takes a config directly; this is for the calls that happen without one.
+Sild.initialize(baseURL: base, token: { try await mintToken() })
+
+// Whenever FCM issues or rotates the token:
+await Sild.setPushToken(token)
+
+// On sign-out. Retry until it returns true, or that device keeps receiving.
+await Sild.clearPushToken(token)
+
+// In UNUserNotificationCenterDelegate — the foreground path:
+func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification
+) async -> UNNotificationPresentationOptions {
+    guard SildPushKit.isSildPush(notification.request.content.userInfo) else { return myOwn() }
+    return Sild.presentationOptions(for: notification)
+}
+
+// And the tap:
+if let nudge = SildPushKit.parse(response.notification.request.content.userInfo) {
+    open(.conversation(id: nudge.conversationId))
+}
+```
+
+`presentationOptions` is the optional renderer: the system draws the alert exactly
+as it would have in the background, and hands back nothing when the messenger is
+on screen showing that conversation. Deciding yourself is equally supported —
+`Sild.shouldShow(userInfo:)` is the same answer without the options. `SildPushKit`
+stays the payload half (`isSildPush`, `parse`), the peer of the Android `SildPush`
+object; the payload carries the conversation id, its kind and the unread count, so
+a tap routes with no round-trip.
+
 ## Requirements
 
 **iOS 17+.** The messenger is built on `@Observable`, `TextField(axis:)` and the

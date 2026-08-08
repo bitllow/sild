@@ -181,7 +181,7 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.SettingsRead}, Principals: adminOnly, Handler: (*Handler).getEmailChannel},
 		{Method: "PATCH", Path: "/v1/channels/email", Class: classAction,
 			Actions: []policy.Action{policy.SettingsWrite}, Principals: adminOnly, Handler: (*Handler).updateEmailChannel},
-		// Push setup. The credential carries its own action rather than
+		// Push setup, owner-only. The credential carries its own action rather than
 		// SettingsWrite: supplying it confers the ability to notify every user.
 		{Method: "GET", Path: "/v1/channels/push", Class: classAction,
 			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).getPushConfig},
@@ -240,6 +240,8 @@ type RouteGuard struct {
 	// plain agent session must be refused — the dimension Principals cannot
 	// express, since an agent and an owner are both principal.KindAdmin.
 	PrivilegedOnly bool
+	// OwnerOnly narrows that further: an admin session must be refused too.
+	OwnerOnly bool
 }
 
 // RouteSuccess is a route's declared success status, exported so a test can
@@ -269,19 +271,25 @@ func RouteGuards() []RouteGuard {
 		}
 		out = append(out, RouteGuard{
 			Method: r.Method, Path: r.Path,
-			Actions: r.Actions, Principals: r.Principals, PrivilegedOnly: r.privilegedOnly(),
+			Actions: r.Actions, Principals: r.Principals,
+			PrivilegedOnly: r.privilegedOnly(), OwnerOnly: r.ownerOnly(),
 		})
 	}
 	return out
 }
 
 // privilegedOnly reports that every action on the route is owner/admin-only.
-func (r routeSpec) privilegedOnly() bool {
+func (r routeSpec) privilegedOnly() bool { return r.everyAction(policy.RequiresPrivilegedAdmin) }
+
+// ownerOnly reports that every action on the route is the owner's alone.
+func (r routeSpec) ownerOnly() bool { return r.everyAction(policy.RequiresOwner) }
+
+func (r routeSpec) everyAction(pred func(policy.Action) bool) bool {
 	if len(r.Actions) == 0 {
 		return false
 	}
 	for _, a := range r.Actions {
-		if !policy.RequiresPrivilegedAdmin(a) {
+		if !pred(a) {
 			return false
 		}
 	}

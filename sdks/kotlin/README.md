@@ -66,6 +66,47 @@ Peer conversations are created by the host backend via `POST /v1/conversations`
 (`open_assignment: false`); the SDK opens them by id. It never creates peer chats
 itself — matching the widget and the platform's design.
 
+## Push notifications
+
+Your app keeps its own Firebase integration and the SDK adds none — only one
+`FirebaseMessagingService` wins per app, so a second one inside a library would
+silently never fire (`docs/adr/0001-host-app-owns-fcm-sdk-takes-the-token.md`).
+Hand Sild the token you were issued, and the messages that turn out to be ours.
+
+```kotlin
+// Wherever FCM gives you a token — onNewToken, or a fetch at startup:
+Sild.setPushToken(token)
+
+// On sign-out. Retry until it reports true, or that device keeps receiving.
+Sild.clearPushToken(token) { ok -> if (!ok) retryLater() }
+
+// In your FirebaseMessagingService:
+override fun onMessageReceived(msg: RemoteMessage) {
+    if (!SildPush.isSildPush(msg.data)) return handleMyOwn(msg)
+    if (!Sild.shouldShow(msg.data)) return // the user is reading that thread
+    val nudge = SildPush.parse(msg.data) ?: return
+    SildNotifications.show(
+        this, nudge,
+        title = msg.notification?.title.orEmpty(),
+        body = msg.notification?.body,
+        smallIcon = R.drawable.ic_notification,
+        contentIntent = pendingIntentOpening(nudge.conversationId),
+    )
+}
+```
+
+`SildNotifications` is optional — render it yourself and nothing else changes.
+Either way the payload names the channel `SildPush.NOTIFICATION_CHANNEL`
+(`sild_messages`), which your app must have created
+(`SildNotifications.ensureChannel(context)`), and carries the conversation id,
+its kind and the unread count so a tap routes with no round-trip:
+`SildMessenger.openConversation(context, nudge.conversationId)`.
+
+`onMessageReceived` only runs while your app is in the foreground; backgrounded,
+the system draws the notification and no app code runs — which is why the
+suppression check is the only decision left to make. Android 13+ needs
+`POST_NOTIFICATIONS` from the host; without it, posting does nothing.
+
 ## Appearance
 
 The messenger is themed from the tenant's active brand (`GET /v1/brands/active`): brand

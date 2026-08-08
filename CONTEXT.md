@@ -27,8 +27,15 @@ _Avoid_: participant, subscriber
 
 **User**:
 An end user of the tenant's product, identified by the tenant's own external
-user id. Sild holds no record of them beyond their membership.
-_Avoid_: customer, contact, account
+user id.
+_Avoid_: customer, account
+
+**Contact**:
+A person the tenant has talked to, and the profile the tenant keeps on them —
+one per external user id, shared by every conversation they are in. Only
+becomes visible through membership: a profile alone is not someone the tenant
+has talked to.
+_Avoid_: customer, profile, lead
 
 **Agent**:
 A person working the tenant's inbox.

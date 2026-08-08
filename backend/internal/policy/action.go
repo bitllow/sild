@@ -41,8 +41,9 @@ const (
 	PrincipalRead Action = "principal.read"
 
 	PushTokensManage Action = "push_tokens.manage"
-	// PushConfigManage is separate from SettingsWrite: the credential it accepts
-	// confers the ability to notify every one of the tenant's users.
+	// PushConfigManage is separate from SettingsWrite, and owner-only: the
+	// credential it accepts confers the ability to notify every one of the
+	// tenant's users.
 	PushConfigManage Action = "push_config.manage"
 	// PushRecipientsManage is the host backend acting for one of its users —
 	// suppressing nudges or dropping their devices.
@@ -69,6 +70,7 @@ type grant struct {
 	user      bool
 	admin     bool // admin session, any platform role
 	adminPriv bool // admin session, owner/admin only
+	owner     bool // admin session, owner only
 	signed    bool // signed upload capability
 }
 
@@ -106,7 +108,7 @@ var capabilities = map[Action]grant{
 	PrincipalRead: {apiKey: true, user: true, admin: true},
 
 	PushTokensManage:     {user: true},
-	PushConfigManage:     {adminPriv: true},
+	PushConfigManage:     {owner: true},
 	PushRecipientsManage: {apiKey: true},
 
 	BrandsReadActive: {apiKey: true, user: true, admin: true},
@@ -126,12 +128,20 @@ var capabilities = map[Action]grant{
 // against the catalog.
 func Actions() []Action { return sortedActions() }
 
-// RequiresPrivilegedAdmin reports that only an owner/admin session carries the
-// action, so a route guarding it must refuse a plain agent. Exported for the
-// manifest conformance test, which asserts the mounted guard against it.
+// RequiresPrivilegedAdmin reports that an agent session cannot carry the action,
+// so a route guarding it must refuse one — owner-only actions included. Exported
+// for the manifest conformance test, which asserts the mounted guard against it.
 func RequiresPrivilegedAdmin(a Action) bool {
 	g, ok := capabilities[a]
-	return ok && g.adminPriv && !g.admin && !g.apiKey && !g.user
+	return ok && (g.adminPriv || g.owner) && !g.admin && !g.apiKey && !g.user
+}
+
+// RequiresOwner reports that the action is the owner's alone, so a route
+// guarding it must refuse an admin as well as an agent. Owner wins over
+// adminPriv here for the same reason it does in holds.
+func RequiresOwner(a Action) bool {
+	g, ok := capabilities[a]
+	return ok && g.owner && !g.admin && !g.apiKey && !g.user
 }
 
 func sortedActions() []Action {

@@ -133,10 +133,21 @@ func (s *Service) TestPushSend(ctx context.Context, tenantID, token string) erro
 	if err != nil {
 		return err
 	}
-	return s.notifier.Notify(ctx,
+	err = s.notifier.Notify(ctx,
 		push.Credential{ProjectID: cfg.ProjectID, ServiceAccountJSON: raw},
 		push.Target{Token: token},
 		push.Nudge{Title: "Test notification", Body: "Push is wired up correctly."})
+	// The two inputs fail differently and the tenant fixes them in different
+	// places, so the setup screen must be able to tell them apart.
+	switch {
+	case errors.Is(err, push.ErrTokenDead):
+		return invalid("device token was rejected: " + err.Error())
+	case errors.Is(err, push.ErrCredential):
+		return invalid("credential was rejected by the push provider: " + err.Error())
+	case err != nil:
+		return err
+	}
+	return s.store.PushConfigs().MarkVerified(ctx, tenantID)
 }
 
 // SetUserPush turns nudges on or off for one user, on behalf of the tenant's own

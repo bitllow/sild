@@ -409,7 +409,9 @@ const SENDER_SOURCE_OPTIONS = [
 const Push = observer(function Push() {
   const store = useStore();
   const ch = store.pushChannel;
-  const configured = !!ch?.project_id;
+  // The credential is the owner's capability, so an admin never sees the panel.
+  if (!store.canManagePush || !ch) return null;
+  const configured = !!ch.project_id;
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
@@ -428,8 +430,8 @@ const Push = observer(function Push() {
             from your own Firebase project — the same project your app was built against.
           </div>
         </div>
-        <Badge variant={ch?.verified ? "success" : "warning"} data-testid="push-status">
-          {ch?.verified ? "Delivering" : configured ? "Awaiting first delivery" : "Not set up"}
+        <Badge variant={ch.verified ? "success" : "warning"} data-testid="push-status">
+          {ch.verified ? "Delivering" : configured ? "Awaiting first delivery" : "Not set up"}
         </Badge>
       </div>
 
@@ -438,7 +440,7 @@ const Push = observer(function Push() {
         {configured ? (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
             <code data-testid="push-project" style={monoField}>
-              {ch?.project_id} · {ch?.client_email}
+              {ch.project_id} · {ch.client_email}
             </code>
             <Button size="sm" variant="secondary" onClick={store.removePushCredential} disabled={store.pushBusy}>
               <TrashIcon size={15} />
@@ -480,14 +482,14 @@ const Push = observer(function Push() {
       <ToggleRow
         title="Show who sent it"
         desc="Put the sender's name on the notification instead of just “New message”."
-        checked={!!ch?.include_sender}
+        checked={ch.include_sender}
         onChange={store.togglePushIncludeSender}
         testId="push-include-sender"
       />
       <ToggleRow
         title="Show the message"
         desc="Include the message text. Leave off to keep conversations off lock screens."
-        checked={!!ch?.include_body}
+        checked={ch.include_body}
         onChange={store.togglePushIncludeBody}
         testId="push-include-body"
       />
@@ -497,10 +499,10 @@ const Push = observer(function Push() {
         desc="Whose name appears when an agent replies. Messages between your users always name the sender."
       >
         <Select
-          value={ch?.sender_source ?? "brand"}
+          value={ch.sender_source}
           options={SENDER_SOURCE_OPTIONS}
           onChange={(e) => store.setPushSenderSource(e.target.value as "brand" | "agent")}
-          disabled={!ch?.include_sender}
+          disabled={!ch.include_sender}
         />
       </SettingRow>
 

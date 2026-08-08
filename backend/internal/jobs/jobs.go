@@ -1,6 +1,7 @@
 // Package jobs runs the background work of the backend: the webhook outbox relay
-// (§6.1) and the conversation archival sweep (§12). sild-dev, sild-worker and
-// sild-standalone all drive it, so the schedule is the same wherever the jobs run.
+// (§6.1), the conversation archival sweep (§12) and the push nudge queue (§5.5).
+// sild-dev, sild-worker and sild-standalone all drive it, so the schedule is the
+// same wherever the jobs run.
 //
 // Every job here is safe on N processes at once: the relay claims outbox rows and
 // the sweep takes a cluster-wide lease (ARCHITECTURE §4).

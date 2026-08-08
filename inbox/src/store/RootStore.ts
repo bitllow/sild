@@ -238,6 +238,7 @@ export class RootStore {
   appIdCopied = false;
   snippetCopied = false;
   peerAccess = false;
+  canManagePush = false;
   peer = new PeerStore(this);
 
   constructor() {
@@ -262,6 +263,9 @@ export class RootStore {
         const list = me.grants.find((g) => g.action === "conversations.list");
         const kinds = list?.scope?.kinds;
         this.peerAccess = !!list && (!kinds || kinds.includes("peer"));
+        // Same rule for the push credential: it is a capability the server
+        // grants, not a role this re-derives.
+        this.canManagePush = me.grants.some((g) => g.action === "push_config.manage");
       });
       // Load peer conversations up front (not lazily on first visit) so the nav
       // attention badge is live from session start and realtime peer messages
@@ -334,6 +338,7 @@ export class RootStore {
       this.meId = null;
     this.appId = "";
       this.peerAccess = false;
+      this.canManagePush = false;
       this.peer.reset();
     });
   };
@@ -1130,7 +1135,9 @@ export class RootStore {
         adminApi.listTeam(),
         adminApi.getEmailChannel(),
         adminApi.getBrands(),
-        adminApi.getPushChannel(),
+        // The push credential is the owner's alone, so an admin is refused it —
+        // the rest of the page is theirs and must still load.
+        adminApi.getPushChannel().catch(() => null),
       ]);
       runInAction(() => {
         this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);

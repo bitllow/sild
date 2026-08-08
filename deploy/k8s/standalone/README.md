@@ -60,4 +60,4 @@ needed. Skipping the CORS policy leaves signed URLs that fail in the browser onl
 The jobs need no attention: the outbox claim and the archive lease make every
 replica safe to run them (ARCHITECTURE §4). If you would rather keep serving pods
 free of background work, set `SILD_JOBS: ""` here and run a second Deployment
-with `SILD_JOBS: webhook,archive` — or just use `deploy/k8s/32-worker.yaml`.
+that leaves it unset — or just use `deploy/k8s/32-worker.yaml`.

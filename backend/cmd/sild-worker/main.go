@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	jobsFlag := flag.String("jobs", "", "comma-separated: webhook,archive (default: SILD_JOBS)")
+	jobsFlag := flag.String("jobs", "", "comma-separated: webhook,archive,push (default: SILD_JOBS)")
 	once := flag.Bool("once", false, "run each job a single time and exit (cron / Cloud Run Jobs)")
 	flag.Parse()
 	// gcloud splits --args on commas, so `--jobs webhook,archive` arrives as a flag

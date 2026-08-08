@@ -39,6 +39,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     // No material-icons: SildIcons builds the widget's own Feather glyphs.
     implementation("androidx.activity:activity-compose:1.9.0")
+    // NotificationCompat, for the optional push renderer.
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.2")
     implementation("io.coil-kt:coil-compose:2.6.0")

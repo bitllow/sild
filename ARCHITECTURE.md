@@ -463,7 +463,7 @@ make test
 # run individually (REST-only works against just the DB):
 make run-api          # sild-api   :8080
 make run-ws           # sild-ws    :8081   (needs Redis broker)
-make run-worker       # sild-worker (SILD_JOBS, default webhook,archive)
+make run-worker       # sild-worker (SILD_JOBS, default webhook,archive,push)
 make migrate          # sild-migrate, then exit
 
 # full stack the easy way — DB + Redis + all four binaries:
