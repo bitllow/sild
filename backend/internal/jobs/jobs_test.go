@@ -18,7 +18,7 @@ func TestParse(t *testing.T) {
 		name, list string
 		want       []string
 	}{
-		{"default", "webhook,archive", []string{"webhook", "archive"}},
+		{"default", "webhook,archive,push", []string{"webhook", "archive", "push"}},
 		{"order is normalized for logging", "archive,webhook", []string{"webhook", "archive"}},
 		{"spaces", " webhook , archive ", []string{"webhook", "archive"}},
 		{"one job", "webhook", []string{"webhook"}},
@@ -43,7 +43,7 @@ func TestParse(t *testing.T) {
 // leaves webhook delivery off on a replica that reports itself healthy, and
 // nothing surfaces it until someone notices events stopped arriving.
 func TestParseRejectsAnUnknownJob(t *testing.T) {
-	for _, list := range []string{"webhok", "webhook,archiv", "push", "webhook,,nonsense"} {
+	for _, list := range []string{"webhok", "webhook,archiv", "pushh", "webhook,,nonsense"} {
 		if _, err := jobs.Parse(list); err == nil {
 			t.Fatalf("Parse(%q) accepted an unknown job", list)
 		}
@@ -59,7 +59,7 @@ func TestRunOnceReturns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	deps := jobs.Deps{Relay: webhook.NewRelay(h.Store), Sweep: archive.NewJob(h.Store, h.Sink, h.Cfg)}
+	deps := jobs.Deps{Relay: webhook.NewRelay(h.Store), Sweep: archive.NewJob(h.Store, h.Sink, h.Cfg), Push: h.Push}
 	if err := jobs.RunOnce(context.Background(), set, deps); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestUnsetSILDJobsTakesTheBinaryDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	want := []string{"webhook", "archive"}
+	want := []string{"webhook", "archive", "push"}
 	if got := set.Names(); !slices.Equal(got, want) {
 		t.Fatalf("default jobs = %v, want %v", got, want)
 	}

@@ -17,6 +17,7 @@ func TestProductionRejectsSingleNodeConfig(t *testing.T) {
 			DB:       config.DB{Driver: config.Postgres, DSN: "host=db"},
 			Realtime: config.Realtime{Broker: "redis"},
 			Storage:  config.Storage{Backend: "gcs", Bucket: "sild-uploads"},
+			Secrets:  config.Secrets{Key: "ZGV2LW9ubHktdGVzdC1rZXktMzJieXRlcy1sb25nISE="},
 		}
 	}
 	if err := valid().Validate(); err != nil {
@@ -41,6 +42,10 @@ func TestProductionRejectsSingleNodeConfig(t *testing.T) {
 			c.Storage.Backend = "local"
 			c.Storage.SigningKey = "shared-secret"
 		}, "STORAGE_LOCAL_SHARED"},
+		// Without a key, a tenant push credential could only be stored in
+		// plaintext. Failing here beats a feature that looks configured and
+		// silently holds the key to notifying every user of every tenant.
+		{"no secrets key", func(c *config.Config) { c.Secrets.Key = "" }, "SILD_SECRETS_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,6 +72,7 @@ func TestLocalStorageNeedsSharedKeyAndSharedVolume(t *testing.T) {
 		DB:       config.DB{Driver: config.Postgres},
 		Realtime: config.Realtime{Broker: "redis"},
 		Storage:  config.Storage{Backend: "local", SigningKey: "shared-secret", LocalShared: true},
+		Secrets:  config.Secrets{Key: "ZGV2LW9ubHktdGVzdC1rZXktMzJieXRlcy1sb25nISE="},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("rejected: %v", err)

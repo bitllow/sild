@@ -9,6 +9,8 @@ import {
   type ConversationParams,
   type ApiQueuePage,
   type QueueSort,
+  type ApiPushChannel,
+  type PushSettingsPatch,
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
@@ -111,6 +113,13 @@ function playChime(): void {
   else fire();
 }
 
+// errorText renders a failed request for the settings panels. The backend's
+// message is the useful part — it says which credential field was wrong.
+function errorText(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  return e instanceof Error ? e.message : "Something went wrong.";
+}
+
 export class RootStore {
   // --- session ---
   session: SessionState = "loading";
@@ -185,6 +194,11 @@ export class RootStore {
   webhooks: Webhook[] = [];
   team: TeamMember[] = [];
   emailChannel: EmailChannel | null = null;
+  pushChannel: ApiPushChannel | null = null;
+  // Set while a credential upload or test send is in flight; pushMessage carries
+  // the outcome so the panel can say what happened.
+  pushBusy = false;
+  pushMessage: { text: string; kind: "error" | "ok" } | null = null;
   // Versions of the two whole-document config resources, quoted back on write so
   // a concurrent edit fails loudly instead of being overwritten.
   emailChannelVersion: string | null = null;
@@ -224,6 +238,7 @@ export class RootStore {
   appIdCopied = false;
   snippetCopied = false;
   peerAccess = false;
+  canManagePush = false;
   peer = new PeerStore(this);
 
   constructor() {
@@ -248,6 +263,9 @@ export class RootStore {
         const list = me.grants.find((g) => g.action === "conversations.list");
         const kinds = list?.scope?.kinds;
         this.peerAccess = !!list && (!kinds || kinds.includes("peer"));
+        // Same rule for the push credential: it is a capability the server
+        // grants, not a role this re-derives.
+        this.canManagePush = me.grants.some((g) => g.action === "push_config.manage");
       });
       // Load peer conversations up front (not lazily on first visit) so the nav
       // attention badge is live from session start and realtime peer messages
@@ -320,6 +338,7 @@ export class RootStore {
       this.meId = null;
     this.appId = "";
       this.peerAccess = false;
+      this.canManagePush = false;
       this.peer.reset();
     });
   };
@@ -1110,12 +1129,15 @@ export class RootStore {
   // ─────────────────────────── settings ───────────────────────────
   loadSettings = async () => {
     try {
-      const [keys, webhooks, team, email, brands] = await Promise.all([
+      const [keys, webhooks, team, email, brands, pushCh] = await Promise.all([
         adminApi.listApiKeys(),
         adminApi.listWebhooks(),
         adminApi.listTeam(),
         adminApi.getEmailChannel(),
         adminApi.getBrands(),
+        // The push credential is the owner's alone, so an admin is refused it —
+        // the rest of the page is theirs and must still load.
+        adminApi.getPushChannel().catch(() => null),
       ]);
       runInAction(() => {
         this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
@@ -1123,6 +1145,7 @@ export class RootStore {
         this.team = team.map(mapTeamMember);
         this.emailChannel = mapEmailChannel(email.data);
         this.emailChannelVersion = email.etag;
+        this.pushChannel = pushCh;
         this.applyBrands(brands.data.brands, brands.data.active_brand_id);
         this.brandsVersion = brands.etag;
         this.settingsLoaded = true;
@@ -1305,6 +1328,75 @@ export class RootStore {
       /* clipboard unavailable */
     }
   };
+  // ─────────────────────────── settings: push (§5.5) ──────────────────────
+  togglePushIncludeSender = (v: boolean) => this.patchPush({ include_sender: v });
+  togglePushIncludeBody = (v: boolean) => this.patchPush({ include_body: v });
+  setPushSenderSource = (v: "brand" | "agent") => this.patchPush({ sender_source: v });
+
+  // Optimistic, like the email toggles: apply locally, roll back if the write
+  // fails. The three settings are written together because the endpoint takes
+  // them as one document.
+  private patchPush = async (change: Partial<PushSettingsPatch>) => {
+    const ch = this.pushChannel;
+    if (!ch) return;
+    const prev = { ...ch };
+    runInAction(() => Object.assign(ch, change));
+    try {
+      await adminApi.updatePushSettings({
+        include_sender: ch.include_sender,
+        include_body: ch.include_body,
+        sender_source: ch.sender_source,
+      });
+    } catch {
+      runInAction(() => Object.assign(ch, prev));
+    }
+  };
+
+  // The credential is a service-account JSON file from the tenant's own push
+  // project, checked against the provider before it is stored — so a rejection
+  // here is about the credential, not the network.
+  uploadPushCredential = (raw: string) =>
+    this.runPush(async () => {
+      const credential: unknown = JSON.parse(raw);
+      await adminApi.setPushCredential(credential);
+    }, { notice: "Credential saved.", refresh: true, onSyntaxError: "That file is not valid JSON." });
+
+  removePushCredential = () =>
+    this.runPush(() => adminApi.deletePushCredential(), { refresh: true });
+
+  sendTestPush = (token: string) =>
+    this.runPush(() => adminApi.testPushSend(token), { notice: "Test notification sent." });
+
+  // One busy/outcome envelope for the three push actions: each is a single
+  // request whose result the panel has to show, unlike the toggles which roll
+  // back silently.
+  private runPush = async (
+    fn: () => Promise<unknown>,
+    opts: { notice?: string; refresh?: boolean; onSyntaxError?: string } = {}
+  ) => {
+    runInAction(() => {
+      this.pushBusy = true;
+      this.pushMessage = null;
+    });
+    try {
+      await fn();
+      const fresh = opts.refresh ? await adminApi.getPushChannel() : null;
+      runInAction(() => {
+        if (fresh) this.pushChannel = fresh;
+        if (opts.notice) this.pushMessage = { text: opts.notice, kind: "ok" };
+      });
+    } catch (e) {
+      const text = e instanceof SyntaxError && opts.onSyntaxError ? opts.onSyntaxError : errorText(e);
+      runInAction(() => {
+        this.pushMessage = { text, kind: "error" };
+      });
+    } finally {
+      runInAction(() => {
+        this.pushBusy = false;
+      });
+    }
+  };
+
   toggleAutoReply = (v: boolean) => this.patchChannel({ autoReply: v }, { auto_reply: v });
   toggleSpamFilter = (v: boolean) => this.patchChannel({ spamFilter: v }, { spam_filter: v });
 

@@ -206,12 +206,12 @@ gcloud run jobs create sild-jobs \
   --set-secrets "DB_DSN=sild-db-dsn:latest,SILD_REDIS_URL=sild-redis-url:latest"
 ```
 
-Note what is *not* there: no `--jobs webhook,archive`. `gcloud` splits both `--args`
+Note what is *not* there: no `--jobs`. `gcloud` splits both `--args`
 and `--set-env-vars` on commas, so a comma-containing value silently becomes extra
 arguments — `--args --once,--jobs,webhook,archive` would set `--jobs=webhook` and
-drop `archive` on the floor. The default job set is already `webhook,archive`, so
-passing nothing is both shorter and correct. If you do need a subset, use gcloud's
-alternate delimiter: `--set-env-vars "^##^SILD_JOBS=webhook,archive"`.
+drop `archive` on the floor. Passing nothing runs every job, which is what a worker
+wants. If you do need a subset, use gcloud's alternate delimiter:
+`--set-env-vars "^##^SILD_JOBS=webhook,archive"`.
 
 `--once` is what makes it a Job rather than a service: `sild-standalone` and a bare
 `sild-worker` both loop forever, so as a Cloud Run Job they would run until the
@@ -220,8 +220,8 @@ outbox claim and the archive lease are what make that true — but a Job has to
 finish.
 
 This is the recommended shape: it keeps CPU-always-allocated cost off the serving
-revisions. The alternative — `--min-instances=1` with CPU always allocated and
-`SILD_JOBS=webhook,archive` on the serving revision — also works, and is correct
+revisions. The alternative — `--min-instances=1` with CPU always allocated and the jobs left
+on (`SILD_JOBS` unset) on the serving revision — also works, and is correct
 at any instance count for the same reason. What does *not* work is in-process jobs
 on a scale-to-zero revision: with no CPU allocated between requests, the tickers do
 not fire.
@@ -292,7 +292,7 @@ mechanism.
 | `SILD_REDIS_URL` | — | `redis://redis:6379` | Memorystore | in-cluster |
 | `SILD_HTTP_ADDR` | `:8080` | `:8080` | ignored (`$PORT`) | `:8080` |
 | `SILD_WS_ADDR` | — | ignored | ignored | `:8081` (`sild-ws`) |
-| `SILD_JOBS` | — | `webhook,archive` | `""` + a Job | — (`sild-worker`) |
+| `SILD_JOBS` | — | unset (every job) | `""` + a Job | — (`sild-worker`) |
 | `SILD_SMTP_INGEST` | — | `false` | `false` | — (`sild-mail`) |
 | `STORAGE_BACKEND` | `local` | `local` (one shared volume) or `gcs` | `gcs` | `gcs` |
 | `STORAGE_BUCKET` | — | required with `gcs` | required | required with `gcs` |

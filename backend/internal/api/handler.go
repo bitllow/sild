@@ -97,7 +97,11 @@ func (h *Handler) authChain(r routeSpec) []gin.HandlerFunc {
 		return nil // the signature is the credential; the handler verifies it
 	}
 	guard := []gin.HandlerFunc{h.credentialGuard(r.Principals)}
-	if r.privilegedOnly() {
+	// Narrowest tier first: an owner-only route is privileged too.
+	switch {
+	case r.ownerOnly():
+		guard = append(guard, middleware.RequireRole(models.PlatformOwner))
+	case r.privilegedOnly():
 		guard = append(guard, middleware.RequireRole(models.PlatformOwner, models.PlatformAdmin))
 	}
 	return guard

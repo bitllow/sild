@@ -9,7 +9,9 @@ import (
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
 	"github.com/bitllow/sild/backend/internal/mail"
+	"github.com/bitllow/sild/backend/internal/push"
 	"github.com/bitllow/sild/backend/internal/realtime"
+	"github.com/bitllow/sild/backend/internal/secrets"
 	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
@@ -24,6 +26,8 @@ type Service struct {
 	mailer   mail.Mailer
 	verifier mail.SignatureVerifier
 	sink     archive.Sink // cold-storage read fallback (§12)
+	notifier push.Notifier
+	secrets  *secrets.Box
 	cfg      *config.Config
 	now      func() time.Time
 	// search backs the ?q= form of ListConversations. Set after construction:
@@ -36,11 +40,11 @@ type Service struct {
 func (s *Service) UseSearch(ss *SearchService) { s.search = ss }
 
 // New constructs the domain service.
-func New(st store.Store, pub realtime.Publisher, km *auth.KeyManager, bucket storage.Bucket, mailer mail.Mailer, sink archive.Sink, cfg *config.Config) *Service {
+func New(st store.Store, pub realtime.Publisher, km *auth.KeyManager, bucket storage.Bucket, mailer mail.Mailer, sink archive.Sink, notifier push.Notifier, box *secrets.Box, cfg *config.Config) *Service {
 	if mailer == nil {
 		mailer = mail.NoopMailer{}
 	}
-	return &Service{store: st, pub: pub, keys: km, bucket: bucket, mailer: mailer, verifier: mail.HMACVerifier{}, sink: sink, cfg: cfg, now: time.Now}
+	return &Service{store: st, pub: pub, keys: km, bucket: bucket, mailer: mailer, verifier: mail.HMACVerifier{}, sink: sink, notifier: notifier, secrets: box, cfg: cfg, now: time.Now}
 }
 
 // SetClock overrides the service clock (tests).

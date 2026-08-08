@@ -49,3 +49,7 @@ stringData:
   POSTGRES_DB: "please-change-me"
   # Consumed by the backend binaries. Matches the postgres Deployment below.
   DB_DSN: "host=sild-postgres port=5432 user=please-change-me1 password=please-change-me2 dbname=please-change-me3"
+  # Seals tenant push credentials at rest (§5.5). Production refuses to start
+  # without it, because the alternative is holding them in plaintext. Generate
+  # with: openssl rand -base64 32
+  SILD_SECRETS_KEY: "cGxlYXNlLWNoYW5nZS1tZS0zMi1ieXRlLWtleS0xMjM="

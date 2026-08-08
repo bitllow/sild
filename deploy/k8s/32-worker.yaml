@@ -1,4 +1,4 @@
-# Background jobs (§6.1 webhook relay + §12 archive). No inbound ports.
+# Background jobs (§6.1 webhook relay, §12 archive, §5.5 push nudges). No inbound ports.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,7 +16,8 @@ spec:
         - name: sild-worker
           image: dmitri896/sild:backend
           imagePullPolicy: Always
-          command: ["/usr/local/bin/sild-worker", "-jobs", "webhook,archive"]
+          # No -jobs: the default is every job, so a new one needs no edit here.
+          command: ["/usr/local/bin/sild-worker"]
           envFrom:
             - configMapRef: { name: sild-config }
             - secretRef: { name: sild-secrets }

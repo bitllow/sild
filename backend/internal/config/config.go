@@ -36,6 +36,14 @@ type Config struct {
 	Email     Email
 	Jobs      Jobs
 	Bootstrap Bootstrap
+	Secrets   Secrets
+}
+
+// Secrets holds the key that seals tenant-supplied credentials at rest (§5.5
+// push credentials). Without it those columns could only be stored in plaintext,
+// so production refuses to start rather than degrade to that quietly.
+type Secrets struct {
+	Key string `env:"SILD_SECRETS_KEY"`
 }
 
 // ListenAddr is the address the REST listener binds.
@@ -73,7 +81,7 @@ func (j Jobs) List(def string) string {
 }
 
 // DefaultJobs is what a serving or worker process runs when SILD_JOBS is unset.
-const DefaultJobs = "webhook,archive"
+const DefaultJobs = "webhook,archive,push"
 
 // Email configures the forwarding ingestion daemon (inbound) and the outbound
 // SMTP relay (§6.2). Each tenant gets a forwarding address
@@ -205,6 +213,9 @@ func (c *Config) Validate() error {
 		if !c.Storage.LocalShared {
 			bad = append(bad, "STORAGE_BACKEND=local stores attachment bytes on the node that received them, so another replica answers 404 for them: use gcs/s3, or set STORAGE_LOCAL_SHARED=true to assert STORAGE_LOCAL_DIR is one shared volume across every replica")
 		}
+	}
+	if c.Secrets.Key == "" {
+		bad = append(bad, "SILD_SECRETS_KEY must be set: tenant push credentials are sealed with it, and without it they could only be stored in plaintext (openssl rand -base64 32)")
 	}
 	if len(bad) == 0 {
 		return nil

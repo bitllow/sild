@@ -3,7 +3,6 @@ package domain
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/auth"
@@ -200,13 +199,7 @@ func (s *Service) AgentDisplayName(ctx context.Context, tenantID, actorID string
 	if err != nil || a == nil {
 		return ""
 	}
-	if a.FirstName != "" {
-		return a.FirstName
-	}
-	if i := strings.IndexByte(a.Email, '@'); i > 0 {
-		return a.Email[:i]
-	}
-	return a.Email
+	return a.DisplayName()
 }
 
 // ListAdmins returns the tenant's admin users (Settings → Team, §8).

@@ -101,7 +101,7 @@ backend/
 │   │   └── email/            # §6.2 inbound parse, outbound reply
 │   ├── storage/              # §11 Bucket iface: gcs | s3
 │   ├── archive/              # §12 Sink iface: bigquery | gcs_json | s3_json
-│   └── push/                 # §5.5 Notifier iface: FCM + APNs
+│   └── push/                 # §5.5 nudge queue fan-out + FCM transport
 ```
 
 ### Layering rule (one direction only)
@@ -144,16 +144,16 @@ scale independently.
 |---|---|---|---|---|
 | **`sild-api`** | HTTP (gin), REST §4 | stateless | request rate | store, search, auth, storage, broker (*publish only*) |
 | **`sild-ws`** | WS + SSE (Centrifuge), §5 | **stateful — holds connections** | # connections | broker (subscribe), store (membership on connect), auth (JWKS) |
-| **`sild-worker`** | background loops, no public HTTP | stateless | outbox/queue depth | store, broker (presence), webhook/push/email/archive deps |
+| **`sild-worker`** | background loops, no public HTTP | stateless | outbox/queue depth | store, webhook/push/email/archive deps |
 | **`sild-migrate`** | one-shot, runs & exits | — | — | db |
 
 - Email **inbound** (`POST /v1/email/inbound`) is an HTTP route with
   provider-signature auth → it lives **inside `sild-api`**.
-- The **webhook outbox relay** and the **archival job** are background →
-  **`sild-worker`**, selected via `SILD_JOBS` (default `webhook,archive`).
-  Archival may also be triggered on-demand/cron (`sild-worker --once` with
-  `SILD_JOBS=archive`). Outbound email and push fan-out still run inline on the
-  message path.
+- The **webhook outbox relay**, the **push fan-out** and the **archival job** are
+  background → **`sild-worker`**, selected via `SILD_JOBS` (default
+  `webhook,archive,push`). Archival may also be triggered on-demand/cron
+  (`sild-worker --once` with `SILD_JOBS=archive`). Outbound email still runs
+  inline on the message path.
 - Each main.go stays thin: build the shared `di` container, then run its role.
   Shared providers (config, db, store, search, auth, broker) are registered
   once in `internal/di`; each binary differs only in which long-running
@@ -163,14 +163,18 @@ scale independently.
 
 `api` handlers call `node.Publish(channel, event)` after committing to Postgres;
 Centrifuge routes it through the **broker** to whichever process holds the
-connection. Presence (used by `sild-worker` to push only to members with no live
-connection) also lives in the broker.
+connection.
+
+Push fan-out does *not* consult presence: both mobile platforms hand a
+notification to a foregrounded app instead of displaying it, so the device
+decides — and it knows what is on screen, which a socket does not
+(`docs/adr/0002-nudges-are-sent-without-a-presence-check.md`).
 
 - **Memory broker** — in-process only. Usable only when one binary holds both
   the publisher and the connections (not our deployment).
 - **Redis broker** — **required**, because `api` and `ws` are separate
-  processes: it is the bus that carries API-published events to the `ws` nodes
-  and holds cluster-wide presence. Selected in `di` by config.
+  processes: it is the bus that carries API-published events to the `ws` nodes.
+  Selected in `di` by config.
 
 > **Consequence of separate binaries:** realtime needs **Redis**. `sild-api`
 > alone (REST-only, no live push) runs against just the DB; end-to-end realtime
@@ -181,14 +185,14 @@ connection) also lives in the broker.
 ```
        publish                          ┌─────────┐ subscribe   ┌──────┐
 ┌──────┐  (after PG     ┌─────────┐     │  Redis  │────────────▶│  ws  │ (×M)
-│ api  │───  commit) ──▶│  Redis  │     │ broker  │  presence   │ holds│
-│ (×N) │                │ broker  │     └────┬────┘             │ conns│
-└──────┘                └────┬────┘          │                  └──────┘
-                             │ outbox+presence│
-                             ▼                ▼
-                        ┌────────┐      (worker queries presence to decide
-                        │ worker │       push fan-out; drains the outbox)
-                        └────────┘
+│ api  │───  commit) ──▶│  Redis  │     │ broker  │             │ holds│
+│ (×N) │                │ broker  │     └─────────┘             │ conns│
+└──────┘                └─────────┘                             └──────┘
+   │ outbox + push queue (committed with the message)
+   ▼
+┌────────┐   (drains both queues: webhook deliveries,
+│ worker │    push nudges through each tenant's project)
+└────────┘
 ```
 
 Each binary exposes its own `/healthz` + `/metrics`.
@@ -443,7 +447,7 @@ backend skeleton; each is surfaced again at the phase that needs it.
 | IDs | **oklog/ulid** | sortable, prefixed |
 | Config | **caarlos0/env** | env-only, sane defaults |
 | Realtime | **Centrifuge** (embedded) | egress-only; runs in its own `sild-ws` binary (§3a) |
-| Broker | **Redis** | bus between `sild-api` (publish) and `sild-ws` (fan-out); holds presence |
+| Broker | **Redis** | bus between `sild-api` (publish) and `sild-ws` (fan-out) |
 | JSON columns | **gorm.io/datatypes** | portable jsonb/JSON/TEXT |
 
 ---
@@ -459,7 +463,7 @@ make test
 # run individually (REST-only works against just the DB):
 make run-api          # sild-api   :8080
 make run-ws           # sild-ws    :8081   (needs Redis broker)
-make run-worker       # sild-worker (SILD_JOBS, default webhook,archive)
+make run-worker       # sild-worker (SILD_JOBS, default webhook,archive,push)
 make migrate          # sild-migrate, then exit
 
 # full stack the easy way — DB + Redis + all four binaries:

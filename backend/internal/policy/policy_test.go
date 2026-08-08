@@ -17,6 +17,10 @@ func agent(peer bool) *principal.Principal {
 	return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a1",
 		Role: models.PlatformAgent, PeerAccess: peer}
 }
+func admin() *principal.Principal {
+	return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a3",
+		Role: models.PlatformAdmin}
+}
 func owner(peer bool) *principal.Principal {
 	return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a2",
 		Role: models.PlatformOwner, PeerAccess: peer}
@@ -100,6 +104,11 @@ func TestAuthorizeCapability(t *testing.T) {
 
 		{"user manages push tokens", user("u1"), PushTokensManage, true},
 		{"agent cannot manage push tokens", agent(false), PushTokensManage, false},
+
+		{"owner manages push config", owner(false), PushConfigManage, true},
+		{"admin cannot manage push config", admin(), PushConfigManage, false},
+		{"agent cannot manage push config", agent(false), PushConfigManage, false},
+		{"apikey cannot manage push config", apiKey(), PushConfigManage, false},
 
 		{"any principal reads own identity", user("u1"), PrincipalRead, true},
 		{"any principal reads active brand", user("u1"), BrandsReadActive, true},

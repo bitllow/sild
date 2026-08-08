@@ -29,13 +29,16 @@ func probePath(p string) string {
 	return strings.Join(parts, "/")
 }
 
-// probeEnv holds one credential of each kind, all valid, for one tenant.
+// probeEnv holds one credential of each kind, all valid, for one tenant — and one
+// session per platform role, since an agent, an admin and an owner are all
+// principal.KindAdmin.
 type probeEnv struct {
 	h     *testutil.Harness
 	key   string
 	jwt   string
-	admin string // owner session
-	agent string // agent session
+	owner string
+	admin string
+	agent string
 }
 
 func newProbeEnv(t *testing.T) probeEnv {
@@ -43,12 +46,14 @@ func newProbeEnv(t *testing.T) probeEnv {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	h.SeedAdmin(tenant.ID, "owner@probe", models.PlatformOwner)
+	h.SeedAdmin(tenant.ID, "admin@probe", models.PlatformAdmin)
 	h.SeedAdmin(tenant.ID, "agent@probe", models.PlatformAgent)
 	return probeEnv{
 		h:     h,
 		key:   h.SeedAPIKey(tenant.ID),
 		jwt:   h.MintToken(tenant.ID, "u_probe"),
-		admin: loginAs(t, h, "owner@probe"),
+		owner: loginAs(t, h, "owner@probe"),
+		admin: loginAs(t, h, "admin@probe"),
 		agent: loginAs(t, h, "agent@probe"),
 	}
 }
@@ -63,7 +68,7 @@ func TestMountedRoutesRefuseUndeclaredPrincipalKinds(t *testing.T) {
 	byKind := map[principal.Kind]func(*testutil.Req) *testutil.Req{
 		principal.KindAPIKey: func(r *testutil.Req) *testutil.Req { return r.Bearer(e.key) },
 		principal.KindUser:   func(r *testutil.Req) *testutil.Req { return r.Bearer(e.jwt) },
-		principal.KindAdmin:  func(r *testutil.Req) *testutil.Req { return r.Cookie("sild_admin", e.admin) },
+		principal.KindAdmin:  func(r *testutil.Req) *testutil.Req { return r.Cookie("sild_admin", e.owner) },
 	}
 
 	for _, g := range api.RouteGuards() {
@@ -82,20 +87,30 @@ func TestMountedRoutesRefuseUndeclaredPrincipalKinds(t *testing.T) {
 	}
 }
 
-func TestMountedRoutesRefuseAgentOnPrivilegedRoutes(t *testing.T) {
+// The role dimension Principals cannot express: every session below the tier a
+// route declares must be refused.
+func TestMountedRoutesRefuseSessionsBelowTheDeclaredRole(t *testing.T) {
 	e := newProbeEnv(t)
-	for _, g := range api.RouteGuards() {
-		if !g.PrivilegedOnly {
-			continue
-		}
-		t.Run(g.Method+" "+g.Path, func(t *testing.T) {
-			code := e.fire(g.Method, probePath(g.Path), func(r *testutil.Req) *testutil.Req {
-				return r.Cookie("sild_admin", e.agent)
-			})
-			if code != http.StatusForbidden {
-				t.Errorf("guards owner/admin-only actions %v, but an agent session got %d — want 403",
-					g.Actions, code)
+	for _, tier := range []struct {
+		role    string
+		session string
+		guards  func(api.RouteGuard) bool
+	}{
+		{"agent", e.agent, func(g api.RouteGuard) bool { return g.PrivilegedOnly }},
+		{"admin", e.admin, func(g api.RouteGuard) bool { return g.OwnerOnly }},
+	} {
+		for _, g := range api.RouteGuards() {
+			if !tier.guards(g) {
+				continue
 			}
-		})
+			t.Run(tier.role+" "+g.Method+" "+g.Path, func(t *testing.T) {
+				code := e.fire(g.Method, probePath(g.Path), func(r *testutil.Req) *testutil.Req {
+					return r.Cookie("sild_admin", tier.session)
+				})
+				if code != http.StatusForbidden {
+					t.Errorf("guards %v, but an %s session got %d — want 403", g.Actions, tier.role, code)
+				}
+			})
+		}
 	}
 }

@@ -30,6 +30,7 @@ const (
 	PushToken    = "pt"
 	ReadReceipt  = "rr"
 	Outbox       = "evt"
+	PushOutbox   = "pev"
 	Brand        = "br"
 	Request      = "req"
 	// Holder identifies one process's hold on something contended — a job lease,

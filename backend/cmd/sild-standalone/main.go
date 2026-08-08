@@ -27,6 +27,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/jobs"
 	"github.com/bitllow/sild/backend/internal/mail"
 	"github.com/bitllow/sild/backend/internal/provision"
+	"github.com/bitllow/sild/backend/internal/push"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/server"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -58,7 +59,7 @@ func main() {
 
 	err = c.Invoke(func(
 		cfg *config.Config, km *auth.KeyManager, svc *domain.Service, st store.Store,
-		srv *server.Server, node *realtime.Node, relay *webhook.Relay, sweep *archive.Job,
+		srv *server.Server, node *realtime.Node, relay *webhook.Relay, sweep *archive.Job, nudges *push.FanOut,
 	) error {
 		if err := km.EnsureActiveKey(ctx); err != nil {
 			return err
@@ -74,7 +75,7 @@ func main() {
 			return err
 		}
 
-		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
+		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep, Push: nudges})
 
 		if cfg.Email.SMTPIngest {
 			go func() {

@@ -27,6 +27,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/jobs"
 	"github.com/bitllow/sild/backend/internal/mail"
 	"github.com/bitllow/sild/backend/internal/provision"
+	"github.com/bitllow/sild/backend/internal/push"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/server"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -49,7 +50,7 @@ func main() {
 	err = c.Invoke(func(
 		cfg *config.Config, db *gorm.DB, km *auth.KeyManager, svc *domain.Service,
 		srv *server.Server, node *realtime.Node, relay *webhook.Relay, st store.Store,
-		sweep *archive.Job,
+		sweep *archive.Job, nudges *push.FanOut,
 	) error {
 		// Dev-only exception to "only sild-migrate migrates" (ARCHITECTURE §4).
 		// SILD_DEV_MIGRATE=false wherever this shares a database with a deployment.
@@ -151,13 +152,13 @@ func main() {
 			}
 		}()
 
-		// The same jobs, on the same schedule, as the deployed binaries — but the
-		// relay only by default, since the archive sweep purges hot rows.
-		selected, err := jobs.Parse(cfg.Jobs.List(jobs.Webhook))
+		// The same jobs, on the same schedule, as the deployed binaries — minus the
+		// archive sweep by default, since it purges hot rows.
+		selected, err := jobs.Parse(cfg.Jobs.List(jobs.Webhook + "," + jobs.Push))
 		if err != nil {
 			return err
 		}
-		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep})
+		jobs.Start(ctx, selected, jobs.Deps{Relay: relay, Sweep: sweep, Push: nudges})
 
 		log.Printf("sild-dev: REST+WS on %s (db=%s, broker=%s, jobs=%v) — Ctrl-C to stop", cfg.ListenAddr(), cfg.DB.Driver, cfg.Realtime.Broker, selected.Names())
 		return srv.Run(ctx)

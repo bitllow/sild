@@ -161,6 +161,13 @@ func routeManifest() []routeSpec {
 		{Method: "DELETE", Path: "/v1/push-tokens", Class: classAction,
 			Actions: []policy.Action{policy.PushTokensManage}, Principals: userOnly, Handler: (*Handler).deregisterPush, Success: http.StatusNoContent},
 
+		// Push control for the host's own backend: acting for one of its users,
+		// so a server credential rather than that user's token.
+		{Method: "PUT", Path: "/v1/users/:userID/push", Class: classAction,
+			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).setPushOptOut, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/users/:userID/push-tokens", Class: classAction,
+			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).deleteUserPushTokens},
+
 		// Brands: active is optional-auth, the set is owner/admin.
 		{Method: "GET", Path: "/v1/brands/active", Class: classPublic,
 			Actions: []policy.Action{policy.BrandsReadActive}, Principals: anyPrincipal, Handler: (*Handler).getActiveBrand},
@@ -174,6 +181,18 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.SettingsRead}, Principals: adminOnly, Handler: (*Handler).getEmailChannel},
 		{Method: "PATCH", Path: "/v1/channels/email", Class: classAction,
 			Actions: []policy.Action{policy.SettingsWrite}, Principals: adminOnly, Handler: (*Handler).updateEmailChannel},
+		// Push setup, owner-only. The credential carries its own action rather than
+		// SettingsWrite: supplying it confers the ability to notify every user.
+		{Method: "GET", Path: "/v1/channels/push", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).getPushConfig},
+		{Method: "PATCH", Path: "/v1/channels/push", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).updatePushSettings, Success: http.StatusNoContent},
+		{Method: "PUT", Path: "/v1/channels/push/credential", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).setPushCredential, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/channels/push/credential", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).deletePushCredential, Success: http.StatusNoContent},
+		{Method: "POST", Path: "/v1/channels/push/test", Class: classAction,
+			Actions: []policy.Action{policy.PushConfigManage}, Principals: adminOnly, Handler: (*Handler).testPushSend, Success: http.StatusNoContent},
 		{Method: "GET", Path: "/v1/api-keys", Class: classAction,
 			Actions: []policy.Action{policy.APIKeysManage}, Principals: adminOnly, Handler: (*Handler).listAPIKeys},
 		{Method: "POST", Path: "/v1/api-keys", Class: classAction,
@@ -221,6 +240,8 @@ type RouteGuard struct {
 	// plain agent session must be refused — the dimension Principals cannot
 	// express, since an agent and an owner are both principal.KindAdmin.
 	PrivilegedOnly bool
+	// OwnerOnly narrows that further: an admin session must be refused too.
+	OwnerOnly bool
 }
 
 // RouteSuccess is a route's declared success status, exported so a test can
@@ -250,19 +271,25 @@ func RouteGuards() []RouteGuard {
 		}
 		out = append(out, RouteGuard{
 			Method: r.Method, Path: r.Path,
-			Actions: r.Actions, Principals: r.Principals, PrivilegedOnly: r.privilegedOnly(),
+			Actions: r.Actions, Principals: r.Principals,
+			PrivilegedOnly: r.privilegedOnly(), OwnerOnly: r.ownerOnly(),
 		})
 	}
 	return out
 }
 
 // privilegedOnly reports that every action on the route is owner/admin-only.
-func (r routeSpec) privilegedOnly() bool {
+func (r routeSpec) privilegedOnly() bool { return r.everyAction(policy.RequiresPrivilegedAdmin) }
+
+// ownerOnly reports that every action on the route is the owner's alone.
+func (r routeSpec) ownerOnly() bool { return r.everyAction(policy.RequiresOwner) }
+
+func (r routeSpec) everyAction(pred func(policy.Action) bool) bool {
 	if len(r.Actions) == 0 {
 		return false
 	}
 	for _, a := range r.Actions {
-		if !policy.RequiresPrivilegedAdmin(a) {
+		if !pred(a) {
 			return false
 		}
 	}

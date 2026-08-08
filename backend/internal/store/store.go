@@ -26,6 +26,9 @@ type Store interface {
 	Receipts() ReceiptRepo
 	Uploads() UploadRepo
 	PushTokens() PushTokenRepo
+	PushConfigs() PushConfigRepo
+	PushOptOuts() PushOptOutRepo
+	PushOutbox() PushOutboxRepo
 	Webhooks() WebhookRepo
 	Outbox() OutboxRepo
 	Email() EmailRepo

@@ -133,6 +133,24 @@ const (
 	PushWeb     PushPlatform = "web"
 )
 
+// Valid reports a recognised platform, so an unknown one is rejected at the
+// edge rather than stored and never matched.
+func (p PushPlatform) Valid() bool {
+	return p == PushIOS || p == PushAndroid || p == PushWeb
+}
+
+// PushSenderSource picks whose name a support nudge carries (§5.5).
+type PushSenderSource string
+
+const (
+	PushSenderBrand PushSenderSource = "brand"
+	PushSenderAgent PushSenderSource = "agent"
+)
+
+func (s PushSenderSource) Valid() bool {
+	return s == PushSenderBrand || s == PushSenderAgent
+}
+
 // UploadStatus tracks the direct-to-bucket lifecycle (§11 + ownership record).
 type UploadStatus string
 

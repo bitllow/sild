@@ -30,7 +30,11 @@ SILD_TEST_MYSQL_DSN="sild:sild@tcp(127.0.0.1:3307)/sild?charset=utf8mb4&parseTim
 | §5.1 channel split | participants → conv + user channels | `realtime/centrifuge_test.go: TestPublishParticipantsChannels` |
 | §5.1 operator fan-out | an operator's subscription set is fixed (never per-conversation); a support conversation reaches the agents channel, a peer one only the peer channel | `realtime/parity_test.go: TestChannelSetDoesNotGrowWithTheQueue`, `domain/agent_fanout_test.go` |
 | §5.6 internal notes | published only to agent tenant channels, never a conversation or user channel, and nowhere at all when no operator may observe the conversation; stripped from client history; user can't set internal | `realtime/…: TestPublishInternalChannelOnly`, `TestPublishInternalWithoutObserversGoesNowhere`, `api/messages_test.go: TestInternalNoteIsolation`, `TestUserCannotPostInternal` |
-| §5.5 push fan-out | only offline members, never the sender | `push/fanout_test.go` |
+| §5.5 push fan-out | every other member, never the sender; nothing for an internal note or an unconfigured tenant; the nudge commits with the message | `api/push_test.go` |
+| §5.5 nudge text | the sender and body settings are independent, and compose server-side | `push/nudge_test.go`, `api/push_test.go: TestNudgeTextFollowsTenantSettings` |
+| §5.5 push transport | alert + data payload, per-conversation collapse, named channel; unregistered/invalid prunes the token, 429/5xx retries, 401 is a credential error | `push/fcm_test.go` |
+| §5.5 push credential | sealed at rest, non-deterministic, a wrong key says so; never returned by the API; owner-only | `secrets/secrets_test.go`, `api/push_test.go` |
+| §5.5 push opt-out | suppresses delivery, survives re-registration, lifts without a reinstall; host control refuses a user token | `api/push_test.go` |
 | §6.1 webhooks | HMAC `X-Signature`, stable `X-Sild-Event-Id`, delivery log, backoff retry on failure | `connector/webhook/relay_test.go` |
 | §6.2 email | inbound creates/threads by token; agent reply emails out; signature gate | `domain/email_test.go` |
 | §4.3 search | keyword (body + member metadata) + `status:`/`role:` filters, AND'd | `domain/search_test.go` |

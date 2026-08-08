@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Avatar, Button, CopyIcon, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
+import { Avatar, Badge, Button, CopyIcon, Input, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
 import type { PlatformRole } from "@/store/types";
 import { tabStyle } from "./styles";
 import { Appearance } from "./Appearance";
@@ -264,17 +265,15 @@ const OTHER_CHANNELS: { name: string; desc: string }[] = [
   { name: "Slack", desc: "Handle Slack messages alongside email." },
 ];
 
-// ToggleRow is one labelled setting with a Switch on the right.
-function ToggleRow({
+// SettingRow is one labelled setting with its control on the right.
+function SettingRow({
   title,
   desc,
-  checked,
-  onChange,
+  children,
 }: {
   title: string;
   desc: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
+  children: React.ReactNode;
 }) {
   return (
     <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, borderBottom: rowBorder }}>
@@ -282,10 +281,42 @@ function ToggleRow({
         <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
         <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>{desc}</div>
       </div>
-      <Switch checked={checked} onChange={onChange} />
+      {children}
     </div>
   );
 }
+
+function ToggleRow(props: { title: string; desc: string; checked: boolean; onChange: (v: boolean) => void; testId?: string }) {
+  return (
+    <SettingRow title={props.title} desc={props.desc}>
+      <Switch checked={props.checked} onChange={props.onChange} data-testid={props.testId} />
+    </SettingRow>
+  );
+}
+
+// The mono value field shared by the forwarding address and the push project.
+const monoField: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  fontFamily: "var(--font-mono)",
+  fontSize: 13,
+  background: "var(--surface-sunken)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 8,
+  padding: "9px 12px",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+// The uppercase label above a value field.
+const fieldLabel: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "var(--text-tertiary)",
+  textTransform: "uppercase",
+  letterSpacing: ".04em",
+};
 
 const Channels = observer(function Channels() {
   const store = useStore();
@@ -319,28 +350,9 @@ const Channels = observer(function Channels() {
         </div>
 
         <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-            Forwarding address
-          </div>
+          <div style={fieldLabel}>Forwarding address</div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-            <code
-              style={{
-                flex: 1,
-                minWidth: 0,
-                fontFamily: "var(--font-mono)",
-                fontSize: 13,
-                color: "var(--text-primary)",
-                background: "var(--surface-sunken)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 8,
-                padding: "9px 12px",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {ch?.forwardingAddress || "…"}
-            </code>
+            <code style={{ ...monoField, color: "var(--text-primary)" }}>{ch?.forwardingAddress || "…"}</code>
             <Button size="sm" variant="secondary" onClick={store.copyForwardingAddress} disabled={!ch}>
               <CopyIcon size={15} />
               <span style={{ marginLeft: 5 }}>{store.channelCopied ? "Copied" : "Copy"}</span>
@@ -362,6 +374,8 @@ const Channels = observer(function Channels() {
         />
       </div>
 
+      <Push />
+
       <div style={{ ...card, marginTop: 20 }}>
         <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>Other channels</div>
@@ -382,5 +396,164 @@ const Channels = observer(function Channels() {
         ))}
       </div>
     </>
+  );
+});
+
+const SENDER_SOURCE_OPTIONS = [
+  { value: "brand", label: "your brand name" },
+  { value: "agent", label: "the agent who replied" },
+];
+
+// Push (§5.5). Notifications go through the tenant's own push project, so the
+// credential is theirs to supply — Sild cannot address an app it does not own.
+const Push = observer(function Push() {
+  const store = useStore();
+  const ch = store.pushChannel;
+  // The credential is the owner's capability, so an admin never sees the panel.
+  if (!store.canManagePush || !ch) return null;
+  const configured = !!ch.project_id;
+
+  const onFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => void store.uploadPushCredential(String(reader.result));
+    reader.readAsText(file);
+  };
+
+  return (
+    <div style={{ ...card, marginTop: 20 }} data-testid="push-settings">
+      <div style={{ padding: "16px 18px", borderBottom: rowBorder, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Push notifications</div>
+          <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
+            Notify people in your app when they are not looking at it. Upload the service-account key
+            from your own Firebase project — the same project your app was built against.
+          </div>
+        </div>
+        <Badge variant={ch.verified ? "success" : "warning"} data-testid="push-status">
+          {ch.verified ? "Delivering" : configured ? "Awaiting first delivery" : "Not set up"}
+        </Badge>
+      </div>
+
+      <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
+        <div style={fieldLabel}>Service account</div>
+        {configured ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+            <code data-testid="push-project" style={monoField}>
+              {ch.project_id} · {ch.client_email}
+            </code>
+            <Button size="sm" variant="secondary" onClick={store.removePushCredential} disabled={store.pushBusy}>
+              <TrashIcon size={15} />
+              <span style={{ marginLeft: 5 }}>Remove</span>
+            </Button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 8 }}>
+            No credential yet. Nothing is notified until one is uploaded.
+          </div>
+        )}
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            marginTop: 10,
+            padding: "6px 12px",
+            fontSize: 13,
+            fontWeight: 600,
+            borderRadius: 8,
+            cursor: store.pushBusy ? "default" : "pointer",
+            opacity: store.pushBusy ? 0.6 : 1,
+            border: "1px solid var(--border-default)",
+            background: "var(--white)",
+          }}
+        >
+          <input
+            type="file"
+            accept="application/json,.json"
+            data-testid="push-credential-file"
+            style={{ display: "none" }}
+            disabled={store.pushBusy}
+            onChange={(e) => onFile(e.target.files?.[0])}
+          />
+          {configured ? "Replace key file" : "Upload key file"}
+        </label>
+      </div>
+
+      <ToggleRow
+        title="Show who sent it"
+        desc="Put the sender's name on the notification instead of just “New message”."
+        checked={ch.include_sender}
+        onChange={store.togglePushIncludeSender}
+        testId="push-include-sender"
+      />
+      <ToggleRow
+        title="Show the message"
+        desc="Include the message text. Leave off to keep conversations off lock screens."
+        checked={ch.include_body}
+        onChange={store.togglePushIncludeBody}
+        testId="push-include-body"
+      />
+
+      <SettingRow
+        title="Name support replies as"
+        desc="Whose name appears when an agent replies. Messages between your users always name the sender."
+      >
+        <Select
+          value={ch.sender_source}
+          options={SENDER_SOURCE_OPTIONS}
+          onChange={(e) => store.setPushSenderSource(e.target.value as "brand" | "agent")}
+          disabled={!ch.include_sender}
+        />
+      </SettingRow>
+
+      <TestPushRow />
+
+      {store.pushMessage && (
+        <div
+          data-testid="push-message"
+          style={{
+            padding: "12px 18px",
+            fontSize: 13,
+            color: store.pushMessage.kind === "error" ? "var(--danger, #B3261E)" : "var(--success, #137333)",
+          }}
+        >
+          {store.pushMessage.text}
+        </div>
+      )}
+    </div>
+  );
+});
+
+// TestPushRow sends to a token pasted from a debug build. Deliberately not a
+// picker over registered devices: every registered device belongs to a real
+// end user, so a picker rings a customer's phone.
+const TestPushRow = observer(function TestPushRow() {
+  const store = useStore();
+  const [token, setToken] = useState("");
+  return (
+    <div style={{ padding: "14px 18px", borderBottom: rowBorder }}>
+      <div style={{ fontSize: 14, fontWeight: 600 }}>Send a test notification</div>
+      <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
+        Paste the device token your app logs on startup to check the whole path.
+      </div>
+      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+        <Input
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Device token"
+          data-testid="push-test-token"
+          style={{ flex: 1 }}
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          data-testid="push-test-send"
+          disabled={!token || store.pushBusy}
+          onClick={() => void store.sendTestPush(token)}
+        >
+          Send
+        </Button>
+      </div>
+    </div>
   );
 });

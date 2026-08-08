@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/id"
@@ -58,6 +59,18 @@ func (a *AdminUser) BeforeCreate(*gorm.DB) error {
 		a.ID = id.New(id.AdminUser)
 	}
 	return nil
+}
+
+// DisplayName is what end-user surfaces call this operator. One rule, so a
+// notification and the widget never name the same agent differently.
+func (a *AdminUser) DisplayName() string {
+	if a.FirstName != "" {
+		return a.FirstName
+	}
+	if i := strings.IndexByte(a.Email, '@'); i > 0 {
+		return a.Email[:i]
+	}
+	return a.Email
 }
 
 // AdminSession is a server-side admin cookie session (revocable).

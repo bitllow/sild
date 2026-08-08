@@ -17,13 +17,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import io.sild.core.SildClient
 import io.sild.core.SildConfig
+import io.sild.core.SildHost
 
 // SildRuntime holds the host-supplied config process-wide. The config carries a
 // TokenProvider (not parcelable), so the launcher stores it here and the messenger
 // Activity reads it — the same "init once, open many" model as the web Sild.init.
 object SildRuntime {
-    @Volatile
-    var config: SildConfig? = null
+    // One holder, shared with the push calls in :core — a second one here would
+    // let a host configure the messenger and still fail to register a device.
+    var config: SildConfig?
+        get() = SildHost.config
+        set(value) {
+            SildHost.config = value
+        }
 }
 
 // Sild is the SDK entry point: Sild.init(config) once (e.g. in Application), then
@@ -35,6 +41,24 @@ object Sild {
         SildRuntime.config = config
         return SildMessenger
     }
+
+    // Push (§5.5). The host owns its FCM registration (ADR 0001) and hands the token
+    // here; the work is SildHost's, in :core, so Android and iOS run one implementation.
+
+    /** Forward the FCM token you were issued, and again whenever it rotates. */
+    fun setPushToken(token: String, onResult: (Boolean) -> Unit = {}) =
+        SildHost.setPushToken(token, onResult)
+
+    /** Release this device on sign-out, so the next user of it hears nothing. */
+    fun clearPushToken(token: String, onResult: (Boolean) -> Unit = {}) =
+        SildHost.clearPushToken(token, onResult)
+
+    /**
+     * Whether to display a nudge that arrived while the app was in the foreground.
+     * False for the conversation the messenger is showing, and for anything that is
+     * not ours.
+     */
+    fun shouldShow(data: Map<String, String>): Boolean = SildHost.shouldShow(data)
 }
 
 object SildMessenger {
@@ -89,6 +113,20 @@ internal class SildSession(cfg: SildConfig) : ViewModel() {
 
 // SildMessengerActivity hosts the Compose messenger, themed from the live brand.
 class SildMessengerActivity : ComponentActivity() {
+    private var session: SildSession? = null
+
+    // Resumed, not merely alive: a messenger sitting behind another of the host's
+    // screens is not what the user is reading, and must not suppress its nudges.
+    override fun onResume() {
+        super.onResume()
+        SildHost.onScreen = session?.client
+    }
+
+    override fun onPause() {
+        super.onPause()
+        SildHost.onScreen = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val config = SildRuntime.config
@@ -104,6 +142,7 @@ class SildMessengerActivity : ComponentActivity() {
         val session = ViewModelProvider(this, SildSession.Factory(config))[SildSession::class.java]
         session.startOnce(if (rootIsHome) null else target.removePrefix(SildMessenger.CONV_PREFIX))
         val client = session.client
+        this.session = session
 
         setContent {
             val state by client.state.collectAsStateWithLifecycle()
