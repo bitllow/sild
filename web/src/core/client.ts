@@ -316,6 +316,7 @@ export class SildClient implements WidgetClient {
     this.patch({ connection: "connecting", error: null });
     try {
       await this.getToken();
+      await this.writeProfile();
       this.connectRealtime();
       // The list surface needs it, and openConversation reads the target's row from it.
       await this.loadConversations();
@@ -325,6 +326,18 @@ export class SildClient implements WidgetClient {
       this.patch({ ready: true });
     } catch (e) {
       this.patch({ error: e instanceof Error ? e.message : "Failed to connect", ready: true });
+    }
+  }
+
+  // writeProfile upserts the configured profile before anything else, so Sild
+  // knows who this is before they ever write a message. Fire-and-forget: a
+  // missing profile costs a display name, a blocked start costs the whole
+  // support channel.
+  private async writeProfile() {
+    try {
+      await this.api("PUT", "/contacts/me", { metadata: this.metadata });
+    } catch (e) {
+      console.warn("sild: profile write failed", e);
     }
   }
 
@@ -523,7 +536,9 @@ export class SildClient implements WidgetClient {
   }
 
   async openSupportRequest() {
-    const conv = await this.api<{ id: string }>("POST", "/conversations", { metadata: this.metadata });
+    // No profile in the body: the participant's is already stored, and creating a
+    // conversation means naming participants, nothing more.
+    const conv = await this.api<{ id: string }>("POST", "/conversations", {});
     await this.loadConversations();
     await this.openConversation(conv.id);
     // The socket connected before this conversation existed, so its server-side

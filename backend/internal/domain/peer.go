@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"strings"
 
 	"github.com/bitllow/sild/backend/internal/realtime"
@@ -82,10 +81,18 @@ func (s *Service) ListPeerConversations(ctx context.Context, tenantID string, pa
 	if err != nil {
 		return PeerPage{}, err
 	}
+	groups := make([][]models.ConversationMember, 0, len(page.Items))
+	for i := range page.Items {
+		groups = append(groups, page.Items[i].Members)
+	}
+	profiles, err := s.MemberProfiles(ctx, tenantID, groups...)
+	if err != nil {
+		return PeerPage{}, err
+	}
 	out := make([]map[string]any, 0, len(page.Items))
 	for i := range page.Items {
 		it := &page.Items[i]
-		conv := views.Conversation(&it.Conversation, it.Members, nil)
+		conv := views.Conversation(&it.Conversation, it.Members, nil, profiles)
 		conv["last_activity"] = it.LastActivity
 		if it.Conversation.LastMessagePreview != "" {
 			conv["last_message"] = map[string]any{
@@ -170,9 +177,8 @@ func (s *Service) PeerAgentSend(ctx context.Context, tenantID, convID, adminID, 
 func (s *Service) agentJoinPeer(ctx context.Context, conv *models.Conversation, adminID string) error {
 	tenantID, convID := conv.TenantID, conv.ID
 	name := s.AgentDisplayName(ctx, tenantID, adminID)
-	meta, _ := json.Marshal(map[string]string{"name": name, "role": "support"})
-	member, err := s.buildMember(ctx, tenantID, convID, MemberInput{
-		UserID: adminID, Kind: models.MemberAgent, ConvRole: models.ConvRole("support"), Metadata: meta,
+	member, err := s.buildMember(tenantID, convID, MemberInput{
+		UserID: adminID, Kind: models.MemberAgent, ConvRole: models.ConvRole("support"),
 	})
 	if err != nil {
 		return err

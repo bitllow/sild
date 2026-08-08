@@ -1,19 +1,24 @@
 package gormstore
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-// Contacts are a derived READ MODEL over conversation_members, keyed
-// (tenant_id, external_user_id). The scope is applied BEFORE aggregation: a
-// pre-aggregated row cannot be scoped safely, because its ordering value and
-// metadata winner would encode rows the caller may not see.
+// A contact's PROFILE is a stored row keyed (tenant_id, external_user_id); the
+// contacts DIRECTORY is still derived from conversation_members, joined outward
+// to that row. The scope is applied BEFORE aggregation: a pre-aggregated row
+// cannot be scoped safely, because its ordering value would encode rows the
+// caller may not see.
 
 type contactRepo struct{ db *gorm.DB }
 
@@ -60,7 +65,7 @@ func parseTimeText(v string) time.Time {
 	return time.Time{}
 }
 
-// contactBase builds the scope-filtered membership join every contact query
+// contactBase builds the scope-filtered membership join every directory query
 // starts from.
 func (r *contactRepo) contactBase(ctx context.Context, tenantID string, scope policy.ResourceScope) *gorm.DB {
 	q := r.db.WithContext(ctx).
@@ -98,8 +103,13 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 		base = base.Where("m.external_user_id = ?", q.Exact)
 	}
 	if q.Search != "" {
+		// The search text lives on the narrow contacts row, so the scan never pulls
+		// a profile page through memory.
 		like := "%" + q.Search + "%"
-		base = base.Where("LOWER(m.member_search_text) LIKE LOWER(?) OR LOWER(m.external_user_id) LIKE LOWER(?)", like, like)
+		base = base.Where(`LOWER(m.external_user_id) LIKE LOWER(?)
+			OR EXISTS (SELECT 1 FROM contacts ct
+				WHERE ct.tenant_id = m.tenant_id AND ct.external_user_id = m.external_user_id
+				  AND LOWER(ct.search_text) LIKE LOWER(?))`, like, like)
 	}
 
 	// The sort value is an aggregate, so the keyset predicate lives in HAVING.
@@ -155,7 +165,7 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 	for i := range rows {
 		ids[i] = rows[i].ExternalUserID
 	}
-	meta, err := r.winningMetadata(ctx, tenantID, scope, ids)
+	meta, err := r.Profiles(ctx, tenantID, ids)
 	if err != nil {
 		return empty, err
 	}
@@ -180,32 +190,6 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 	return page, nil
 }
 
-// winningMetadata takes each contact's metadata from their most recently joined
-// AUTHORIZED membership. One blob wins whole — merging keys across memberships
-// would fabricate a person who never existed.
-func (r *contactRepo) winningMetadata(ctx context.Context, tenantID string, scope policy.ResourceScope, externalIDs []string) (map[string][]byte, error) {
-	type row struct {
-		ExternalUserID string
-		Metadata       []byte
-		JoinedAt       time.Time
-		ID             string
-	}
-	var rows []row
-	err := r.contactBase(ctx, tenantID, scope).
-		Where("m.external_user_id IN ?", externalIDs).
-		Select("m.external_user_id AS external_user_id, m.metadata AS metadata, m.joined_at AS joined_at, m.id AS id").
-		Order("m.joined_at ASC").Order("m.id ASC").
-		Scan(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string][]byte, len(externalIDs))
-	for _, r := range rows { // ascending scan, so the last write is the newest
-		out[r.ExternalUserID] = r.Metadata
-	}
-	return out, nil
-}
-
 // GetContact returns one contact, or ErrNotFound when the caller's scope admits
 // none of their conversations — the same rule the list applies, so a contact
 // cannot be probed for through the single-object route.
@@ -222,3 +206,91 @@ func (r *contactRepo) GetContact(ctx context.Context, tenantID string, scope pol
 	}
 	return &page.Items[0], nil
 }
+
+// Upsert writes the profile across both tables. The narrow row's update names
+// only search_text and updated_at, so push_opted_out_at survives every write.
+func (r *contactRepo) Upsert(ctx context.Context, tenantID, externalUserID string, metadata []byte, searchText string) (bool, error) {
+	changed := true
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var prev models.ContactMeta
+		err := tx.Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).First(&prev).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		changed = err != nil || !bytes.Equal(prev.Metadata, metadata)
+
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "external_user_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"search_text", "updated_at"}),
+		}).Create(&models.Contact{
+			TenantID: tenantID, ExternalUserID: externalUserID,
+			SearchText: searchText, UpdatedAt: time.Now(),
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "external_user_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"metadata"}),
+		}).Create(&models.ContactMeta{
+			TenantID: tenantID, ExternalUserID: externalUserID,
+			Metadata: datatypes.JSON(metadata),
+		}).Error
+	})
+	return changed, err
+}
+
+func (r *contactRepo) Profiles(ctx context.Context, tenantID string, externalUserIDs []string) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	if len(externalUserIDs) == 0 {
+		return out, nil
+	}
+	var rows []models.ContactMeta
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND external_user_id IN ?", tenantID, externalUserIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if len(rows[i].Metadata) > 0 {
+			out[rows[i].ExternalUserID] = rows[i].Metadata
+		}
+	}
+	return out, nil
+}
+
+// SetPushOptOut writes only the system column, so it cannot disturb a profile.
+func (r *contactRepo) SetPushOptOut(ctx context.Context, tenantID, externalUserID string, optedOut bool) error {
+	var at *time.Time
+	if optedOut {
+		now := time.Now()
+		at = &now
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "external_user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"push_opted_out_at", "updated_at"}),
+	}).Create(&models.Contact{
+		TenantID: tenantID, ExternalUserID: externalUserID,
+		PushOptedOutAt: at, UpdatedAt: time.Now(),
+	}).Error
+}
+
+func (r *contactRepo) OptedOut(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(externalUserIDs) == 0 {
+		return out, nil
+	}
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&models.Contact{}).
+		Where("tenant_id = ? AND push_opted_out_at IS NOT NULL AND external_user_id IN ?", tenantID, externalUserIDs).
+		Pluck("external_user_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
+var _ store.ContactRepo = (*contactRepo)(nil)

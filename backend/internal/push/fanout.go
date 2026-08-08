@@ -149,7 +149,7 @@ func (f *FanOut) deliver(ctx context.Context, tp *tenantPush, messageID string, 
 
 	var sender string
 	if tp.settings.IncludeSender {
-		sender = f.senderName(ctx, tenantID, tp.settings, conv, members, msg)
+		sender = f.senderName(ctx, tenantID, tp.settings, conv, msg)
 	}
 	title, body := Compose(tp.settings, sender, msg.Body)
 
@@ -235,7 +235,7 @@ func (f *FanOut) recipients(ctx context.Context, tenantID string, members []mode
 		}
 		ids = append(ids, *m.ExternalUserID)
 	}
-	optedOut, err := f.store.PushOptOuts().OptedOut(ctx, tenantID, ids)
+	optedOut, err := f.store.Contacts().OptedOut(ctx, tenantID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (f *FanOut) recipients(ctx context.Context, tenantID string, members []mode
 
 // senderName resolves whose name the nudge carries: for a support conversation
 // the tenant chooses brand or agent; a peer conversation always names the member.
-func (f *FanOut) senderName(ctx context.Context, tenantID string, s Settings, conv *models.Conversation, members []models.ConversationMember, msg *models.Message) string {
+func (f *FanOut) senderName(ctx context.Context, tenantID string, s Settings, conv *models.Conversation, msg *models.Message) string {
 	if conv.Kind == models.KindSupport && msg.InternalActorID != nil {
 		if s.SenderSource == models.PushSenderBrand {
 			brand, err := f.store.Brands().Active(ctx, tenantID)
@@ -268,24 +268,22 @@ func (f *FanOut) senderName(ctx context.Context, tenantID string, s Settings, co
 	if msg.ExternalUserID == nil {
 		return ""
 	}
-	return memberName(members, *msg.ExternalUserID)
+	return f.contactName(ctx, tenantID, *msg.ExternalUserID)
 }
 
-// memberName reads the host-supplied display name off the membership metadata,
-// the same `name` key the inbox and widget render.
-func memberName(members []models.ConversationMember, externalUserID string) string {
-	for _, m := range members {
-		if m.ExternalUserID == nil || *m.ExternalUserID != externalUserID {
-			continue
-		}
-		var meta map[string]any
-		if json.Unmarshal(m.Metadata, &meta) != nil {
-			break
-		}
-		if name, ok := meta["name"].(string); ok && name != "" {
-			return name
-		}
-		break
+// contactName reads the host-supplied display name off the sender's stored
+// profile, the same `name` key the inbox and widget render.
+func (f *FanOut) contactName(ctx context.Context, tenantID, externalUserID string) string {
+	profiles, err := f.store.Contacts().Profiles(ctx, tenantID, []string{externalUserID})
+	if err != nil {
+		return externalUserID
+	}
+	var meta map[string]any
+	if json.Unmarshal(profiles[externalUserID], &meta) != nil {
+		return externalUserID
+	}
+	if name, ok := meta["name"].(string); ok && name != "" {
+		return name
 	}
 	return externalUserID
 }

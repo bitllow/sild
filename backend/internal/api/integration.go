@@ -55,7 +55,6 @@ func (h *Handler) createConversation(c *gin.Context) {
 		Members   []struct {
 			UserID   string          `json:"user_id"`
 			ConvRole models.ConvRole `json:"conv_role"`
-			Metadata json.RawMessage `json:"metadata"`
 		} `json:"members"`
 		OpenAssignment *bool  `json:"open_assignment"`
 		ExternalUserID string `json:"external_user_id"`
@@ -99,7 +98,7 @@ func (h *Handler) createConversation(c *gin.Context) {
 		// ignored rather than trusted, so a user cannot add anyone to a
 		// conversation they open.
 		in.Members = []domain.MemberInput{
-			{UserID: p.Subject, ConvRole: models.RoleClient, Metadata: req.Metadata},
+			{UserID: p.Subject, ConvRole: models.RoleClient},
 		}
 
 	case principal.KindAdmin:
@@ -108,12 +107,12 @@ func (h *Handler) createConversation(c *gin.Context) {
 			return
 		}
 		in.Members = []domain.MemberInput{
-			{UserID: req.ExternalUserID, ConvRole: models.RoleClient, Metadata: req.Metadata},
+			{UserID: req.ExternalUserID, ConvRole: models.RoleClient},
 		}
 
 	default: // API key
 		for _, m := range req.Members {
-			in.Members = append(in.Members, domain.MemberInput{UserID: m.UserID, ConvRole: m.ConvRole, Metadata: m.Metadata})
+			in.Members = append(in.Members, domain.MemberInput{UserID: m.UserID, ConvRole: m.ConvRole})
 		}
 	}
 
@@ -122,7 +121,12 @@ func (h *Handler) createConversation(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, views.Conversation(conv, conv.Members, conv.Assignment))
+	profiles, err := h.svc.MemberProfiles(c.Request.Context(), apiutil.Tenant(c), conv.Members)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, views.Conversation(conv, conv.Members, conv.Assignment, profiles))
 }
 
 // addMember: POST /v1/conversations/:id/members (§4.1).
@@ -130,18 +134,22 @@ func (h *Handler) addMember(c *gin.Context) {
 	var req struct {
 		UserID   string          `json:"user_id"`
 		ConvRole models.ConvRole `json:"conv_role"`
-		Metadata json.RawMessage `json:"metadata"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
 	m, err := h.svc.AddMember(c.Request.Context(), apiutil.Tenant(c), c.Param("id"),
-		domain.MemberInput{UserID: req.UserID, ConvRole: req.ConvRole, Metadata: req.Metadata})
+		domain.MemberInput{UserID: req.UserID, ConvRole: req.ConvRole})
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, views.Member(m))
+	profiles, err := h.svc.MemberProfiles(c.Request.Context(), apiutil.Tenant(c), []models.ConversationMember{*m})
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, views.Member(m, profiles))
 }
 
 // removeMember: DELETE /v1/conversations/:id/members/:user_id (§4.1). 409 if it

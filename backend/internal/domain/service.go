@@ -105,8 +105,8 @@ func (s *Service) enqueueWebhook(ctx context.Context, tx store.Store, tenantID, 
 	})
 }
 
-// searchText materializes member_search_text from the tenant's searchable keys
-// (§3): concat the values of those keys from the member's metadata.
+// searchText materializes contacts.search_text from the tenant's searchable keys
+// (§3): concat the values of those keys from the stored profile.
 func (s *Service) searchText(ctx context.Context, tenantID string, metadata []byte) (string, error) {
 	keys, err := s.store.Tenants().SearchableKeys(ctx, tenantID)
 	if err != nil || len(keys) == 0 || len(metadata) == 0 {

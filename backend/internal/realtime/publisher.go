@@ -14,6 +14,7 @@ const (
 	EventAssignmentUpdated  = "assignment.updated"
 	EventConversationClosed = "conversation.closed"
 	EventTyping             = "typing"
+	EventContactUpdated     = "contact.updated"
 )
 
 // Channel naming (§5.1). Clients never choose channels; subscriptions are

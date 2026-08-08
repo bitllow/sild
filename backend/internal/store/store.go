@@ -27,7 +27,6 @@ type Store interface {
 	Uploads() UploadRepo
 	PushTokens() PushTokenRepo
 	PushConfigs() PushConfigRepo
-	PushOptOuts() PushOptOutRepo
 	PushOutbox() PushOutboxRepo
 	Webhooks() WebhookRepo
 	Outbox() OutboxRepo

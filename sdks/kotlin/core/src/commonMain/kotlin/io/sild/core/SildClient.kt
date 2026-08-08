@@ -74,6 +74,7 @@ class SildClient internal constructor(
             val conn = if (realtime == null) ConnectionState.IDLE else ConnectionState.CONNECTING
             _state.update { it.copy(connection = conn, error = null) }
             runCatching {
+                writeProfile()
                 loadBrand()
                 realtime?.connect()
                 // Always load the list first: it drives the App's conversation list
@@ -128,6 +129,16 @@ class SildClient internal constructor(
      */
     fun shouldShow(data: Map<String, String>): Boolean =
         SildPush.shouldShow(data, _state.value.activeId)
+
+    /**
+     * Upserts the configured profile before anything else, so Sild knows who this
+     * is before they ever write a message. Fire-and-forget: a missing profile
+     * costs a display name, a blocked start costs the whole support channel.
+     */
+    private suspend fun writeProfile() {
+        runCatching { api.upsertOwnProfile() }
+            .onFailure { println("sild: profile write failed: ${it.message}") }
+    }
 
     private suspend fun loadBrand() {
         runCatching { api.fetchBrand() }.onSuccess { res ->

@@ -22,12 +22,24 @@ func (h *Handler) getConversation(c *gin.Context) {
 	if !apiutil.AuthorizeConversation(c, h.svc, policy.ConversationsRead, convID) {
 		return
 	}
+	expansion, ok := apiutil.ParseExpand(c, expandContacts)
+	if !ok {
+		return
+	}
 	conv, members, assignment, err := h.svc.GetConversation(c.Request.Context(), apiutil.Tenant(c), convID)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	view := views.Conversation(conv, members, assignment)
+	profiles, err := h.svc.MemberProfiles(c.Request.Context(), apiutil.Tenant(c), members)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	view := views.Conversation(conv, members, assignment, profiles)
+	if expansion.Has(resourceContacts) {
+		view[resourceContacts] = contactsBlock(domain.ExternalParticipants(members), profiles.Contacts, expansion)
+	}
 	view["kind"] = conv.Kind
 	// Archival keeps the conversation and its members, so the view is served from
 	// live rows; only the message history moved to the sink. The flag tells a

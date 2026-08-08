@@ -31,6 +31,10 @@ const (
 
 	ContactsList Action = "contacts.list"
 	ContactsRead Action = "contacts.read"
+	// ContactsWrite stores a person's profile. Agents are excluded: no agent can
+	// write a profile today, and granting it would give the inbox and the device a
+	// field to fight over.
+	ContactsWrite Action = "contacts.write"
 
 	UploadsIssue Action = "uploads.issue"
 	UploadsWrite Action = "uploads.write"
@@ -96,8 +100,9 @@ var capabilities = map[Action]grant{
 	AssignmentsClaim:  {admin: true},
 	AssignmentsClose:  {admin: true},
 
-	ContactsList: {admin: true},
-	ContactsRead: {admin: true},
+	ContactsList:  {admin: true},
+	ContactsRead:  {admin: true},
+	ContactsWrite: {apiKey: true, user: true},
 
 	UploadsIssue: {apiKey: true, user: true, admin: true},
 	UploadsWrite: {signed: true},

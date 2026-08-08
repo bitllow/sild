@@ -240,12 +240,6 @@ func (r *memberRepo) Remap(ctx context.Context, tenantID, convID, fromExternalID
 	})
 }
 
-func (r *memberRepo) UpdateSearchText(ctx context.Context, tenantID, memberID, text string) error {
-	return r.db.WithContext(ctx).Model(&models.ConversationMember{}).
-		Where("tenant_id = ? AND id = ?", tenantID, memberID).
-		Update("member_search_text", text).Error
-}
-
 type assignmentRepo struct{ db *gorm.DB }
 
 func (r *assignmentRepo) Create(ctx context.Context, a *models.Assignment) error {

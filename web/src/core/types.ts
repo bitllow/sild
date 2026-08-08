@@ -68,9 +68,11 @@ export interface SildConfig {
    *  own messages from the other party's in a peer conversation (rider↔driver),
    *  where both are user-authored. Optional — support-only usage doesn't need it. */
   userId?: string;
-  /** Per-participant metadata attached when this user opens a support request
-   *  (becomes conversation_members.metadata — shown in the inbox member panel).
-   *  Host-defined and opaque, e.g. { name, email, phone, plan }. */
+  /** The signed-in user's profile, upserted on every start() and shared by every
+   *  conversation they are in (shown in the inbox member panel). Host-defined and
+   *  opaque, e.g. { name, email, phone, plan }. This is the WHOLE profile, not a
+   *  patch: it replaces whatever Sild holds, and the last writer wins across a
+   *  person's devices. */
   metadata?: Record<string, unknown>;
   /** Optional inline brand overrides. When omitted, the widget fetches the
    *  active brand from GET /v1/me/brand at load. */

@@ -105,7 +105,6 @@ type MemberRepo interface {
 	ListActiveForUser(ctx context.Context, tenantID, externalUserID string) ([]models.ConversationMember, error)
 	CountActive(ctx context.Context, tenantID, convID string) (int, error)
 	Remap(ctx context.Context, tenantID, convID, fromExternalID, toExternalID string) error
-	UpdateSearchText(ctx context.Context, tenantID, memberID, text string) error
 }
 
 // LeaseRepo is the cluster-wide named mutex backing work that must have one
@@ -277,15 +276,6 @@ type PushConfigRepo interface {
 	Delete(ctx context.Context, tenantID string) error
 	// MarkVerified records the first successful delivery.
 	MarkVerified(ctx context.Context, tenantID string) error
-}
-
-// PushOptOutRepo records users the tenant's backend has suppressed (§5.5).
-type PushOptOutRepo interface {
-	Set(ctx context.Context, tenantID, externalUserID string) error
-	Clear(ctx context.Context, tenantID, externalUserID string) error
-	// OptedOut answers for a whole conversation's membership at once, so fan-out
-	// costs one query rather than one per member.
-	OptedOut(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]bool, error)
 }
 
 // PushOutboxRepo is the nudge queue. Same claim protocol as OutboxRepo — see

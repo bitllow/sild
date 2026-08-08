@@ -24,6 +24,11 @@ func (h *Handler) listConversations(c *gin.Context) {
 		return
 	}
 
+	expansion, ok := apiutil.ParseExpand(c, expandContacts)
+	if !ok {
+		return
+	}
+
 	page, ok := apiutil.PageParams(c, conversationPageDefaults(c.Query("q")))
 	if !ok {
 		return
@@ -59,7 +64,10 @@ func (h *Handler) listConversations(c *gin.Context) {
 
 	extra := gin.H{}
 	if countsCh != nil {
-		extra = gin.H{"counts": <-countsCh}
+		extra["counts"] = <-countsCh
+	}
+	if expansion.Has(resourceContacts) {
+		extra[resourceContacts] = contactsBlock(res.Participants, res.Profiles, expansion)
 	}
 	apiutil.RespondPageWith(c, resourceConversations, store.Page[map[string]any]{
 		Items: res.Items, NextCursor: res.NextCursor, HasMore: res.HasMore,

@@ -218,11 +218,13 @@ func ensurePeerConversation(ctx context.Context, svc *domain.Service, tenantID, 
 	driverMeta, _ := json.Marshal(map[string]string{
 		"name": "Toomas Vaher", "role": "driver", "vehicle": "Silver estate · 421 KLM", "phone": "+372 5987 6543",
 	})
+	_ = svc.UpsertContact(ctx, tenantID, riderID, riderMeta)
+	_ = svc.UpsertContact(ctx, tenantID, driverID, driverMeta)
 	conv, err := svc.CreateConversation(ctx, tenantID, domain.CreateConversationInput{
 		Reference: reference, OpenAssignment: false,
 		Members: []domain.MemberInput{
-			{UserID: riderID, ConvRole: models.ConvRole("rider"), Metadata: riderMeta},
-			{UserID: driverID, ConvRole: models.ConvRole("driver"), Metadata: driverMeta},
+			{UserID: riderID, ConvRole: models.ConvRole("rider")},
+			{UserID: driverID, ConvRole: models.ConvRole("driver")},
 		},
 	})
 	if err != nil {
@@ -267,6 +269,13 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 			Visibility: models.VisibilityInternal, AllowInternal: true,
 		})
 	}
+	// profile stores a person's contact profile — the seed standing in for the
+	// host backend, which now writes it once rather than per conversation.
+	profile := func(uid string, meta json.RawMessage) {
+		if err := svc.UpsertContact(ctx, tenantID, uid, meta); err != nil {
+			log.Printf("dev seed contact %s: %v", uid, err)
+		}
+	}
 	create := func(ref string, meta json.RawMessage, members []domain.MemberInput) *models.Conversation {
 		conv, err := svc.CreateConversation(ctx, tenantID, domain.CreateConversationInput{
 			Reference: ref, Metadata: meta, Members: members, OpenAssignment: true,
@@ -283,12 +292,17 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 		}
 	}
 
-	mariMeta := json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"client"}`)
+	profile("u_mari", json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"client"}`))
+	profile("u_driver9", json.RawMessage(`{"name":"Driver 9","phone":"+372 5987 6543","app_version":"2.3.0","role":"driver"}`))
+	profile("support@acme.com", json.RawMessage(`{"name":"support@acme.com","email":"support@acme.com","role":"email contact"}`))
+	profile("u_jaan", json.RawMessage(`{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"client"}`))
+	profile("guest_7f3a", json.RawMessage(`{"name":"Guest · web","guest":"true","app_version":"web 1.0"}`))
+	profile("u_pille", json.RawMessage(`{"name":"Pille Saar","phone":"+372 5333 9090","role":"client"}`))
 
 	// Mari's earlier, resolved threads — seed real contact history so the Details
 	// panel's "Earlier from Mari" list (and the "View all from" filter) has data.
 	past1 := create("trip_8109", nil, []domain.MemberInput{
-		{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: mariMeta},
+		{UserID: "u_mari", ConvRole: models.RoleClient},
 	})
 	if past1 != nil {
 		user(past1.ID, "u_mari", "I was charged twice for last night's ride.", models.ChannelApp)
@@ -298,7 +312,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 		_ = svc.CloseConversation(ctx, tenantID, past1.ID)
 	}
 	past2 := create("trip_7640", nil, []domain.MemberInput{
-		{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: mariMeta},
+		{UserID: "u_mari", ConvRole: models.RoleClient},
 	})
 	if past2 != nil {
 		user(past2.ID, "u_mari", "Can I get a receipt for my trip to the airport?", models.ChannelApp)
@@ -309,8 +323,8 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 
 	// 1. Mari Tamm — claimed (assigned), client + driver, internal note.
 	mari := create("trip_8842", json.RawMessage(`{"kind":"ride"}`), []domain.MemberInput{
-		{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: mariMeta},
-		{UserID: "u_driver9", ConvRole: models.RoleDriver, Metadata: json.RawMessage(`{"name":"Driver 9","phone":"+372 5987 6543","app_version":"2.3.0","role":"driver"}`)},
+		{UserID: "u_mari", ConvRole: models.RoleClient},
+		{UserID: "u_driver9", ConvRole: models.RoleDriver},
 	})
 	if mari != nil {
 		user(mari.ID, "u_mari", "Hi — my driver still hasn't arrived and the app says they're 2 min away for the last 10 minutes.", models.ChannelApp)
@@ -322,7 +336,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 
 	// 2. Email party — queued.
 	email := create("order_5512", nil, []domain.MemberInput{
-		{UserID: "support@acme.com", Kind: models.MemberEmail, ConvRole: models.RoleClient, Metadata: json.RawMessage(`{"name":"support@acme.com","email":"support@acme.com","role":"email contact"}`)},
+		{UserID: "support@acme.com", Kind: models.MemberEmail, ConvRole: models.RoleClient},
 	})
 	if email != nil {
 		user(email.ID, "support@acme.com", "Following up — the refund for order 5512 still hasn't landed. It's been 6 business days.", models.ChannelEmail)
@@ -330,7 +344,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 
 	// 3. Jaan Kask — claimed (assigned).
 	jaan := create("trip_7731", nil, []domain.MemberInput{
-		{UserID: "u_jaan", ConvRole: models.RoleClient, Metadata: json.RawMessage(`{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"client"}`)},
+		{UserID: "u_jaan", ConvRole: models.RoleClient},
 	})
 	if jaan != nil {
 		user(jaan.ID, "u_jaan", "I can't add a payment card — it keeps failing.", models.ChannelApp)
@@ -341,7 +355,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 
 	// 4. Guest · web — queued.
 	guest := create("guest_7f3a", nil, []domain.MemberInput{
-		{UserID: "guest_7f3a", ConvRole: models.RoleClient, Metadata: json.RawMessage(`{"name":"Guest · web","guest":"true","app_version":"web 1.0"}`)},
+		{UserID: "guest_7f3a", ConvRole: models.RoleClient},
 	})
 	if guest != nil {
 		user(guest.ID, "guest_7f3a", "How do I change my pickup address after booking?", models.ChannelApp)
@@ -349,7 +363,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 
 	// 5. Pille Saar — closed.
 	pille := create("trip_2014", nil, []domain.MemberInput{
-		{UserID: "u_pille", ConvRole: models.RoleClient, Metadata: json.RawMessage(`{"name":"Pille Saar","phone":"+372 5333 9090","role":"client"}`)},
+		{UserID: "u_pille", ConvRole: models.RoleClient},
 	})
 	if pille != nil {
 		user(pille.ID, "u_pille", "Driver was great, thank you", models.ChannelApp)
@@ -380,6 +394,13 @@ func devSeedPeerConversations(ctx context.Context, svc *domain.Service, tenantID
 		return conv
 	}
 	role := func(r string) models.ConvRole { return models.ConvRole(r) }
+	profile := func(uid string, meta string) { _ = svc.UpsertContact(ctx, tenantID, uid, json.RawMessage(meta)) }
+
+	profile("p_mari", `{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"rider"}`)
+	profile("p_toomas", `{"name":"Toomas Vaher","phone":"+372 5987 6543","vehicle":"Silver estate · 421 KLM","app_version":"2.3.0","role":"driver"}`)
+	profile("p_jaan", `{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"rider"}`)
+	profile("p_pille", `{"name":"Pille Saar","phone":"+372 5333 9090","app_version":"2.3.0","role":"rider"}`)
+	profile("p_andres", `{"name":"Andres Laan","phone":"+372 5661 2020","vehicle":"Black hatchback · 118 TRE","role":"driver"}`)
 
 	// Peer participants use their own ids (p_*), distinct from the support-seed
 	// contacts (u_mari/u_pille/…), so these direct chats stay a separate persona
@@ -387,8 +408,8 @@ func devSeedPeerConversations(ctx context.Context, svc *domain.Service, tenantID
 
 	// 1. rider↔driver — trip in progress (default active).
 	if c := peer("trip_9021", []domain.MemberInput{
-		{UserID: "p_mari", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"rider"}`)},
-		{UserID: "p_toomas", ConvRole: role("driver"), Metadata: json.RawMessage(`{"name":"Toomas Vaher","phone":"+372 5987 6543","vehicle":"Silver estate · 421 KLM","app_version":"2.3.0","role":"driver"}`)},
+		{UserID: "p_mari", ConvRole: role("rider")},
+		{UserID: "p_toomas", ConvRole: role("driver")},
 	}); c != nil {
 		msg(c.ID, "p_mari", "Hi, I'm the passenger for trip 9021 — waiting outside the north doors.")
 		msg(c.ID, "p_toomas", "Hi Mari, 1 minute away. There's construction at the north side — I'll pull up to the main entrance instead.")
@@ -398,8 +419,8 @@ func devSeedPeerConversations(ctx context.Context, svc *domain.Service, tenantID
 
 	// 2. rider↔rider — shared ride (unread).
 	if c := peer("trip_8830 · shared ride", []domain.MemberInput{
-		{UserID: "p_mari", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"rider"}`)},
-		{UserID: "p_jaan", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"rider"}`)},
+		{UserID: "p_mari", ConvRole: role("rider")},
+		{UserID: "p_jaan", ConvRole: role("rider")},
 	}); c != nil {
 		msg(c.ID, "p_mari", "Hey — we're matched for the shared ride to the airport. Terminal 1 or 2?")
 		msg(c.ID, "p_jaan", "Terminal 2. I can meet you at the taxi rank if that's easier.")
@@ -407,8 +428,8 @@ func devSeedPeerConversations(ctx context.Context, svc *domain.Service, tenantID
 
 	// 3. rider↔driver — lost item; the agent has already stepped in ("You joined").
 	if c := peer("trip_7788 · lost item", []domain.MemberInput{
-		{UserID: "p_pille", ConvRole: role("rider"), Metadata: json.RawMessage(`{"name":"Pille Saar","phone":"+372 5333 9090","app_version":"2.3.0","role":"rider"}`)},
-		{UserID: "p_andres", ConvRole: role("driver"), Metadata: json.RawMessage(`{"name":"Andres Laan","phone":"+372 5661 2020","vehicle":"Black hatchback · 118 TRE","role":"driver"}`)},
+		{UserID: "p_pille", ConvRole: role("rider")},
+		{UserID: "p_andres", ConvRole: role("driver")},
 	}); c != nil {
 		msg(c.ID, "p_pille", "I think I left my scarf in the back seat.")
 		msg(c.ID, "p_andres", "Found a scarf — I can drop it at your address after my next trip.")

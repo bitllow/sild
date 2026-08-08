@@ -70,15 +70,53 @@ func Attachment(a *models.MessageAttachment, urlFn URLFunc) map[string]any {
 	return out
 }
 
-// Member renders a conversation member.
-func Member(m *models.ConversationMember) map[string]any {
+// Profiles resolves the metadata a member view renders inline. Contacts are the
+// stored profiles, keyed by external_user_id; Agents are operator display names,
+// keyed by internal_actor_id — an agent has no contact row, so their member
+// metadata is synthesized rather than joined.
+type Profiles struct {
+	Contacts map[string][]byte
+	Agents   map[string]string
+}
+
+// Contact renders a contact's stored profile — the shape shared by the
+// `contact.updated` event and the `expand=contacts` block.
+func Contact(externalUserID string, metadata []byte) map[string]any {
+	return map[string]any{
+		"external_user_id": externalUserID,
+		"metadata":         rawJSON(metadata),
+	}
+}
+
+// Member renders a conversation member, with the participant's profile inline.
+func Member(m *models.ConversationMember, p Profiles) map[string]any {
 	out := map[string]any{
 		"member_kind": m.MemberKind,
 		"conv_role":   m.ConvRole,
-		"metadata":    rawJSON(m.Metadata),
+		"metadata":    memberMetadata(m, p),
 		"joined_at":   m.JoinedAt,
 	}
 	participantID(out, m.ExternalUserID, m.InternalActorID)
+	return out
+}
+
+// memberMetadata joins the profile for an end user and synthesizes one for an
+// agent, so the inbox reads one field whoever the participant is.
+func memberMetadata(m *models.ConversationMember, p Profiles) any {
+	if m.ExternalUserID != nil {
+		return rawJSON(p.Contacts[*m.ExternalUserID])
+	}
+	if m.InternalActorID == nil {
+		return nil
+	}
+	name := p.Agents[*m.InternalActorID]
+	if name == "" {
+		return nil
+	}
+	out := map[string]any{"name": name}
+	if m.ConvRole != "" {
+		out["role"] = string(m.ConvRole)
+	}
 	return out
 }
 
@@ -102,8 +140,8 @@ func Assignment(a *models.Assignment) map[string]any {
 // QueueRow renders one inbox queue row: the assignment + its conversation
 // (members + last message preview + last activity), but NO message history —
 // the client fetches that lazily when the conversation is opened (§4.3).
-func QueueRow(it *store.QueueItem) map[string]any {
-	conv := Conversation(&it.Conversation, it.Members, nil)
+func QueueRow(it *store.QueueItem, p Profiles) map[string]any {
+	conv := Conversation(&it.Conversation, it.Members, nil, p)
 	conv["last_activity"] = it.LastActivity
 	if it.Conversation.LastMessagePreview != "" {
 		conv["last_message"] = map[string]any{
@@ -118,7 +156,7 @@ func QueueRow(it *store.QueueItem) map[string]any {
 }
 
 // Conversation renders the full conversation (§4.1 fetch, §4.2 GET).
-func Conversation(c *models.Conversation, members []models.ConversationMember, assignment *models.Assignment) map[string]any {
+func Conversation(c *models.Conversation, members []models.ConversationMember, assignment *models.Assignment, p Profiles) map[string]any {
 	out := map[string]any{
 		"id":         c.ID,
 		"status":     c.Status,
@@ -128,7 +166,7 @@ func Conversation(c *models.Conversation, members []models.ConversationMember, a
 	}
 	ms := make([]map[string]any, 0, len(members))
 	for i := range members {
-		ms = append(ms, Member(&members[i]))
+		ms = append(ms, Member(&members[i], p))
 	}
 	out["members"] = ms
 	if assignment != nil {

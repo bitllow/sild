@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -30,10 +29,12 @@ func newPushFixture(t *testing.T) *pushFixture {
 	tenant := h.SeedTenant()
 	h.SeedPushCredential(tenant.ID, "acme-app")
 
+	h.SeedContact(tenant.ID, "u_alice", `{"name":"Alice"}`)
+	h.SeedContact(tenant.ID, "u_bob", `{"name":"Bob"}`)
 	conv, err := h.Svc.CreateConversation(context.Background(), tenant.ID, domain.CreateConversationInput{
 		Members: []domain.MemberInput{
-			{UserID: "u_alice", ConvRole: models.RoleClient, Metadata: json.RawMessage(`{"name":"Alice"}`)},
-			{UserID: "u_bob", ConvRole: models.RoleClient, Metadata: json.RawMessage(`{"name":"Bob"}`)},
+			{UserID: "u_alice", ConvRole: models.RoleClient},
+			{UserID: "u_bob", ConvRole: models.RoleClient},
 		},
 	})
 	if err != nil {
@@ -359,7 +360,7 @@ func TestLosingTheClaimLeavesTheRowAlone(t *testing.T) {
 func TestOptOutSuppressesAndSurvivesReregistration(t *testing.T) {
 	f := newPushFixture(t)
 	ctx := context.Background()
-	if err := f.h.Svc.SetUserPush(ctx, f.tenant.ID, "u_bob", false); err != nil {
+	if err := f.h.Svc.SetContactPush(ctx, f.tenant.ID, "u_bob", false); err != nil {
 		t.Fatalf("opt out: %v", err)
 	}
 	f.send(t, "u_alice", "hi")
@@ -375,7 +376,7 @@ func TestOptOutSuppressesAndSurvivesReregistration(t *testing.T) {
 	}
 
 	// Lifting it resumes delivery without a reinstall.
-	if err := f.h.Svc.SetUserPush(ctx, f.tenant.ID, "u_bob", true); err != nil {
+	if err := f.h.Svc.SetContactPush(ctx, f.tenant.ID, "u_bob", true); err != nil {
 		t.Fatalf("clear opt out: %v", err)
 	}
 	f.send(t, "u_alice", "third")
@@ -389,7 +390,7 @@ func TestHostCanDeleteAUsersDevices(t *testing.T) {
 	f := newPushFixture(t)
 	key := f.h.SeedAPIKey(f.tenant.ID)
 
-	w := f.h.Request("DELETE", "/v1/users/u_bob/push-tokens").Bearer(key).Do()
+	w := f.h.Request("DELETE", "/v1/contacts/u_bob/push-tokens").Bearer(key).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete tokens = %d: %s", w.Code, w.Body)
 	}
@@ -413,8 +414,8 @@ func TestPushControlRejectsAUserToken(t *testing.T) {
 	tok := f.h.MintToken(f.tenant.ID, "u_bob")
 
 	for _, tc := range []struct{ method, path string }{
-		{"PUT", "/v1/users/u_bob/push"},
-		{"DELETE", "/v1/users/u_bob/push-tokens"},
+		{"PUT", "/v1/contacts/u_bob/push"},
+		{"DELETE", "/v1/contacts/u_bob/push-tokens"},
 	} {
 		w := f.h.Request(tc.method, tc.path).Bearer(tok).JSON(map[string]any{"enabled": false}).Do()
 		if w.Code != http.StatusForbidden && w.Code != http.StatusUnauthorized {
@@ -430,7 +431,7 @@ func TestPushControlIsScopedToTheCallersTenant(t *testing.T) {
 	other := f.h.SeedTenant()
 	key := f.h.SeedAPIKey(other.ID)
 
-	w := f.h.Request("DELETE", "/v1/users/u_bob/push-tokens").Bearer(key).Do()
+	w := f.h.Request("DELETE", "/v1/contacts/u_bob/push-tokens").Bearer(key).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete tokens = %d: %s", w.Code, w.Body)
 	}
@@ -443,7 +444,7 @@ func TestPushControlIsScopedToTheCallersTenant(t *testing.T) {
 	}
 
 	// Nor can it silence them.
-	if w := f.h.Request("PUT", "/v1/users/u_bob/push").Bearer(key).
+	if w := f.h.Request("PUT", "/v1/contacts/u_bob/push").Bearer(key).
 		JSON(map[string]any{"enabled": false}).Do(); w.Code != http.StatusNoContent {
 		t.Fatalf("opt out = %d: %s", w.Code, w.Body)
 	}

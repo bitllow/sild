@@ -80,31 +80,3 @@ func (h *Handler) testPushSend(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
-
-// setPushOptOut: PUT /v1/users/:userID/push — the host's backend suppressing
-// nudges for one of its users. Survives the app re-registering.
-func (h *Handler) setPushOptOut(c *gin.Context) {
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
-	if !httpx.DecodeJSON(c, &req) {
-		return
-	}
-	err := h.svc.SetUserPush(c.Request.Context(), apiutil.Tenant(c), c.Param("userID"), req.Enabled)
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.Status(http.StatusNoContent)
-}
-
-// deleteUserPushTokens: DELETE /v1/users/:userID/push-tokens — account deletion.
-// Distinct from an opt-out: the app may register again.
-func (h *Handler) deleteUserPushTokens(c *gin.Context) {
-	n, err := h.svc.DeleteUserPushTokens(c.Request.Context(), apiutil.Tenant(c), c.Param("userID"))
-	if err != nil {
-		apiutil.Fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"deleted": n})
-}

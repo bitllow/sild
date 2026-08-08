@@ -6,6 +6,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/search"
 	"github.com/bitllow/sild/backend/internal/store"
+	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
 )
 
@@ -28,11 +29,15 @@ type ListConversationsInput struct {
 	IncludeInternal bool
 }
 
-// ConversationPage is a rendered page plus the paging position.
+// ConversationPage is a rendered page plus the paging position. Participants and
+// Profiles are the distinct external people on the page and what was already
+// loaded for their inline member views, so an expansion re-reads nothing.
 type ConversationPage struct {
-	Items      []map[string]any
-	NextCursor *store.Cursor
-	HasMore    bool
+	Items        []map[string]any
+	Participants []string
+	Profiles     map[string][]byte
+	NextCursor   *store.Cursor
+	HasMore      bool
 }
 
 // ListConversations returns one page of conversations visible to the scope.
@@ -64,6 +69,7 @@ type rowExtras struct {
 	agentNames map[string]string
 	unread     map[string]int
 	snippets   map[string]search.ConversationHit
+	profiles   views.Profiles
 }
 
 // renderPage batches every per-row lookup, then renders.
@@ -86,7 +92,20 @@ func (s *Service) renderPage(ctx context.Context, tenantID string, items []store
 		}
 	}
 
-	x := rowExtras{snippets: snippets}
+	groups := make([][]models.ConversationMember, 0, len(items))
+	for i := range items {
+		groups = append(groups, items[i].Members)
+	}
+	out.Participants = externalParticipants(groups)
+
+	profiles, err := s.MemberProfiles(ctx, tenantID, groups...)
+	if err != nil {
+		return ConversationPage{}, err
+	}
+
+	out.Profiles = profiles.Contacts
+
+	x := rowExtras{snippets: snippets, profiles: profiles}
 	x.subjects, _ = s.store.Email().Subjects(ctx, tenantID, ids)
 	x.agentNames = s.agentNames(ctx, tenantID, actors)
 	if in.IncludeUnread && in.UnreadFor != "" {
@@ -183,7 +202,7 @@ func (s *Service) searchConversations(ctx context.Context, tenantID string, scop
 // the widget and search all render the same shape.
 func (s *Service) renderRow(it *store.ConversationItem, x rowExtras) map[string]any {
 	id := it.Conversation.ID
-	conv := views.Conversation(&it.Conversation, it.Members, it.Assignment)
+	conv := views.Conversation(&it.Conversation, it.Members, it.Assignment, x.profiles)
 	conv["kind"] = it.Conversation.Kind
 	conv["last_activity"] = it.LastActivity
 	if it.Conversation.LastMessagePreview != "" {

@@ -56,7 +56,7 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 		b = b.Where("EXISTS (SELECT 1 FROM messages msg WHERE msg.conversation_id = c.id AND msg.channel = ?)", *q.Channel)
 	}
 	for k, v := range q.Meta {
-		// member_search_text (fast, indexed for configured keys) OR live JSON
+		// contacts.search_text (fast, indexed for configured keys) OR live JSON
 		// extraction (always works, slower) — §4.3 fallback for any key.
 		cond, args := metaExists(dialect, k, like(v))
 		b = b.Where(cond, args...)
@@ -72,37 +72,50 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 				WHERE msg.conversation_id = c.id AND msg.visibility <> 'internal'
 				  AND ` + wrap("msg.body", op) + " " + op + " ?)"
 		}
-		memberInner := wrap("m.member_search_text", op) + " " + op + " ? OR " +
+		memberInner := wrap("ct.search_text", op) + " " + op + " ? OR " +
 			wrap("m.external_user_id", op) + " " + op + " ?"
-		args := []any{like(kw), like(kw), like(kw)} // body, member_search_text, external_user_id
+		join := contactJoin
+		args := []any{like(kw), like(kw), like(kw)} // body, search_text, external_user_id
 		if q.MatchRawMetadata {
 			// Peer participants are end users the operator is stepping in to help,
-			// so peer search additionally matches the raw metadata as text — any
-			// value (name, phone, plate) is findable even without configured keys.
-			// This is deliberately NOT done for the default support search, which
-			// stays bound to the tenant's searchable_metadata_keys allowlist.
-			memberInner += " OR " + wrap(memberMetaText(dialect), op) + " " + op + " ?"
-			args = []any{like(kw), like(kw), like(kw), like(kw)} // + raw metadata
+			// so peer search additionally matches the raw profile as text — any value
+			// (name, phone, plate) is findable even without configured keys. This is
+			// deliberately NOT done for the default support search, which stays bound
+			// to the tenant's searchable_metadata_keys allowlist, and it is the one
+			// keyword path that pays for the blob table.
+			memberInner += " OR " + wrap(contactMetaText(dialect), op) + " " + op + " ?"
+			join += contactMetaJoin
+			args = []any{like(kw), like(kw), like(kw), like(kw)} // + raw profile
 		}
-		memberCond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" + memberInner + "))"
+		memberCond := "EXISTS (SELECT 1 FROM conversation_members m" + join +
+			" WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" + memberInner + "))"
 		cond := "(" + bodyCond + " OR " + memberCond + ")"
 		b = b.Where(cond, args...)
 	}
 	return b
 }
 
-// memberMetaText is the dialect-specific expression that exposes a member's raw
-// metadata as text for a LIKE/ILIKE match — so any metadata value is searchable
-// even when the tenant hasn't declared searchable_metadata_keys (member_search_text
-// is empty then).
-func memberMetaText(d config.Driver) string {
+// A member's profile lives on their contact row, so a match on it is a join
+// outward. Both are LEFT joins: a participant nobody wrote a profile for is
+// still findable by external id.
+const (
+	contactJoin = ` LEFT JOIN contacts ct
+		ON ct.tenant_id = m.tenant_id AND ct.external_user_id = m.external_user_id`
+	contactMetaJoin = ` LEFT JOIN contacts_meta cm
+		ON cm.tenant_id = m.tenant_id AND cm.external_user_id = m.external_user_id`
+)
+
+// contactMetaText is the dialect-specific expression that exposes a stored
+// profile as text for a LIKE/ILIKE match — so any value is searchable even when
+// the tenant hasn't declared searchable_metadata_keys (search_text is empty then).
+func contactMetaText(d config.Driver) string {
 	switch d {
 	case config.Postgres:
-		return "m.metadata::text"
+		return "cm.metadata::text"
 	case config.MySQL:
-		return "CAST(m.metadata AS CHAR)"
+		return "CAST(cm.metadata AS CHAR)"
 	default: // sqlite stores JSON as TEXT
-		return "m.metadata"
+		return "cm.metadata"
 	}
 }
 
@@ -121,25 +134,26 @@ func existsLike(table, alias, col, op string) string {
 		" WHERE " + alias + ".conversation_id = c.id AND " + wrap(col, op) + " " + op + " ?)"
 }
 
-// metaExists matches a member-metadata key against the materialized search text
-// OR a live JSON extraction of that exact key (§4.3 generic meta fallback). The
-// key is parameterized — never interpolated — so it is injection-safe.
+// metaExists matches a profile key against the materialized search text OR a
+// live JSON extraction of that exact key (§4.3 generic meta fallback). The key
+// is parameterized — never interpolated — so it is injection-safe.
 func metaExists(dialect config.Driver, key, likeVal string) (string, []any) {
 	op := likeOpFor(dialect)
-	textExpr := wrap("m.member_search_text", op)
+	textExpr := wrap("ct.search_text", op)
 	var jsonExpr, pathArg string
 	switch dialect {
 	case config.Postgres:
-		jsonExpr = "(m.metadata ->> ?)"
+		jsonExpr = "(cm.metadata ->> ?)"
 		pathArg = key
 	case config.MySQL:
-		jsonExpr = "JSON_UNQUOTE(JSON_EXTRACT(m.metadata, ?))"
+		jsonExpr = "JSON_UNQUOTE(JSON_EXTRACT(cm.metadata, ?))"
 		pathArg = "$." + key
 	default: // sqlite
-		jsonExpr = "json_extract(m.metadata, ?)"
+		jsonExpr = "json_extract(cm.metadata, ?)"
 		pathArg = "$." + key
 	}
-	cond := "EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" +
+	cond := "EXISTS (SELECT 1 FROM conversation_members m" + contactJoin + contactMetaJoin +
+		" WHERE m.conversation_id = c.id AND m.left_at IS NULL AND (" +
 		textExpr + " " + op + " ? OR " + wrap(jsonExpr, op) + " " + op + " ?))"
 	return cond, []any{likeVal, pathArg, likeVal}
 }

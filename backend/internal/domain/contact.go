@@ -1,0 +1,123 @@
+package domain
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+
+	"github.com/bitllow/sild/backend/internal/realtime"
+	"github.com/bitllow/sild/backend/internal/store/models"
+	"github.com/bitllow/sild/backend/internal/views"
+)
+
+// UpsertContact stores a person's profile, replacing it whole: a key the writer
+// dropped is gone, so a read always returns a profile someone asserted. Only the
+// host's blob and its search text move — Sild's own columns are untouched, or an
+// app launch could un-suppress an opted-out person.
+func (s *Service) UpsertContact(ctx context.Context, tenantID, externalUserID string, metadata json.RawMessage) error {
+	if err := ValidateExternalUserID(externalUserID); err != nil {
+		return err
+	}
+	canonical, err := canonicalJSON(metadata)
+	if err != nil {
+		return invalid("metadata must be a JSON object")
+	}
+	text, err := s.searchText(ctx, tenantID, canonical)
+	if err != nil {
+		return err
+	}
+	changed, err := s.store.Contacts().Upsert(ctx, tenantID, externalUserID, canonical, text)
+	if err != nil {
+		return err
+	}
+	// A no-op upsert is silent: the SDK writes on every start-up, and an unchanged
+	// profile must not cost the tenant channel a fan-out.
+	//
+	// The event carries NO profile: the tenant channel reaches every operator,
+	// while a profile is only readable through a conversation the caller's scope
+	// admits. So this is an invalidation — clients re-read through the scoped
+	// routes and see exactly what they may. One channel, not also the peer one:
+	// every operator is subscribed here, so a second target would deliver twice.
+	if changed {
+		s.emit(ctx, realtime.Target{Tenant: tenantID},
+			realtime.EventContactUpdated, "", map[string]any{})
+	}
+	return nil
+}
+
+// SetContactPush turns nudges on or off for one contact, on behalf of the
+// tenant's own backend. Suppression survives the app re-registering — that is
+// what makes it a preference rather than a token deletion.
+func (s *Service) SetContactPush(ctx context.Context, tenantID, externalUserID string, enabled bool) error {
+	if err := ValidateExternalUserID(externalUserID); err != nil {
+		return err
+	}
+	return s.store.Contacts().SetPushOptOut(ctx, tenantID, externalUserID, !enabled)
+}
+
+// MemberProfiles resolves what member views render inline across any number of
+// member groups: one query for every contact profile among them, one lookup per
+// distinct agent. Batched because the conversation list renders a page of them.
+func (s *Service) MemberProfiles(ctx context.Context, tenantID string, groups ...[]models.ConversationMember) (views.Profiles, error) {
+	var externals, actors []string
+	for _, g := range groups {
+		for i := range g {
+			switch {
+			case g[i].ExternalUserID != nil:
+				externals = append(externals, *g[i].ExternalUserID)
+			case g[i].InternalActorID != nil:
+				actors = append(actors, *g[i].InternalActorID)
+			}
+		}
+	}
+	contacts, err := s.store.Contacts().Profiles(ctx, tenantID, externals)
+	if err != nil {
+		return views.Profiles{}, err
+	}
+	return views.Profiles{Contacts: contacts, Agents: s.agentNames(ctx, tenantID, actors)}, nil
+}
+
+// ExternalParticipants lists the distinct end users among a conversation's
+// members, in a stable order — the people an expansion can carry profiles for.
+func ExternalParticipants(members []models.ConversationMember) []string {
+	return externalParticipants([][]models.ConversationMember{members})
+}
+
+func externalParticipants(groups [][]models.ConversationMember) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, g := range groups {
+		for i := range g {
+			id := g[i].ExternalUserID
+			if id == nil || *id == "" || seen[*id] {
+				continue
+			}
+			seen[*id] = true
+			out = append(out, *id)
+		}
+	}
+	return out
+}
+
+// canonicalJSON normalizes a profile blob so an unchanged write is recognizable
+// as one: key order and whitespace must not read as a change. An absent or null
+// metadata field clears the profile.
+//
+// UseNumber keeps every number as the digits the host wrote. The blob is opaque
+// and may carry ids past float64's exact range, so decoding into a float would
+// silently rewrite the host's data.
+func canonicalJSON(raw json.RawMessage) ([]byte, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v map[string]any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	return json.Marshal(v)
+}

@@ -2,60 +2,12 @@ package domain
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
-	"gorm.io/datatypes"
 )
-
-// OpenSupportRequest creates a conversation with the client as sole member plus a
-// queued assignment, atomically (§4.0). Used by the authed client (self), the
-// agent (with a user), and the host-backend guest path. Never deduped (§4.2).
-func (s *Service) OpenSupportRequest(ctx context.Context, tenantID, clientUserID string, metadata json.RawMessage) (*models.Conversation, *models.Assignment, error) {
-	if clientUserID == "" {
-		return nil, nil, invalid("client user id is required")
-	}
-	conv := &models.Conversation{TenantID: tenantID, Status: models.ConversationOpen, CreatedAt: s.now()}
-	assignment := &models.Assignment{TenantID: tenantID, Status: models.AssignmentQueued, CreatedAt: s.now()}
-	var member models.ConversationMember
-
-	err := s.store.Tx(ctx, func(tx store.Store) error {
-		if err := tx.Conversations().Create(ctx, conv); err != nil {
-			return err
-		}
-		st, _ := s.searchText(ctx, tenantID, metadata)
-		uid := clientUserID
-		member = models.ConversationMember{
-			TenantID: tenantID, ConversationID: conv.ID, MemberKind: models.MemberUser,
-			ExternalUserID: &uid, ConvRole: models.RoleClient,
-			Metadata: datatypes.JSON(metadata), MemberSearchText: st, JoinedAt: s.now(),
-		}
-		if err := tx.Members().Add(ctx, &member); err != nil {
-			return err
-		}
-		assignment.ConversationID = conv.ID
-		if err := tx.Assignments().Create(ctx, assignment); err != nil {
-			return err
-		}
-		if err := s.enqueueWebhook(ctx, tx, tenantID, conv.ID, "conversation.created",
-			views.Conversation(conv, []models.ConversationMember{member}, assignment)); err != nil {
-			return err
-		}
-		return s.enqueueWebhook(ctx, tx, tenantID, conv.ID, "assignment.created", views.Assignment(assignment))
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	conv.Members = []models.ConversationMember{member}
-	conv.Assignment = assignment
-	// notify the client's user channel + the tenant agents channel (new queue item)
-	s.emit(ctx, realtime.Target{Users: []string{clientUserID}, Tenant: tenantID},
-		realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
-	return conv, assignment, nil
-}
 
 // AddAssignment queues an existing conversation for an agent (§4.0).
 func (s *Service) AddAssignment(ctx context.Context, tenantID, convID string) (*models.Assignment, error) {

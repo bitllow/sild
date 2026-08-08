@@ -2,7 +2,6 @@ package domain_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/domain"
@@ -18,12 +17,12 @@ func TestAdminSearch(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant("phone") // phone is a searchable metadata key
 	ctx := context.Background()
+	h.SeedContact(tenant.ID, "u_driver", `{"phone":"+3725512345"}`)
 
 	conv, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
 		OpenAssignment: true,
 		Members: []domain.MemberInput{{
 			UserID: "u_driver", ConvRole: models.RoleDriver,
-			Metadata: json.RawMessage(`{"phone":"+3725512345"}`),
 		}},
 	})
 	if err != nil {
@@ -41,7 +40,7 @@ func TestAdminSearch(t *testing.T) {
 		want bool
 	}{
 		{"refund", true},         // keyword in body
-		{"5512", true},           // keyword in member metadata (member_search_text)
+		{"5512", true},           // keyword in member profile (contacts.search_text)
 		{"status:open", true},    // structured filter matches
 		{"status:closed", false}, // structured filter excludes
 		{"role:driver", true},    // member role filter
@@ -62,23 +61,23 @@ func TestAdminSearch(t *testing.T) {
 }
 
 // §4.3: generic meta.<key> must work via live-JSON even for a key that is NOT in
-// the tenant's searchable_metadata_keys (so it isn't in member_search_text).
+// the tenant's searchable_metadata_keys (so it isn't in contacts.search_text).
 func TestAdminSearchLiveJSONFallback(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant("phone") // only "phone" is indexed; "city" is not
 	ctx := context.Background()
+	h.SeedContact(tenant.ID, "u_driver", `{"phone":"+3725512345","city":"Tallinn"}`)
 
 	if _, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
 		OpenAssignment: true,
 		Members: []domain.MemberInput{{
 			UserID: "u_driver", ConvRole: models.RoleDriver,
-			Metadata: json.RawMessage(`{"phone":"+3725512345","city":"Tallinn"}`),
 		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// "city" is not materialized into member_search_text, but the live-JSON
+	// "city" is not materialized into contacts.search_text, but the live-JSON
 	// fallback finds it.
 	res, err := h.Search.Search(ctx, tenant.ID, supportScope(), domain.SearchInput{Query: "meta.city:tallinn", Limit: 25})
 	if err != nil {
@@ -99,12 +98,12 @@ func TestSupportKeywordDoesNotMatchUnindexedMetadata(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant("phone") // only "phone" is searchable; "city" is not
 	ctx := context.Background()
+	h.SeedContact(tenant.ID, "u_driver", `{"phone":"+3725512345","city":"Tallinn"}`)
 
 	if _, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
 		OpenAssignment: true,
 		Members: []domain.MemberInput{{
 			UserID: "u_driver", ConvRole: models.RoleDriver,
-			Metadata: json.RawMessage(`{"phone":"+3725512345","city":"Tallinn"}`),
 		}},
 	}); err != nil {
 		t.Fatal(err)

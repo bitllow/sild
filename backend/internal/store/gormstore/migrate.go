@@ -22,6 +22,9 @@ func Migrate(db *gorm.DB) error {
 		if err := backfillLastActivity(db); err != nil {
 			return err
 		}
+		if err := dropRetiredObjects(db); err != nil {
+			return err
+		}
 		return applyDialectIndexes(db)
 	})
 }
@@ -99,6 +102,32 @@ func backfillLastActivity(db *gorm.DB) error {
 		  AND last_message_at IS NOT NULL`).Error
 }
 
+// dropRetiredObjects removes what the profile move replaced: the per-membership
+// profile and its search text, and the opt-out table now folded into
+// contacts.push_opted_out_at. AutoMigrate never drops, so a database upgraded in
+// place would keep them forever. Idempotent — each drop is guarded by existence.
+//
+// Raw DDL, addressed by table NAME: the fields are gone from the models, so
+// gorm's model-driven migrator has no schema to resolve them against. Every
+// dialect drops a column's dependent indexes with it, so the retired trigram and
+// fulltext indexes need no statement of their own.
+func dropRetiredObjects(db *gorm.DB) error {
+	const members = "conversation_members"
+	m := db.Migrator()
+	for _, col := range []string{"metadata", "member_search_text"} {
+		if !m.HasColumn(members, col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE " + members + " DROP COLUMN " + col).Error; err != nil {
+			return err
+		}
+	}
+	if m.HasTable("push_opt_outs") {
+		return db.Exec("DROP TABLE push_opt_outs").Error
+	}
+	return nil
+}
+
 // applyDialectIndexes adds the search indexes that AutoMigrate can't express:
 //   - postgres: pg_trgm extension + GIN(gin_trgm_ops) for partial/substring search
 //   - mysql:    FULLTEXT (ngram) — partial-ish, the middle capability tier
@@ -112,7 +141,7 @@ func applyDialectIndexes(db *gorm.DB) error {
 		stmts := []string{
 			`CREATE EXTENSION IF NOT EXISTS pg_trgm`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_body_trgm ON messages USING gin (body gin_trgm_ops)`,
-			`CREATE INDEX IF NOT EXISTS idx_member_search_trgm ON conversation_members USING gin (member_search_text gin_trgm_ops)`,
+			`CREATE INDEX IF NOT EXISTS idx_contact_search_trgm ON contacts USING gin (search_text gin_trgm_ops)`,
 		}
 		for _, s := range stmts {
 			if err := db.Exec(s).Error; err != nil {
@@ -124,7 +153,7 @@ func applyDialectIndexes(db *gorm.DB) error {
 		// CREATE FULLTEXT INDEX has no IF NOT EXISTS; guard via catalog check.
 		stmts := []struct{ name, table, col string }{
 			{"idx_messages_body_ft", "messages", "body"},
-			{"idx_member_search_ft", "conversation_members", "member_search_text"},
+			{"idx_contact_search_ft", "contacts", "search_text"},
 		}
 		for _, s := range stmts {
 			var n int64

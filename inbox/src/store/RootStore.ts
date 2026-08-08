@@ -620,7 +620,11 @@ export class RootStore {
           const existing = byId.get(it.id);
           const fresh = buildQueueRow(it);
           if (existing) {
-            // refresh lightweight row fields; keep any loaded history + members
+            // refresh lightweight row fields; keep any loaded history. Members and
+            // the row label come from the server every sync — a contact's profile
+            // is stored once and can change under a row that is already open.
+            existing.name = fresh.name;
+            existing.members = fresh.members;
             existing.preview = fresh.preview;
             existing.time = fresh.time;
             existing.lastActivity = fresh.lastActivity;
@@ -642,6 +646,17 @@ export class RootStore {
   };
 
   private handleEvent = (channel: string, env: RealtimeEnvelope) => {
+    // A profile changed somewhere in the tenant. The event names no one — a
+    // profile is only readable through a conversation this operator's scope
+    // admits — so re-read: the queue for the list, the open thread for the row
+    // that may sit beyond page one.
+    if (env.type === "contact.updated") {
+      void this.syncQueue();
+      void this.refreshActiveMessages();
+      void this.refreshContactHistory();
+      if (this.peerAccess) this.peer.onTenantNudge();
+      return;
+    }
     // agents:<tenant> carries every support conversation this operator may read
     // (§5.1); one for a conversation the list lacks is the new-request nudge.
     // Typing and receipts can't change the queue, so they never trigger a fetch.

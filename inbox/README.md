@@ -46,7 +46,7 @@ live; on (re)connect the client runs a REST catch-up (§5.4).
 
 The list's search bar calls `GET /v1/conversations?q=` (debounced) — mixed tokens:
 `status:`/`assignee:me`/`role:`/`channel:`/`meta.*:` filters plus free keywords
-(partial trigram match on message bodies + member metadata). Results replace the
+(partial trigram match on message bodies + contact profiles). Results replace the
 queue list with the matched-message snippet as the preview.
 
 ## Screens

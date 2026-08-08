@@ -6,16 +6,28 @@ import (
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
 	"github.com/bitllow/sild/backend/internal/domain"
+	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/store"
+	"github.com/bitllow/sild/backend/internal/views"
 	"github.com/gin-gonic/gin"
 )
 
 // Contacts are people, conversations are threads — both searchable, as separate
-// resources. A contact's history is GET /v1/conversations?participant=<id>.
+// resources. A contact's profile is stored once and shared by every conversation
+// they are in; the directory below still lists only people the caller's
+// conversations admit. A contact's history is GET /v1/conversations?participant=<id>.
 
-// contactView renders a contact. No display name: the client already derives one,
-// and duplicating that rule would give two sources of truth.
+// expandContacts declares the contacts block an `expand` path may ask for. A
+// contact has no id: its wire identity is external_user_id, so `contacts.id` is
+// one of the 400s.
+var expandContacts = apiutil.Expandable{
+	Resource: resourceContacts,
+	Fields:   []string{"external_user_id", "metadata"},
+}
+
+// contactView renders a directory entry. No display name: the client already
+// derives one, and duplicating that rule would give two sources of truth.
 func contactView(c *store.Contact) gin.H {
 	out := gin.H{
 		"external_user_id":   c.ExternalUserID,
@@ -71,11 +83,8 @@ func (h *Handler) getContact(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// Same rule the write boundaries enforce; gin unescapes the path before
-	// matching, so a "/" sent as %2F never reaches here at all.
-	ext := c.Param("external_user_id")
-	if err := domain.ValidateExternalUserID(ext); err != nil {
-		apiutil.Fail(c, err)
+	ext, ok := contactPathID(c)
+	if !ok {
 		return
 	}
 	contact, err := h.svc.GetContact(c.Request.Context(), apiutil.Tenant(c), scope, ext)
@@ -84,4 +93,108 @@ func (h *Handler) getContact(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, contactView(contact))
+}
+
+// putMyContact: PUT /v1/contacts/me — the SDK's first call on start-up, scoped
+// to the token subject so no one can rewrite anyone else's identity.
+func (h *Handler) putMyContact(c *gin.Context) {
+	h.upsertContact(c, apiutil.Subject(c))
+}
+
+// putContact: PUT /v1/contacts/:external_user_id — the host's own backend
+// writing a profile from its system of record, for any of its users.
+func (h *Handler) putContact(c *gin.Context) {
+	ext, ok := contactPathID(c)
+	if !ok {
+		return
+	}
+	h.upsertContact(c, ext)
+}
+
+// upsertContact replaces the profile whole: the configured metadata IS the
+// profile, so a host never has to reason about what Sild merged it with.
+func (h *Handler) upsertContact(c *gin.Context, externalUserID string) {
+	if !apiutil.Authorize(c, policy.ContactsWrite) {
+		return
+	}
+	var req struct {
+		Metadata json.RawMessage `json:"metadata"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if err := h.svc.UpsertContact(c.Request.Context(), apiutil.Tenant(c), externalUserID, req.Metadata); err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// setContactPush: PUT /v1/contacts/:external_user_id/push — the host's backend
+// suppressing nudges for one of its users. Survives the app re-registering, and
+// a profile write never disturbs it.
+func (h *Handler) setContactPush(c *gin.Context) {
+	ext, ok := contactPathID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if err := h.svc.SetContactPush(c.Request.Context(), apiutil.Tenant(c), ext, req.Enabled); err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// deleteContactPushTokens: DELETE /v1/contacts/:external_user_id/push-tokens —
+// account deletion. Distinct from an opt-out: the app may register again.
+func (h *Handler) deleteContactPushTokens(c *gin.Context) {
+	ext, ok := contactPathID(c)
+	if !ok {
+		return
+	}
+	n, err := h.svc.DeleteUserPushTokens(c.Request.Context(), apiutil.Tenant(c), ext)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": n})
+}
+
+// contactPathID reads and validates the path identity. Same rule the write
+// boundaries enforce; gin unescapes the path before matching, so a "/" sent as
+// %2F never reaches here at all.
+func contactPathID(c *gin.Context) (string, bool) {
+	ext := c.Param("external_user_id")
+	if err := domain.ValidateExternalUserID(ext); err != nil {
+		apiutil.Fail(c, err)
+		return "", false
+	}
+	return ext, true
+}
+
+// contactsBlock renders the `expand=contacts` block for the participants of a
+// page, from the profiles the member views already loaded — an expansion costs
+// no query of its own, and a narrow one touches no blob-backed field at all.
+//
+// Profiles only: the directory aggregates need the scoped aggregate query the
+// contacts resource itself is for, and computing them per conversation page
+// would reintroduce the fan-out this expansion exists to remove.
+func contactsBlock(ids []string, profiles map[string][]byte, ex apiutil.Expansion) []map[string]any {
+	out := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		block := views.Contact(id, profiles[id])
+		for field := range block {
+			if !ex.Wants(resourceContacts, field) {
+				delete(block, field)
+			}
+		}
+		out = append(out, block)
+	}
+	return out
 }

@@ -48,37 +48,6 @@ func (r *pushConfigRepo) MarkVerified(ctx context.Context, tenantID string) erro
 		Updates(map[string]any{"verified": true, "updated_at": time.Now()}).Error
 }
 
-type pushOptOutRepo struct{ db *gorm.DB }
-
-func (r *pushOptOutRepo) Set(ctx context.Context, tenantID, externalUserID string) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&models.PushOptOut{TenantID: tenantID, ExternalUserID: externalUserID, CreatedAt: time.Now()}).Error
-}
-
-func (r *pushOptOutRepo) Clear(ctx context.Context, tenantID, externalUserID string) error {
-	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).
-		Delete(&models.PushOptOut{}).Error
-}
-
-func (r *pushOptOutRepo) OptedOut(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]bool, error) {
-	out := map[string]bool{}
-	if len(externalUserIDs) == 0 {
-		return out, nil
-	}
-	var ids []string
-	err := r.db.WithContext(ctx).Model(&models.PushOptOut{}).
-		Where("tenant_id = ? AND external_user_id IN ?", tenantID, externalUserIDs).
-		Pluck("external_user_id", &ids).Error
-	if err != nil {
-		return nil, err
-	}
-	for _, id := range ids {
-		out[id] = true
-	}
-	return out, nil
-}
-
 type pushOutboxRepo struct{ db *gorm.DB }
 
 // Enqueue is idempotent on message_id: a send retried into the same message must
@@ -114,6 +83,5 @@ func (r *pushOutboxRepo) Reschedule(ctx context.Context, id string, attempts, av
 
 var (
 	_ store.PushConfigRepo = (*pushConfigRepo)(nil)
-	_ store.PushOptOutRepo = (*pushOptOutRepo)(nil)
 	_ store.PushOutboxRepo = (*pushOutboxRepo)(nil)
 )

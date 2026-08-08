@@ -38,18 +38,19 @@ func (s *Service) ListUserConversations(ctx context.Context, tenantID, userID st
 		return nil, err
 	}
 	const includeInternal = false
+	byConv, profiles, err := s.membersWithProfiles(ctx, tenantID, convs)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]map[string]any, 0, len(convs))
 	for i := range convs {
 		c := &convs[i]
-		members, err := s.store.Members().ListActive(ctx, tenantID, c.ID)
-		if err != nil {
-			return nil, err
-		}
+		members := byConv[c.ID]
 		assignment, err := s.store.Assignments().GetByConversation(ctx, tenantID, c.ID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
-		summary := views.Conversation(c, members, assignment)
+		summary := views.Conversation(c, members, assignment, profiles)
 
 		// The handling agent's display name (their first name) so the widget can
 		// label the conversation with a real person instead of "Support".
@@ -100,18 +101,19 @@ func (s *Service) ListContactConversations(ctx context.Context, tenantID, extern
 	if err != nil {
 		return nil, err
 	}
+	byConv, profiles, err := s.membersWithProfiles(ctx, tenantID, convs)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]map[string]any, 0, len(convs))
 	for i := range convs {
 		c := &convs[i]
-		members, err := s.store.Members().ListActive(ctx, tenantID, c.ID)
-		if err != nil {
-			return nil, err
-		}
+		members := byConv[c.ID]
 		assignment, err := s.store.Assignments().GetByConversation(ctx, tenantID, c.ID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
-		conv := views.Conversation(c, members, nil)
+		conv := views.Conversation(c, members, nil, profiles)
 		lastAt := c.CreatedAt
 		if c.LastMessageAt != nil {
 			lastAt = *c.LastMessageAt
@@ -130,4 +132,25 @@ func (s *Service) ListContactConversations(ctx context.Context, tenantID, extern
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// membersWithProfiles loads the members of every conversation in a set and
+// resolves their profiles in ONE pass — a person's profile is one row however
+// many of their threads are on screen, so it must not be read per thread.
+func (s *Service) membersWithProfiles(ctx context.Context, tenantID string, convs []models.Conversation) (map[string][]models.ConversationMember, views.Profiles, error) {
+	byConv := make(map[string][]models.ConversationMember, len(convs))
+	groups := make([][]models.ConversationMember, 0, len(convs))
+	for i := range convs {
+		members, err := s.store.Members().ListActive(ctx, tenantID, convs[i].ID)
+		if err != nil {
+			return nil, views.Profiles{}, err
+		}
+		byConv[convs[i].ID] = members
+		groups = append(groups, members)
+	}
+	profiles, err := s.MemberProfiles(ctx, tenantID, groups...)
+	if err != nil {
+		return nil, views.Profiles{}, err
+	}
+	return byConv, profiles, nil
 }
