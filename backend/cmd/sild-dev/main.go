@@ -200,6 +200,14 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *conf
 
 func strptr(s string) *string { return &s }
 
+// seedProfile stores a person's contact profile — the seed standing in for the
+// host backend, which writes it once rather than per conversation.
+func seedProfile(ctx context.Context, svc *domain.Service, tenantID, uid, meta string) {
+	if err := svc.UpsertContact(ctx, tenantID, uid, json.RawMessage(meta)); err != nil {
+		log.Printf("dev seed contact %s: %v", uid, err)
+	}
+}
+
 // ensurePeerConversation finds (by reference + rider) or creates a driver↔rider
 // peer conversation and returns its id, seeding a driver message so the widget
 // thread opens with content. Peer conversations carry no assignment.
@@ -218,8 +226,8 @@ func ensurePeerConversation(ctx context.Context, svc *domain.Service, tenantID, 
 	driverMeta, _ := json.Marshal(map[string]string{
 		"name": "Toomas Vaher", "role": "driver", "vehicle": "Silver estate · 421 KLM", "phone": "+372 5987 6543",
 	})
-	_ = svc.UpsertContact(ctx, tenantID, riderID, riderMeta)
-	_ = svc.UpsertContact(ctx, tenantID, driverID, driverMeta)
+	seedProfile(ctx, svc, tenantID, riderID, string(riderMeta))
+	seedProfile(ctx, svc, tenantID, driverID, string(driverMeta))
 	conv, err := svc.CreateConversation(ctx, tenantID, domain.CreateConversationInput{
 		Reference: reference, OpenAssignment: false,
 		Members: []domain.MemberInput{
@@ -269,13 +277,6 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 			Visibility: models.VisibilityInternal, AllowInternal: true,
 		})
 	}
-	// profile stores a person's contact profile — the seed standing in for the
-	// host backend, which now writes it once rather than per conversation.
-	profile := func(uid string, meta json.RawMessage) {
-		if err := svc.UpsertContact(ctx, tenantID, uid, meta); err != nil {
-			log.Printf("dev seed contact %s: %v", uid, err)
-		}
-	}
 	create := func(ref string, meta json.RawMessage, members []domain.MemberInput) *models.Conversation {
 		conv, err := svc.CreateConversation(ctx, tenantID, domain.CreateConversationInput{
 			Reference: ref, Metadata: meta, Members: members, OpenAssignment: true,
@@ -292,12 +293,12 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 		}
 	}
 
-	profile("u_mari", json.RawMessage(`{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"client"}`))
-	profile("u_driver9", json.RawMessage(`{"name":"Driver 9","phone":"+372 5987 6543","app_version":"2.3.0","role":"driver"}`))
-	profile("support@acme.com", json.RawMessage(`{"name":"support@acme.com","email":"support@acme.com","role":"email contact"}`))
-	profile("u_jaan", json.RawMessage(`{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"client"}`))
-	profile("guest_7f3a", json.RawMessage(`{"name":"Guest · web","guest":"true","app_version":"web 1.0"}`))
-	profile("u_pille", json.RawMessage(`{"name":"Pille Saar","phone":"+372 5333 9090","role":"client"}`))
+	seedProfile(ctx, svc, tenantID, "u_mari", `{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"client"}`)
+	seedProfile(ctx, svc, tenantID, "u_driver9", `{"name":"Driver 9","phone":"+372 5987 6543","app_version":"2.3.0","role":"driver"}`)
+	seedProfile(ctx, svc, tenantID, "support@acme.com", `{"name":"support@acme.com","email":"support@acme.com","role":"email contact"}`)
+	seedProfile(ctx, svc, tenantID, "u_jaan", `{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"client"}`)
+	seedProfile(ctx, svc, tenantID, "guest_7f3a", `{"name":"Guest · web","guest":"true","app_version":"web 1.0"}`)
+	seedProfile(ctx, svc, tenantID, "u_pille", `{"name":"Pille Saar","phone":"+372 5333 9090","role":"client"}`)
 
 	// Mari's earlier, resolved threads — seed real contact history so the Details
 	// panel's "Earlier from Mari" list (and the "View all from" filter) has data.
@@ -394,13 +395,12 @@ func devSeedPeerConversations(ctx context.Context, svc *domain.Service, tenantID
 		return conv
 	}
 	role := func(r string) models.ConvRole { return models.ConvRole(r) }
-	profile := func(uid string, meta string) { _ = svc.UpsertContact(ctx, tenantID, uid, json.RawMessage(meta)) }
 
-	profile("p_mari", `{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"rider"}`)
-	profile("p_toomas", `{"name":"Toomas Vaher","phone":"+372 5987 6543","vehicle":"Silver estate · 421 KLM","app_version":"2.3.0","role":"driver"}`)
-	profile("p_jaan", `{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"rider"}`)
-	profile("p_pille", `{"name":"Pille Saar","phone":"+372 5333 9090","app_version":"2.3.0","role":"rider"}`)
-	profile("p_andres", `{"name":"Andres Laan","phone":"+372 5661 2020","vehicle":"Black hatchback · 118 TRE","role":"driver"}`)
+	seedProfile(ctx, svc, tenantID, "p_mari", `{"name":"Mari Tamm","phone":"+372 5123 4567","app_version":"2.3.1","role":"rider"}`)
+	seedProfile(ctx, svc, tenantID, "p_toomas", `{"name":"Toomas Vaher","phone":"+372 5987 6543","vehicle":"Silver estate · 421 KLM","app_version":"2.3.0","role":"driver"}`)
+	seedProfile(ctx, svc, tenantID, "p_jaan", `{"name":"Jaan Kask","phone":"+372 5444 1212","app_version":"2.2.9","role":"rider"}`)
+	seedProfile(ctx, svc, tenantID, "p_pille", `{"name":"Pille Saar","phone":"+372 5333 9090","app_version":"2.3.0","role":"rider"}`)
+	seedProfile(ctx, svc, tenantID, "p_andres", `{"name":"Andres Laan","phone":"+372 5661 2020","vehicle":"Black hatchback · 118 TRE","role":"driver"}`)
 
 	// Peer participants use their own ids (p_*), distinct from the support-seed
 	// contacts (u_mari/u_pille/…), so these direct chats stay a separate persona

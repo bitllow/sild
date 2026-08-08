@@ -98,9 +98,8 @@ func (j *Job) archiveOne(ctx context.Context, conv *models.Conversation) error {
 	if len(conv.Metadata) > 0 {
 		ser.Metadata = json.RawMessage(conv.Metadata)
 	}
-	// No profile in the snapshot: a contact's profile lives in one place and is
-	// read live, so a copy here would be a stale second answer. The snapshot
-	// exists to preserve IDENTITY for archived-read authorization.
+	// No profile: it lives in one place and is read live, so a copy here would be
+	// a stale second answer. The snapshot preserves identity, for authorization.
 	for i := range members {
 		ser.Members = append(ser.Members, views.Member(&members[i], views.Profiles{}))
 	}

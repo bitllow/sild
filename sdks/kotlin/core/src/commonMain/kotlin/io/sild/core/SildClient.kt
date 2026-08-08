@@ -73,8 +73,9 @@ class SildClient internal constructor(
             // UI showing a connection that is permanently pending.
             val conn = if (realtime == null) ConnectionState.IDLE else ConnectionState.CONNECTING
             _state.update { it.copy(connection = conn, error = null) }
+            // Fire-and-forget: never gate the support channel on the profile write.
+            scope.launch { writeProfile() }
             runCatching {
-                writeProfile()
                 loadBrand()
                 realtime?.connect()
                 // Always load the list first: it drives the App's conversation list
@@ -131,9 +132,8 @@ class SildClient internal constructor(
         SildPush.shouldShow(data, _state.value.activeId)
 
     /**
-     * Upserts the configured profile before anything else, so Sild knows who this
-     * is before they ever write a message. Fire-and-forget: a missing profile
-     * costs a display name, a blocked start costs the whole support channel.
+     * Upserts the configured profile, so Sild knows who this is before they ever
+     * write a message. A missing profile costs a display name.
      */
     private suspend fun writeProfile() {
         runCatching { api.upsertOwnProfile() }

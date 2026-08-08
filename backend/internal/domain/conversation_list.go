@@ -85,29 +85,26 @@ func (s *Service) renderPage(ctx context.Context, tenantID string, items []store
 
 	ids := make([]string, 0, len(items))
 	actors := make([]string, 0, len(items))
+	var members []models.ConversationMember
 	for i := range items {
 		ids = append(ids, items[i].Conversation.ID)
 		if a := items[i].Assignment; a != nil && a.AssigneeActorID != nil {
 			actors = append(actors, *a.AssigneeActorID)
 		}
+		members = append(members, items[i].Members...)
 	}
 
-	groups := make([][]models.ConversationMember, 0, len(items))
-	for i := range items {
-		groups = append(groups, items[i].Members)
-	}
-	out.Participants = externalParticipants(groups)
-
-	profiles, err := s.MemberProfiles(ctx, tenantID, groups...)
+	// Assignees resolve in the same pass as agent members: an operator who is both
+	// would otherwise be read twice.
+	profiles, err := s.MemberProfiles(ctx, tenantID, members, actors...)
 	if err != nil {
 		return ConversationPage{}, err
 	}
-
+	out.Participants = ExternalParticipants(members)
 	out.Profiles = profiles.Contacts
 
-	x := rowExtras{snippets: snippets, profiles: profiles}
+	x := rowExtras{snippets: snippets, profiles: profiles, agentNames: profiles.Agents}
 	x.subjects, _ = s.store.Email().Subjects(ctx, tenantID, ids)
-	x.agentNames = s.agentNames(ctx, tenantID, actors)
 	if in.IncludeUnread && in.UnreadFor != "" {
 		x.unread, _ = s.store.Messages().UnreadCounts(ctx, tenantID, ids, in.UnreadFor)
 	}

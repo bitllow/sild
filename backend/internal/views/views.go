@@ -6,7 +6,6 @@ package views
 import (
 	"encoding/json"
 
-	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
@@ -79,13 +78,15 @@ type Profiles struct {
 	Agents   map[string]string
 }
 
-// Contact renders a contact's stored profile — the shape shared by the
-// `contact.updated` event and the `expand=contacts` block.
+// Contact renders a contact's stored profile. An absent profile omits the field
+// rather than emitting null, so a person nobody described reads the same on
+// every contact surface.
 func Contact(externalUserID string, metadata []byte) map[string]any {
-	return map[string]any{
-		"external_user_id": externalUserID,
-		"metadata":         rawJSON(metadata),
+	out := map[string]any{"external_user_id": externalUserID}
+	if len(metadata) > 0 {
+		out["metadata"] = rawJSON(metadata)
 	}
+	return out
 }
 
 // Member renders a conversation member, with the participant's profile inline.
@@ -135,24 +136,6 @@ func Assignment(a *models.Assignment) map[string]any {
 		out["closed_at"] = a.ClosedAt
 	}
 	return out
-}
-
-// QueueRow renders one inbox queue row: the assignment + its conversation
-// (members + last message preview + last activity), but NO message history —
-// the client fetches that lazily when the conversation is opened (§4.3).
-func QueueRow(it *store.QueueItem, p Profiles) map[string]any {
-	conv := Conversation(&it.Conversation, it.Members, nil, p)
-	conv["last_activity"] = it.LastActivity
-	if it.Conversation.LastMessagePreview != "" {
-		conv["last_message"] = map[string]any{
-			"body":       it.Conversation.LastMessagePreview,
-			"created_at": it.Conversation.LastMessageAt,
-		}
-	}
-	return map[string]any{
-		"assignment":   Assignment(&it.Assignment),
-		"conversation": conv,
-	}
 }
 
 // Conversation renders the full conversation (§4.1 fetch, §4.2 GET).

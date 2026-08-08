@@ -102,15 +102,12 @@ func backfillLastActivity(db *gorm.DB) error {
 		  AND last_message_at IS NOT NULL`).Error
 }
 
-// dropRetiredObjects removes what the profile move replaced: the per-membership
-// profile and its search text, and the opt-out table now folded into
-// contacts.push_opted_out_at. AutoMigrate never drops, so a database upgraded in
-// place would keep them forever. Idempotent — each drop is guarded by existence.
+// dropRetiredObjects removes what the profile move replaced. AutoMigrate never
+// drops, so a database upgraded in place would keep them forever.
 //
-// Raw DDL, addressed by table NAME: the fields are gone from the models, so
-// gorm's model-driven migrator has no schema to resolve them against. Every
-// dialect drops a column's dependent indexes with it, so the retired trigram and
-// fulltext indexes need no statement of their own.
+// Raw DDL by table NAME: the fields are gone from the models, so gorm's
+// model-driven migrator has no schema to resolve them against. Dropping a column
+// takes its indexes with it on every dialect.
 func dropRetiredObjects(db *gorm.DB) error {
 	const members = "conversation_members"
 	m := db.Migrator()

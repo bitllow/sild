@@ -75,6 +75,8 @@ func (r *contactRepo) contactBase(ctx context.Context, tenantID string, scope po
 			AND NOT EXISTS (SELECT 1 FROM assignments a2
 				WHERE a2.conversation_id = a.conversation_id
 				  AND (a2.created_at > a.created_at OR (a2.created_at = a.created_at AND a2.id > a.id)))`).
+		Joins(`LEFT JOIN contacts ct
+			ON ct.tenant_id = m.tenant_id AND ct.external_user_id = m.external_user_id`).
 		Where("m.tenant_id = ? AND m.external_user_id IS NOT NULL AND m.external_user_id <> ''", tenantID)
 
 	if kinds := scope.AllowedKinds(); len(kinds) > 0 {
@@ -103,13 +105,10 @@ func (r *contactRepo) ListContacts(ctx context.Context, tenantID string, scope p
 		base = base.Where("m.external_user_id = ?", q.Exact)
 	}
 	if q.Search != "" {
-		// The search text lives on the narrow contacts row, so the scan never pulls
-		// a profile page through memory.
+		// Matched off the joined narrow row, so the scan never pulls a profile page
+		// through memory and never re-runs a subquery per membership.
 		like := "%" + q.Search + "%"
-		base = base.Where(`LOWER(m.external_user_id) LIKE LOWER(?)
-			OR EXISTS (SELECT 1 FROM contacts ct
-				WHERE ct.tenant_id = m.tenant_id AND ct.external_user_id = m.external_user_id
-				  AND LOWER(ct.search_text) LIKE LOWER(?))`, like, like)
+		base = base.Where("LOWER(m.external_user_id) LIKE LOWER(?) OR LOWER(ct.search_text) LIKE LOWER(?)", like, like)
 	}
 
 	// The sort value is an aggregate, so the keyset predicate lives in HAVING.
@@ -209,16 +208,22 @@ func (r *contactRepo) GetContact(ctx context.Context, tenantID string, scope pol
 
 // Upsert writes the profile across both tables. The narrow row's update names
 // only search_text and updated_at, so push_opted_out_at survives every write.
+//
+// A write that moves nothing writes nothing: the SDK upserts on every start-up,
+// so the settled state is the common one and it must not cost a transaction.
 func (r *contactRepo) Upsert(ctx context.Context, tenantID, externalUserID string, metadata []byte, searchText string) (bool, error) {
-	changed := true
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var prev models.ContactMeta
-		err := tx.Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).First(&prev).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		changed = err != nil || !bytes.Equal(prev.Metadata, metadata)
+	var prev models.ContactMeta
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).First(&prev).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
+	}
+	changed := err != nil || !bytes.Equal(prev.Metadata, metadata)
+	if !changed && r.searchTextMatches(ctx, tenantID, externalUserID, searchText) {
+		return false, nil
+	}
 
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "external_user_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"search_text", "updated_at"}),
@@ -237,6 +242,17 @@ func (r *contactRepo) Upsert(ctx context.Context, tenantID, externalUserID strin
 		}).Error
 	})
 	return changed, err
+}
+
+// searchTextMatches reports that the materialized text is already what a write
+// would store — the tenant's searchable keys can change without the profile
+// doing so, and that alone has to rewrite the row.
+func (r *contactRepo) searchTextMatches(ctx context.Context, tenantID, externalUserID, searchText string) bool {
+	var stored string
+	err := r.db.WithContext(ctx).Model(&models.Contact{}).
+		Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).
+		Pluck("search_text", &stored).Error
+	return err == nil && stored == searchText
 }
 
 func (r *contactRepo) Profiles(ctx context.Context, tenantID string, externalUserIDs []string) (map[string][]byte, error) {

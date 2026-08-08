@@ -316,7 +316,7 @@ export class SildClient implements WidgetClient {
     this.patch({ connection: "connecting", error: null });
     try {
       await this.getToken();
-      await this.writeProfile();
+      void this.writeProfile(); // fire-and-forget: never gate the channel on it
       this.connectRealtime();
       // The list surface needs it, and openConversation reads the target's row from it.
       await this.loadConversations();
@@ -329,10 +329,9 @@ export class SildClient implements WidgetClient {
     }
   }
 
-  // writeProfile upserts the configured profile before anything else, so Sild
-  // knows who this is before they ever write a message. Fire-and-forget: a
-  // missing profile costs a display name, a blocked start costs the whole
-  // support channel.
+  // writeProfile upserts the configured profile, so Sild knows who this is before
+  // they ever write a message. A missing profile costs a display name; a blocked
+  // start costs the whole support channel.
   private async writeProfile() {
     try {
       await this.api("PUT", "/contacts/me", { metadata: this.metadata });

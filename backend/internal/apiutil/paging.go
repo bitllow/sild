@@ -137,7 +137,10 @@ func FilterFingerprint(c *gin.Context) string {
 func computeFingerprint(c *gin.Context) string {
 	parts := make([]string, 0, 8)
 	for k, vs := range c.Request.URL.Query() {
-		if k == "limit" || k == "cursor" {
+		// Paging position, and expansion, which decides what a row CARRIES rather
+		// than which rows there are — binding it would 400 a client that turned an
+		// expansion off mid-scroll.
+		if k == "limit" || k == "cursor" || k == "expand" {
 			continue
 		}
 		sorted := append([]string(nil), vs...)

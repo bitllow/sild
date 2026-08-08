@@ -139,16 +139,16 @@ func (s *Service) ListContactConversations(ctx context.Context, tenantID, extern
 // many of their threads are on screen, so it must not be read per thread.
 func (s *Service) membersWithProfiles(ctx context.Context, tenantID string, convs []models.Conversation) (map[string][]models.ConversationMember, views.Profiles, error) {
 	byConv := make(map[string][]models.ConversationMember, len(convs))
-	groups := make([][]models.ConversationMember, 0, len(convs))
+	var all []models.ConversationMember
 	for i := range convs {
 		members, err := s.store.Members().ListActive(ctx, tenantID, convs[i].ID)
 		if err != nil {
 			return nil, views.Profiles{}, err
 		}
 		byConv[convs[i].ID] = members
-		groups = append(groups, members)
+		all = append(all, members...)
 	}
-	profiles, err := s.MemberProfiles(ctx, tenantID, groups...)
+	profiles, err := s.MemberProfiles(ctx, tenantID, all)
 	if err != nil {
 		return nil, views.Profiles{}, err
 	}

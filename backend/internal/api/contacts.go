@@ -18,25 +18,20 @@ import (
 // they are in; the directory below still lists only people the caller's
 // conversations admit. A contact's history is GET /v1/conversations?participant=<id>.
 
-// expandContacts declares the contacts block an `expand` path may ask for. A
-// contact has no id: its wire identity is external_user_id, so `contacts.id` is
-// one of the 400s.
+// expandContacts declares what an `expand=contacts` path may name. A contact has
+// no id — its wire identity is external_user_id — so `contacts.id` is a 400.
 var expandContacts = apiutil.Expandable{
 	Resource: resourceContacts,
 	Fields:   []string{"external_user_id", "metadata"},
 }
 
-// contactView renders a directory entry. No display name: the client already
-// derives one, and duplicating that rule would give two sources of truth.
-func contactView(c *store.Contact) gin.H {
-	out := gin.H{
-		"external_user_id":   c.ExternalUserID,
-		"last_activity":      c.LastActivity,
-		"conversation_count": c.ConversationCount,
-	}
-	if len(c.Metadata) > 0 {
-		out["metadata"] = json.RawMessage(c.Metadata)
-	}
+// contactView renders a directory entry: the stored profile plus the aggregates
+// only the scoped directory query can produce. No display name — the client
+// already derives one, and duplicating that rule would give two sources of truth.
+func contactView(c *store.Contact) map[string]any {
+	out := views.Contact(c.ExternalUserID, c.Metadata)
+	out["last_activity"] = c.LastActivity
+	out["conversation_count"] = c.ConversationCount
 	return out
 }
 
@@ -47,7 +42,7 @@ func (h *Handler) listContacts(c *gin.Context) {
 		return
 	}
 	if scope.DenyAll() {
-		apiutil.RespondPage(c, resourceContacts, store.Page[gin.H]{})
+		apiutil.RespondPage(c, resourceContacts, store.Page[map[string]any]{})
 		return
 	}
 	page, ok := apiutil.PageParams(c, apiutil.PageDefaults{
@@ -68,11 +63,11 @@ func (h *Handler) listContacts(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	items := make([]gin.H, 0, len(res.Items))
+	items := make([]map[string]any, 0, len(res.Items))
 	for i := range res.Items {
 		items = append(items, contactView(&res.Items[i]))
 	}
-	apiutil.RespondPage(c, resourceContacts, store.Page[gin.H]{
+	apiutil.RespondPage(c, resourceContacts, store.Page[map[string]any]{
 		Items: items, NextCursor: res.NextCursor, HasMore: res.HasMore,
 	})
 }
@@ -178,21 +173,19 @@ func contactPathID(c *gin.Context) (string, bool) {
 	return ext, true
 }
 
-// contactsBlock renders the `expand=contacts` block for the participants of a
-// page, from the profiles the member views already loaded — an expansion costs
-// no query of its own, and a narrow one touches no blob-backed field at all.
-//
-// Profiles only: the directory aggregates need the scoped aggregate query the
-// contacts resource itself is for, and computing them per conversation page
-// would reintroduce the fan-out this expansion exists to remove.
+// contactsBlock renders the `expand=contacts` block for a page's participants,
+// from the profiles the member views already loaded. Profiles only: the
+// directory aggregates need the scoped query the contacts resource itself is
+// for, and computing them per page would restore the fan-out this removes.
 func contactsBlock(ids []string, profiles map[string][]byte, ex apiutil.Expansion) []map[string]any {
 	out := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
-		block := views.Contact(id, profiles[id])
-		for field := range block {
-			if !ex.Wants(resourceContacts, field) {
-				delete(block, field)
-			}
+		block := map[string]any{}
+		if ex.Wants(resourceContacts, "external_user_id") {
+			block["external_user_id"] = id
+		}
+		if ex.Wants(resourceContacts, "metadata") && len(profiles[id]) > 0 {
+			block["metadata"] = json.RawMessage(profiles[id])
 		}
 		out = append(out, block)
 	}

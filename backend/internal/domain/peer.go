@@ -81,11 +81,11 @@ func (s *Service) ListPeerConversations(ctx context.Context, tenantID string, pa
 	if err != nil {
 		return PeerPage{}, err
 	}
-	groups := make([][]models.ConversationMember, 0, len(page.Items))
+	var members []models.ConversationMember
 	for i := range page.Items {
-		groups = append(groups, page.Items[i].Members)
+		members = append(members, page.Items[i].Members...)
 	}
-	profiles, err := s.MemberProfiles(ctx, tenantID, groups...)
+	profiles, err := s.MemberProfiles(ctx, tenantID, members)
 	if err != nil {
 		return PeerPage{}, err
 	}
