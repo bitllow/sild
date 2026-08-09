@@ -95,14 +95,14 @@ fun HomeScreen(state: SildState, onNew: () -> Unit, onOpen: (String) -> Unit, on
         // Body: New-conversation card, topics, Recent.
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(radii.card.dp)).background(colors.card).padding(16.dp)) {
-                Text("Send us a message", color = colors.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text("We'll get back to you here. No queue numbers.", color = colors.sub, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                Text(t("widget.home.cta"), color = colors.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(t("widget.home.reassurance"), color = colors.sub, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
                 Row(
                     Modifier.fillMaxWidth().padding(top = 14.dp).clip(RoundedCornerShape(radii.btn.dp)).background(colors.brand).clickable(onClick = onNew).padding(vertical = 13.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("New conversation", color = colors.onBrand, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(t("widget.home.newConversation"), color = colors.onBrand, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Spacer(Modifier.size(8.dp))
                     Icon(SildIcons.Arrow, contentDescription = null, tint = colors.onBrand, modifier = Modifier.size(16.dp))
                 }
@@ -117,8 +117,8 @@ fun HomeScreen(state: SildState, onNew: () -> Unit, onOpen: (String) -> Unit, on
                 }
             }
             if (state.conversations.isNotEmpty()) {
-                Text("RECENT", color = colors.tertiary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                val fallback = state.agentName ?: "Support"
+                Text(t("widget.home.recent"), color = colors.tertiary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                val fallback = state.agentName ?: t("widget.home.support")
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(radii.card.dp)).background(colors.card)) {
                     state.conversations.forEachIndexed { i, c ->
                         if (i > 0) HorizontalDivider(color = colors.border)
@@ -171,7 +171,7 @@ private fun ConversationRow(c: Conversation, fallback: String, onClick: () -> Un
                 if (c.time.isNotEmpty()) Text(c.time, color = colors.tertiary, fontSize = 11.sp)
             }
             Text(c.preview, color = colors.sub, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-            val sub = c.subtitle ?: (if (c.closed) "Closed" else null)
+            val sub = c.subtitle ?: (if (c.closed) t("widget.thread.closedShort") else null)
             if (!sub.isNullOrEmpty()) {
                 Text(sub, color = colors.tertiary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
@@ -201,6 +201,10 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
         }
     }
+    // Resolved in composition: the error is set from a coroutine, where the strings
+    // local cannot be read.
+    val tooLarge = t("widget.composer.tooLarge", mapOf("mb" to client.uploadSizeLimitBytes / (1024 * 1024)))
+    val attachFailed = t("widget.composer.attachFailed")
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) attachError = null
         uris.forEach { uri ->
@@ -213,8 +217,8 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
                 } catch (e: Exception) {
                     // Say why — an oversized camera photo is the common case.
                     attachError = when (e) {
-                        is IllegalArgumentException -> "That file is too large (max ${client.uploadSizeLimitBytes / (1024 * 1024)} MB)."
-                        else -> "Couldn't attach that file. Please try again."
+                        is IllegalArgumentException -> tooLarge
+                        else -> attachFailed
                     }
                 } finally {
                     uploading--
@@ -225,12 +229,12 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
 
     val active = state.conversations.firstOrNull { it.id == state.activeId }
     val peer = active?.peer == true
-    val title = if (peer) active?.title ?: "Direct chat" else state.agentName ?: "Support"
+    val title = if (peer) active?.title ?: t("widget.home.directChat") else state.agentName ?: t("widget.home.support")
     val subtitle = when {
-        peer -> active?.subtitle ?: "Direct chat"
-        draft -> "Type your message to start"
-        state.connection.name == "CONNECTED" -> "Replies in a few minutes"
-        else -> "Connecting…"
+        peer -> active?.subtitle ?: t("widget.home.directChat")
+        draft -> t("widget.home.start")
+        state.connection.name == "CONNECTED" -> t("widget.home.subtitle")
+        else -> t("widget.status.connecting")
     }
     val closed = active?.closed == true
     val listState = rememberScrollState()
@@ -250,17 +254,17 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (state.loadingThread && state.messages.isEmpty()) {
-                Text("Loading…", color = colors.tertiary, fontSize = 13.sp)
+                Text(t("widget.status.loading"), color = colors.tertiary, fontSize = 13.sp)
             }
             state.messages.forEach { m -> SildMessageBubble(m, onOpenUrl = openUrl) }
             if (!state.loadingThread && state.messages.isEmpty()) {
-                Text("Send a message to start the conversation.", color = colors.tertiary, fontSize = 13.sp)
+                Text(t("widget.thread.empty"), color = colors.tertiary, fontSize = 13.sp)
             }
             Spacer(Modifier.height(4.dp))
         }
         if (closed) {
             Text(
-                "This conversation is closed.",
+                t("widget.thread.closed"),
                 color = colors.sub, fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth().background(colors.card).padding(14.dp),
             )

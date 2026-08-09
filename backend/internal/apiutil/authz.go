@@ -143,6 +143,22 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, a policy.Action,
 
 // AuthorizeTranslation checks a translation action against a project and, when
 // the action names one, a locale. Only a translator carries a grant to load.
+// TranslationScope is the caller's own grant, for a collection that has to narrow
+// what it returns rather than answer yes or no about one project. Empty for
+// everyone but a translator — nobody else carries a scope.
+func TranslationScope(c *gin.Context, svc *domain.Service) (policy.TranslationAttrs, bool) {
+	p := middleware.Get(c)
+	if p == nil || p.Kind != principal.KindAdmin || p.Role != models.PlatformTranslator {
+		return policy.TranslationAttrs{}, true
+	}
+	attrs, err := svc.TranslationScope(c.Request.Context(), p.TenantID, p.AdminID)
+	if err != nil {
+		Fail(c, err)
+		return policy.TranslationAttrs{}, false
+	}
+	return attrs, true
+}
+
 func AuthorizeTranslation(c *gin.Context, svc *domain.Service, a policy.Action, project, locale string) bool {
 	if !declared(c, a) {
 		failUndeclared(c, a)
@@ -153,14 +169,9 @@ func AuthorizeTranslation(c *gin.Context, svc *domain.Service, a policy.Action, 
 		httpx.Unauthorized(c, "authentication required")
 		return false
 	}
-	var attrs policy.TranslationAttrs
-	if p.Kind == principal.KindAdmin && p.Role == models.PlatformTranslator {
-		var err error
-		attrs, err = svc.TranslationScope(c.Request.Context(), p.TenantID, p.AdminID)
-		if err != nil {
-			Fail(c, err)
-			return false
-		}
+	attrs, ok := TranslationScope(c, svc)
+	if !ok {
+		return false
 	}
 	if err := policy.AuthorizeTranslation(p, a, attrs, project, locale); err != nil {
 		failPolicy(c, err)

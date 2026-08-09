@@ -18,9 +18,10 @@ public enum Sild {
     public static func initialize(
         baseURL: String,
         token: @escaping () async throws -> String,
-        userId: String? = nil
+        userId: String? = nil,
+        locale: String? = nil
     ) {
-        initialize(.make(baseUrl: baseURL, token: token, userId: userId))
+        initialize(.make(baseUrl: baseURL, token: token, userId: userId, locale: locale))
     }
 
     // Push (§5.5). Your app owns its Firebase registration and the SDK adds none

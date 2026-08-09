@@ -116,9 +116,25 @@ private struct SildStyleKey: EnvironmentKey {
     static let defaultValue = SildStyle(config: InteropKt.defaultBrandConfig(), systemDark: false)
 }
 
+/// Looks up one of Sild's own strings in the active language.
+public typealias SildStrings = (String, [String: Any]) -> String
+
+private struct SildStringsKey: EnvironmentKey {
+    // The bundled text, so a screen shown outside the messenger still renders words
+    // rather than keys.
+    static let defaultValue: SildStrings = { key, vars in
+        I18nKt.bundledStrings(locale: nil).t(key: key, vars: vars.isEmpty ? nil : vars)
+    }
+}
+
 public extension EnvironmentValues {
     var sildStyle: SildStyle {
         get { self[SildStyleKey.self] }
         set { self[SildStyleKey.self] = newValue }
+    }
+
+    var sildStrings: SildStrings {
+        get { self[SildStringsKey.self] }
+        set { self[SildStringsKey.self] = newValue }
     }
 }

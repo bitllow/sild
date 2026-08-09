@@ -29,3 +29,7 @@ private fun parseIso(iso: String?): Date? {
     }
     return runCatching { fmt.parse(s) }.getOrNull()
 }
+
+// Android hosts reach the device's ordered preference list through LocaleList; the
+// plain JVM has one default, which is the whole preference on a desktop or in a test.
+internal actual fun deviceLocales(): List<String> = listOf(Locale.getDefault().toLanguageTag())

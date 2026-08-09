@@ -80,6 +80,12 @@ public struct SildMessenger: View {
             }
         }
         .environment(\.sildStyle, style)
+        // Read through the model, so a published update that moves state.stringsRevision
+        // redraws the screens rather than sitting in memory.
+        .environment(\.sildStrings, { [model] key, vars in
+            _ = model.state.stringsRevision
+            return model.t(key, vars)
+        })
         .preferredColorScheme(style.preferredScheme)
         .onAppear {
             if case let .conversation(id) = target {
@@ -92,6 +98,9 @@ public struct SildMessenger: View {
             // never called Sild.initialize, so its config is the SDK's config.
             if SildHost.shared.config == nil { SildHost.shared.config = model.pushConfig }
             SildHost.shared.onScreen = model.pushClient
+            // Re-appearing on screen re-checks a held manifest and applies anything
+            // a previous poll downloaded.
+            model.onForeground()
         }
         .onDisappear {
             if SildHost.shared.onScreen === model.pushClient { SildHost.shared.onScreen = nil }

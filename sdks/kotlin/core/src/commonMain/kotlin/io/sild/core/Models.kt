@@ -146,4 +146,8 @@ data class SildState(
     val agentName: String? = null,
     val brand: BrandConfig = BrandConfig(),
     val brandName: String = "",
+    /** The language being rendered, and a counter that moves whenever the strings
+     *  behind it change — what tells a UI holding cached text to draw again. */
+    val locale: String = "",
+    val stringsRevision: Int = 0,
 )

@@ -1,7 +1,10 @@
 package i18n_test
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,8 +12,12 @@ import (
 	"github.com/bitllow/sild/backend/internal/i18n"
 )
 
-// generatedCatalog is what codegen fans the repo files out to for the web client.
-const generatedCatalog = "../../../web/src/i18n/catalog.generated.ts"
+// What codegen fans the repo files out to. Every client surface is generated, so a
+// key added here reaches all of them or none.
+var generatedCatalogs = []string{
+	"../../../web/src/i18n/catalog.generated.ts",
+	"../../../sdks/kotlin/core/src/commonMain/kotlin/io/sild/core/I18nCatalog.generated.kt",
+}
 
 func TestEveryLocaleCoversTheSameKeys(t *testing.T) {
 	cat := i18n.Platform()
@@ -39,21 +46,23 @@ func TestEstonianIsEtNotEe(t *testing.T) {
 
 // A stale generated catalog would ship a client that renders a key Sild no
 // longer has, or misses one it just added.
-func TestTheGeneratedClientCatalogIsCurrent(t *testing.T) {
-	raw, err := os.ReadFile(generatedCatalog)
-	if err != nil {
-		t.Skipf("generated catalog not present: %v", err)
-	}
-	src := string(raw)
+func TestTheGeneratedClientCatalogsAreCurrent(t *testing.T) {
 	cat := i18n.Platform()
-	for _, locale := range cat.Locales() {
-		if !strings.Contains(src, strconv.Quote(locale)) {
-			t.Errorf("generated catalog is missing locale %s — run `make i18n`", locale)
+	for _, path := range generatedCatalogs {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("generated catalog not present: %v", err)
 		}
-	}
-	for _, key := range cat.Keys() {
-		if !strings.Contains(src, strconv.Quote(key)) {
-			t.Errorf("generated catalog is missing key %s — run `make i18n`", key)
+		src := string(raw)
+		for _, locale := range cat.Locales() {
+			if !strings.Contains(src, strconv.Quote(locale)) {
+				t.Errorf("%s is missing locale %s — run `make i18n`", path, locale)
+			}
+		}
+		for _, key := range cat.Keys() {
+			if !strings.Contains(src, strconv.Quote(key)) {
+				t.Errorf("%s is missing key %s — run `make i18n`", path, key)
+			}
 		}
 	}
 }
@@ -101,5 +110,45 @@ func TestAnOverrideBeatsTheShippedTextForItsOwnLocaleOnly(t *testing.T) {
 	// A fully translated fallback must not outrank the language actually asked for.
 	if got := cat.Resolve(ov, "es", "lv", "widget.home.title"); got != "Chatea con nosotros" {
 		t.Fatalf("es = %q, want Spanish rather than the Latvian override", got)
+	}
+}
+
+// Client surfaces that look strings up by key. A typo here renders the key itself
+// to a customer, and no compiler catches it — so the repo does.
+var keyCallSites = []string{
+	"../../../sdks/kotlin/ui/src/main/kotlin/io/sild/ui",
+	"../../../sdks/swift/Sources/Sild",
+	"../../../web/src/widget",
+}
+
+// tCall finds t("some.key") — the one lookup shape every surface uses.
+var tCall = regexp.MustCompile(`\bt\(\s*"([a-z][\w.]*\.[\w.]+)"`)
+
+func TestNoSurfaceRendersAKeyTheCatalogDoesNotDeclare(t *testing.T) {
+	cat := i18n.Platform()
+	for _, dir := range keyCallSites {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			switch filepath.Ext(path) {
+			case ".kt", ".swift", ".ts", ".tsx":
+			default:
+				return nil
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, m := range tCall.FindAllStringSubmatch(string(raw), -1) {
+				if !cat.Declared(m[1]) {
+					t.Errorf("%s renders %q, which no locale file declares", path, m[1])
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Skipf("surface not present: %v", err)
+		}
 	}
 }

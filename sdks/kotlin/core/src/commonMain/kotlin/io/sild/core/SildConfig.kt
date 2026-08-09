@@ -24,6 +24,11 @@ data class SildConfig(
      *  across a person's devices. An empty map asserts an empty profile and
      *  erases it; null asserts nothing and leaves whatever Sild holds. */
     val metadata: Map<String, String>? = null,
+    /** The language to render in, as a BCP-47 tag. Omit it and the device's
+     *  preference decides, which is the right answer for most apps; set it when
+     *  your app has its own language picker. [SildClient.setLocale] changes it
+     *  after init without a reconnect. */
+    val locale: String? = null,
     /** Client-side ceiling (bytes) on a picked attachment before it is buffered into
      *  memory — a safety bound against OOM, NOT the business limit (the backend enforces
      *  the authoritative per-tenant max). Raise it to match a larger tenant limit. */

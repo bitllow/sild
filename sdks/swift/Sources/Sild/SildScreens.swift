@@ -9,6 +9,10 @@ import SildCore
 /// the first message, so opening support without a conversation lands here.
 struct HomeScreen: View {
     @Environment(\.sildStyle) private var style
+    @Environment(\.sildStrings) private var strings
+
+    private func t(_ key: String, _ vars: [String: Any] = [:]) -> String { strings(key, vars) }
+
     let state: SildState
     let onNew: () -> Void
     let onOpen: (String) -> Void
@@ -102,16 +106,16 @@ struct HomeScreen: View {
 
     private var newConversationCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Send us a message")
+            Text(t("widget.home.cta"))
                 .font(style.font(15, .bold))
                 .foregroundStyle(style.colors.text)
-            Text("We'll get back to you here. No queue numbers.")
+            Text(t("widget.home.reassurance"))
                 .font(style.font(13))
                 .foregroundStyle(style.colors.sub)
                 .padding(.top, 4)
             Button(action: onNew) {
                 HStack(spacing: 8) {
-                    Text("New conversation").font(style.font(15, .bold))
+                    Text(t("widget.home.newConversation")).font(style.font(15, .bold))
                     SildIconView(.arrow, size: 16)
                 }
                 .foregroundStyle(style.colors.onBrand)
@@ -145,7 +149,7 @@ struct HomeScreen: View {
 
     private var recentList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("RECENT")
+            Text(t("widget.home.recent"))
                 .font(style.font(11, .semibold))
                 .foregroundStyle(style.colors.tertiary)
                 .padding(.top, 4)
@@ -164,7 +168,7 @@ struct HomeScreen: View {
     }
 
     private func conversationRow(_ c: Conversation) -> some View {
-        let title = c.title ?? c.agentName ?? (state.agentName ?? "Support")
+        let title = c.title ?? c.agentName ?? (state.agentName ?? t("widget.home.support"))
         return Button { onOpen(c.id) } label: {
             HStack(alignment: .top, spacing: 11) {
                 SildAvatar(name: title, size: 40, background: style.colors.brand)
@@ -184,7 +188,7 @@ struct HomeScreen: View {
                         .foregroundStyle(style.colors.sub)
                         .lineLimit(1)
                         .padding(.top, 2)
-                    if let sub = c.subtitle ?? (c.closed ? "Closed" : nil), !sub.isEmpty {
+                    if let sub = c.subtitle ?? (c.closed ? t("widget.thread.closedShort") : nil), !sub.isEmpty {
                         Text(sub)
                             .font(style.font(11))
                             .foregroundStyle(style.colors.tertiary)
@@ -205,6 +209,9 @@ struct HomeScreen: View {
 struct ThreadScreen: View {
     @Environment(\.sildStyle) private var style
     @Environment(\.openURL) private var openURL
+    @Environment(\.sildStrings) private var strings
+
+    private func t(_ key: String, _ vars: [String: Any] = [:]) -> String { strings(key, vars) }
 
     let model: SildModel
     let draft: Bool
@@ -220,13 +227,13 @@ struct ThreadScreen: View {
     @State private var showFileImporter = false
 
     private func title(_ active: Conversation?) -> String {
-        active?.peer == true ? (active?.title ?? "Direct chat") : (state.agentName ?? "Support")
+        active?.peer == true ? (active?.title ?? t("widget.home.directChat")) : (state.agentName ?? t("widget.home.support"))
     }
 
     private func subtitle(_ active: Conversation?) -> String {
-        if active?.peer == true { return active?.subtitle ?? "Direct chat" }
-        if draft { return "Type your message to start" }
-        return state.connection == .connected ? "Replies in a few minutes" : "Connecting…"
+        if active?.peer == true { return active?.subtitle ?? t("widget.home.directChat") }
+        if draft { return t("widget.home.start") }
+        return state.connection == .connected ? t("widget.home.subtitle") : t("widget.status.connecting")
     }
 
     private var state: SildState { model.state }
@@ -245,7 +252,7 @@ struct ThreadScreen: View {
             connectionBanner
             messages
             if active?.closed == true {
-                Text("This conversation is closed.")
+                Text(t("widget.thread.closed"))
                     .font(style.font(13))
                     .foregroundStyle(style.colors.sub)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -279,9 +286,9 @@ struct ThreadScreen: View {
         }
         .background(style.colors.page)
         .confirmationDialog("Attach", isPresented: $showAttachMenu, titleVisibility: .hidden) {
-            Button("Photo or video") { showPhotoPicker = true }
-            Button("File") { showFileImporter = true }
-            Button("Cancel", role: .cancel) {}
+            Button(t("widget.composer.photoOrVideo")) { showPhotoPicker = true }
+            Button(t("widget.composer.file")) { showFileImporter = true }
+            Button(t("widget.common.cancel"), role: .cancel) {}
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $photoItems, matching: .any(of: [.images, .videos]))
         .onChange(of: photoItems) { _, items in
@@ -305,7 +312,7 @@ struct ThreadScreen: View {
     @ViewBuilder
     private var connectionBanner: some View {
         if state.connection != ConnectionState.connected {
-            Text(state.connection == ConnectionState.disconnected ? "Reconnecting…" : "Connecting…")
+            Text(t(state.connection == ConnectionState.disconnected ? "widget.status.reconnecting" : "widget.status.connecting"))
                 .font(style.font(12))
                 .foregroundStyle(style.colors.sub)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -324,7 +331,7 @@ struct ThreadScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if state.loadingThread && state.messages.isEmpty {
-                        Text("Loading…").font(style.font(13)).foregroundStyle(style.colors.tertiary)
+                        Text(t("widget.status.loading")).font(style.font(13)).foregroundStyle(style.colors.tertiary)
                     }
                     ForEach(state.messages, id: \.id) { m in
                         SildMessageBubble(message: m) { url in
@@ -336,7 +343,7 @@ struct ThreadScreen: View {
                         .id(m.id)
                     }
                     if !state.loadingThread && state.messages.isEmpty {
-                        Text("Send a message to start the conversation.")
+                        Text(t("widget.thread.empty"))
                             .font(style.font(13))
                             .foregroundStyle(style.colors.tertiary)
                     }
@@ -361,7 +368,7 @@ struct ThreadScreen: View {
             } catch is SizeLimitExceeded {
                 attachError = tooLargeMessage
             } catch {
-                attachError = "Couldn't attach that file. Please try again."
+                attachError = t("widget.composer.attachFailed")
             }
         }
     }
@@ -399,7 +406,7 @@ struct ThreadScreen: View {
     }
 
     private var tooLargeMessage: String {
-        "That file is too large (max \(model.uploadSizeLimitBytes / (1024 * 1024)) MB)."
+        t("widget.composer.tooLarge", ["mb": model.uploadSizeLimitBytes / (1024 * 1024)])
     }
 }
 

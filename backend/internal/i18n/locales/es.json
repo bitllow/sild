@@ -1,9 +1,17 @@
 {
+  "email.autoReply.body": "Gracias: hemos recibido tu mensaje y un miembro de nuestro equipo te responderá en breve.",
+  "email.autoReply.subject": "Re: tu mensaje",
   "push.newMessage": "Nuevo mensaje",
+  "widget.common.cancel": "Cancelar",
   "widget.composer.attach": "Adjuntar un archivo",
+  "widget.composer.attachFailed": "No se pudo adjuntar el archivo. Inténtalo de nuevo.",
+  "widget.composer.file": "Archivo",
+  "widget.composer.photoOrVideo": "Foto o vídeo",
   "widget.composer.placeholder": "Escribe un mensaje…",
   "widget.composer.remove": "Quitar",
   "widget.composer.send": "Enviar",
+  "widget.composer.tooLarge": "Ese archivo es demasiado grande (máximo {mb} MB).",
+  "widget.composer.unnamedFile": "adjunto",
   "widget.composer.uploading": "Subiendo…",
   "widget.home.cta": "Envíanos un mensaje",
   "widget.home.directChat": "Chat directo",
@@ -21,11 +29,14 @@
   "widget.notifications.enable": "Activar notificaciones de respuestas",
   "widget.status.connecting": "Conectando…",
   "widget.status.loading": "Cargando…",
+  "widget.status.reconnecting": "Reconectando…",
   "widget.thread.back": "Atrás",
   "widget.thread.closed": "Esta conversación está cerrada.",
+  "widget.thread.closedShort": "Cerrada",
   "widget.thread.directRef": "Chat directo · {ref}",
   "widget.thread.empty": "Envía un mensaje para iniciar la conversación.",
   "widget.thread.loadingOlder": "Cargando mensajes anteriores…",
   "widget.thread.scrollUp": "Desplázate hacia arriba para ver mensajes anteriores",
-  "widget.thread.support": "Chat de soporte"
+  "widget.thread.support": "Chat de soporte",
+  "widget.thread.you": "Tú"
 }

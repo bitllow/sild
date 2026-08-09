@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import io.sild.core.BrandConfig
 import io.sild.core.BrandTheme
+import io.sild.core.bundledStrings
 
 // SildColors is the resolved palette the screens read — the brand color plus the
 // light/dark surface palette, mapped from BrandConfig exactly like the web
@@ -32,6 +33,18 @@ data class SildColors(
 )
 
 val LocalSildColors = staticCompositionLocalOf<SildColors> { error("SildColors not provided") }
+
+/** Looks up one of Sild's own strings in the active language. */
+typealias SildStrings = (String, Map<String, Any>?) -> String
+
+// Defaults to the bundled English so a preview or a host embedding a screen
+// directly still renders words rather than keys.
+val LocalSildStrings = staticCompositionLocalOf<SildStrings> { { key, vars -> bundledStrings().t(key, vars) } }
+
+/** The text for [key] in the language the messenger is rendering. */
+@Composable
+internal fun t(key: String, vars: Map<String, Any>? = null): String = LocalSildStrings.current(key, vars)
+
 val LocalSildRadii = staticCompositionLocalOf { BrandTheme.radii(BrandConfig()) }
 
 /** Parse a web color string ("#rgb", "#rrggbb", or "rgba(r,g,b,a)") into a Color. */

@@ -8,13 +8,24 @@ import (
 
 // TranslationProject is a tenant's settings for one project. The platform
 // project's keys come from the repo (docs/adr/0003), so there are no key rows —
-// a tenant holds only what it changed.
+// a tenant holds only what it changed. A tenant-owned project declares its own.
 type TranslationProject struct {
 	TenantID       string `gorm:"primaryKey;size:40"`
 	Slug           string `gorm:"primaryKey;size:64"`
+	Name           string `gorm:"size:128"`
 	FallbackLocale string `gorm:"size:16;not null"`
 	AutoPublish    bool
 	UpdatedAt      time.Time
+}
+
+// TranslationKey is one string a tenant-owned project declares: the key and the
+// source text every translation of it is written against.
+type TranslationKey struct {
+	TenantID  string `gorm:"primaryKey;size:40"`
+	Project   string `gorm:"primaryKey;size:64"`
+	Key       string `gorm:"primaryKey;size:255;column:string_key"`
+	Source    string `gorm:"type:text"`
+	UpdatedAt time.Time
 }
 
 // TranslationProjectLocale is a locale the tenant has turned on for a project.

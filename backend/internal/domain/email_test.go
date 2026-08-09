@@ -401,3 +401,32 @@ func TestForwardedAutoReply(t *testing.T) {
 		t.Fatalf("auto-reply off: expected no mail, got %+v", sent)
 	}
 }
+
+// The sender of an inbound email is an address and nothing more, so the
+// acknowledgement is written in the language the tenant falls back to.
+func TestAutoReplyIsWrittenInTheTenantsFallbackLanguage(t *testing.T) {
+	h := testutil.New(t)
+	tenantID, addr := seedForwardTenant(t, h, "eml_lv", true, true)
+	ctx := context.Background()
+	if err := h.Svc.SaveTranslationProject(ctx, tenantID, "sild", "", "lv", false, []string{"en", "lv"}); err != nil {
+		t.Fatalf("set fallback language: %v", err)
+	}
+	if _, err := h.Svc.PublishTranslations(ctx, tenantID, "sild", ""); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if _, err := h.Svc.HandleForwarded(ctx, mail.InboundEmail{
+		Recipient: addr, From: "cust@x.com", TextBody: "hello",
+	}); err != nil {
+		t.Fatalf("forwarded: %v", err)
+	}
+	sent := h.Mailer.Messages()
+	if len(sent) != 1 {
+		t.Fatalf("expected one auto-reply, got %d", len(sent))
+	}
+	if !strings.Contains(sent[0].Body, "Paldies") {
+		t.Fatalf("body = %q, want the Latvian acknowledgement", sent[0].Body)
+	}
+	if sent[0].Subject != "Re: jūsu ziņojums" {
+		t.Fatalf("subject = %q, want the Latvian one", sent[0].Subject)
+	}
+}

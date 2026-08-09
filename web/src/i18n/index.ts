@@ -128,7 +128,9 @@ export class I18n {
     this.appId = opts.appId || "";
     this.source = opts.source;
     const named = opts.locale ? normalize(opts.locale) : "";
-    this.explicit = !!named && LOCALES.includes(named);
+    // Honoured even when Sild ships no bundled text for it: the tenant may have
+    // added the language, and its published bundle is what renders.
+    this.explicit = !!named;
     this.locale = (this.explicit ? named : negotiate(devicePrefs(), LOCALES)) || SOURCE_LOCALE;
     this.strings = {};
     this.held = readHeld(this.appId, this.project);
@@ -208,7 +210,9 @@ export class I18n {
   // Which locales the tenant offers is unknowable until the manifest arrives, so a
   // guess negotiated against the repo catalog is re-negotiated against the offering.
   private adopt(manifest: TranslationManifest): void {
-    const offered = Object.keys(manifest.locales || {}).filter((l) => LOCALES.includes(l));
+    // Whatever the tenant publishes is on offer, including a language Sild ships
+    // no bundled text for — its bundle carries every key.
+    const offered = Object.keys(manifest.locales || {});
     if (this.explicit || !offered.length || offered.includes(this.locale)) return;
     const locale = negotiate(devicePrefs(), offered) || normalize(manifest.fallback_locale || "");
     if (!offered.includes(locale)) return;

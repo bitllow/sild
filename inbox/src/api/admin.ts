@@ -320,9 +320,14 @@ export interface ApiTranslationProject {
   platform: boolean;
   available_locales: string[];
   current_version: number | null;
+  /** How many keys the project declares, and the share of them translated per locale. */
+  keys: number;
+  completion: Record<string, number>;
+  namespaces: string[] | null;
 }
 
 export interface TranslationProjectSettings {
+  name?: string;
   fallback_locale: string;
   auto_publish: boolean;
   locales: string[];
@@ -334,6 +339,8 @@ export type TranslationStateFilter = "" | "custom" | "missing" | "needs_review";
 
 export interface ApiTranslationKey {
   key: string;
+  /** The key's grouping prefix, derived from everything before its first dot. */
+  namespace: string;
   /** English source text. */
   source: string;
   /** Draft text for the requested locale: the override if one exists, else the default. */
@@ -344,6 +351,7 @@ export interface ApiTranslationKey {
 export interface TranslationKeyParams {
   locale: string;
   state?: TranslationStateFilter;
+  namespace?: string;
   q?: string;
   limit?: number;
   cursor?: string | null;
@@ -494,6 +502,19 @@ export const adminApi = {
         `/translations/projects${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
       )
     ),
+  createTranslationProject: (id: string, name: string) =>
+    api.post<ApiTranslationProject>("/translations/projects", { id, name }),
+  deleteTranslationProject: (project: string) =>
+    api.del<void>(`/translations/projects/${encodeURIComponent(project)}`),
+
+  // A key is the tenant's declaration; the values under it are its translations.
+  declareTranslationKey: (project: string, key: string, source: string) =>
+    api.post<void>(`/translations/projects/${encodeURIComponent(project)}/declarations`, { key, source }),
+  undeclareTranslationKey: (project: string, key: string) =>
+    api.del<void>(
+      `/translations/projects/${encodeURIComponent(project)}/declarations/${encodeURIComponent(key)}`
+    ),
+
   // Replaces the project's settings whole, so every field is sent every time.
   saveTranslationProject: (project: string, settings: TranslationProjectSettings) =>
     api.put<void>(`/translations/projects/${encodeURIComponent(project)}`, settings as unknown as Record<string, unknown>),
@@ -502,6 +523,7 @@ export const adminApi = {
   listTranslationKeys: (project: string, params: TranslationKeyParams) => {
     const q = new URLSearchParams({ locale: params.locale });
     if (params.state) q.set("state", params.state);
+    if (params.namespace) q.set("namespace", params.namespace);
     if (params.q) q.set("q", params.q);
     if (params.limit) q.set("limit", String(params.limit));
     if (params.cursor) q.set("cursor", params.cursor);

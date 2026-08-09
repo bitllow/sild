@@ -75,7 +75,7 @@ fun SildHeader(
     ) {
         if (onBack != null) {
             IconButton(onClick = onBack) {
-                Icon(SildIcons.Back, contentDescription = "Back", tint = colors.onBrand)
+                Icon(SildIcons.Back, contentDescription = t("widget.thread.back"), tint = colors.onBrand)
             }
         }
         if (avatarName != null) SildAvatar(avatarName, size = 36)
@@ -97,7 +97,7 @@ fun SildSoundToggle(on: Boolean, onToggle: () -> Unit) {
     IconButton(onClick = onToggle) {
         Icon(
             if (on) SildIcons.Speaker else SildIcons.SpeakerOff,
-            contentDescription = if (on) "Turn off reply notifications" else "Turn on reply notifications",
+            contentDescription = t(if (on) "widget.notifications.disable" else "widget.notifications.enable"),
             tint = colors.onBrand,
         )
     }
@@ -112,7 +112,7 @@ fun SildHeaderControls(soundOn: Boolean, onToggleSound: () -> Unit, onClose: () 
     Row(verticalAlignment = Alignment.CenterVertically) {
         SildSoundToggle(on = soundOn, onToggle = onToggleSound)
         IconButton(onClick = onClose) {
-            Icon(SildIcons.Close, contentDescription = "Close", tint = colors.onBrand)
+            Icon(SildIcons.Close, contentDescription = t("widget.launcher.close"), tint = colors.onBrand)
         }
     }
 }
@@ -137,7 +137,7 @@ fun SildMessageBubble(message: Message, onOpenUrl: (String) -> Unit) {
     ) {
         // Meta row above the bubble (web parity): author + time. Own messages are
         // labelled "You"; incoming show the sender's name. Time sits here, not below.
-        val label = if (out) "You" else message.author
+        val label = if (out) t("widget.thread.you") else message.author
         if (label != null || message.time.isNotEmpty()) {
             Row(
                 Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
@@ -188,7 +188,7 @@ private fun FileChip(att: Attachment, onOpenUrl: (String) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Icon(SildIcons.Clip, contentDescription = null, tint = colors.tertiary, modifier = Modifier.size(16.dp))
-        Text(att.filename.ifEmpty { "attachment" }, color = colors.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(att.filename.ifEmpty { t("widget.composer.unnamedFile") }, color = colors.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -239,14 +239,14 @@ fun SildComposer(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text(att.filename.ifEmpty { "attachment" }, color = colors.sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
+                            Text(att.filename.ifEmpty { t("widget.composer.unnamedFile") }, color = colors.sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
                             Box(Modifier.size(18.dp).clip(CircleShape).clickable { onRemove(i) }, contentAlignment = Alignment.Center) {
-                                Icon(SildIcons.Close, contentDescription = "Remove attachment", tint = colors.tertiary, modifier = Modifier.size(13.dp))
+                                Icon(SildIcons.Close, contentDescription = t("widget.composer.remove"), tint = colors.tertiary, modifier = Modifier.size(13.dp))
                             }
                         }
                     }
                     if (uploading > 0) {
-                        Text("Uploading…", color = colors.tertiary, fontSize = 12.sp)
+                        Text(t("widget.composer.uploading"), color = colors.tertiary, fontSize = 12.sp)
                     }
                 }
             }
@@ -262,10 +262,10 @@ fun SildComposer(
                     Modifier.size(34.dp).clip(RoundedCornerShape(radii.btn.dp)).clickable(enabled = enabled, onClick = onAttach),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(SildIcons.Clip, contentDescription = "Attach a file", tint = colors.tertiary, modifier = Modifier.size(20.dp))
+                    Icon(SildIcons.Clip, contentDescription = t("widget.composer.attach"), tint = colors.tertiary, modifier = Modifier.size(20.dp))
                 }
                 Box(Modifier.weight(1f).padding(vertical = 6.dp), contentAlignment = Alignment.CenterStart) {
-                    if (text.isEmpty()) Text("Message…", color = colors.tertiary, fontSize = 14.sp)
+                    if (text.isEmpty()) Text(t("widget.composer.placeholder"), color = colors.tertiary, fontSize = 14.sp)
                     BasicTextField(
                         value = text,
                         onValueChange = { text = it },
@@ -293,7 +293,7 @@ fun SildComposer(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(SildIcons.Send, contentDescription = "Send", tint = colors.onBrand, modifier = Modifier.size(18.dp))
+                    Icon(SildIcons.Send, contentDescription = t("widget.composer.send"), tint = colors.onBrand, modifier = Modifier.size(18.dp))
                 }
             }
         }

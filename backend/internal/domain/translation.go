@@ -34,14 +34,20 @@ type TranslationProjectView struct {
 	Locales          []string
 	AvailableLocales []string
 	CurrentVersion   *int
+	// Keys is how many strings the project declares, and Completion how many of
+	// them carry text per locale — what says whether a market is ready to launch.
+	Keys       int
+	Completion map[string]int
+	Namespaces []string
 }
 
 // TranslationKeyView is one key as the editor sees it.
 type TranslationKeyView struct {
-	Key    string
-	Source string
-	Value  string
-	State  string
+	Key       string
+	Namespace string
+	Source    string
+	Value     string
+	State     string
 }
 
 // TranslationManifest is locale → published version, and what a client polls.
@@ -77,28 +83,70 @@ func sourceHash(s string) string {
 }
 
 // TranslationProject returns the project's settings, defaulted for a tenant that
-// has never changed them.
+// has never changed them. The platform project exists in every tenant without a
+// row; a tenant-owned one has to have been created.
 func (s *Service) TranslationProject(ctx context.Context, tenantID, project string) (TranslationProjectView, error) {
-	if project != i18n.PlatformProject {
-		return TranslationProjectView{}, ErrNotFound
-	}
-	shipped := i18n.Platform().Locales()
-	v := TranslationProjectView{
-		Slug:             i18n.PlatformProject,
-		Name:             "Sild",
-		Platform:         true,
-		FallbackLocale:   i18n.SourceLocale,
-		Locales:          shipped,
-		AvailableLocales: shipped,
-	}
-
 	p, err := s.store.Translations().GetProject(ctx, tenantID, project)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return TranslationProjectView{}, err
 	}
+	if p == nil && project != i18n.PlatformProject {
+		return TranslationProjectView{}, ErrNotFound
+	}
+	return s.projectView(ctx, tenantID, project, p)
+}
+
+// ListTranslationProjects returns the platform project and every project the
+// tenant created, platform first.
+func (s *Service) ListTranslationProjects(ctx context.Context, tenantID string) ([]TranslationProjectView, error) {
+	rows, err := s.store.Translations().ListProjects(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	byslug := make(map[string]*models.TranslationProject, len(rows))
+	for i := range rows {
+		byslug[rows[i].Slug] = &rows[i]
+	}
+	platform, err := s.projectView(ctx, tenantID, i18n.PlatformProject, byslug[i18n.PlatformProject])
+	if err != nil {
+		return nil, err
+	}
+	out := []TranslationProjectView{platform}
+	for i := range rows {
+		if rows[i].Slug == i18n.PlatformProject {
+			continue
+		}
+		v, err := s.projectView(ctx, tenantID, rows[i].Slug, &rows[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// projectView fills in what the settings row does not carry. p is nil for a
+// platform project the tenant has never configured.
+func (s *Service) projectView(ctx context.Context, tenantID, project string, p *models.TranslationProject) (TranslationProjectView, error) {
+	platform := project == i18n.PlatformProject
+	v := TranslationProjectView{
+		Slug:             project,
+		Platform:         platform,
+		FallbackLocale:   i18n.SourceLocale,
+		AvailableLocales: i18n.Platform().Locales(),
+	}
+	if platform {
+		v.Name = "Sild"
+		v.Locales = i18n.Platform().Locales()
+	} else {
+		v.Locales = []string{i18n.SourceLocale}
+	}
 	if p != nil {
 		v.FallbackLocale = p.FallbackLocale
 		v.AutoPublish = p.AutoPublish
+		if p.Name != "" {
+			v.Name = p.Name
+		}
 		locales, err := s.store.Translations().ProjectLocales(ctx, tenantID, project)
 		if err != nil {
 			return TranslationProjectView{}, err
@@ -116,15 +164,128 @@ func (s *Service) TranslationProject(ctx context.Context, tenantID, project stri
 		version := rel.Version
 		v.CurrentVersion = &version
 	}
+
+	cat, err := s.catalogFor(ctx, tenantID, project)
+	if err != nil {
+		return TranslationProjectView{}, err
+	}
+	v.Keys = len(cat.Keys())
+	v.Namespaces = cat.Namespaces()
+	v.Completion, err = s.completion(ctx, tenantID, project, cat, v.Locales)
+	if err != nil {
+		return TranslationProjectView{}, err
+	}
 	return v, nil
+}
+
+// completion is the share of keys carrying text in each enabled locale. A locale
+// Sild ships is complete by construction, so only what the tenant wrote is counted.
+func (s *Service) completion(ctx context.Context, tenantID, project string, cat *i18n.Catalog, locales []string) (map[string]int, error) {
+	total := len(cat.Keys())
+	out := make(map[string]int, len(locales))
+	if total == 0 {
+		for _, l := range locales {
+			out[l] = 100
+		}
+		return out, nil
+	}
+	counts, err := s.store.Translations().TranslatedCounts(ctx, tenantID, project)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range locales {
+		if slices.Contains(cat.Locales(), l) {
+			out[l] = 100
+			continue
+		}
+		out[l] = min(100, counts[l]*100/total)
+	}
+	return out, nil
+}
+
+// catalogFor is the project's declared strings: the repo's for the platform
+// project, the tenant's key rows for one of its own. Everything downstream —
+// resolution, staleness, bundles — is then the same code for both.
+func (s *Service) catalogFor(ctx context.Context, tenantID, project string) (*i18n.Catalog, error) {
+	if project == i18n.PlatformProject {
+		return i18n.Platform(), nil
+	}
+	keys, err := s.store.Translations().Keys(ctx, tenantID, project)
+	if err != nil {
+		return nil, err
+	}
+	sources := make(map[string]string, len(keys))
+	for _, k := range keys {
+		sources[k.Key] = k.Source
+	}
+	return i18n.NewCatalog(sources), nil
+}
+
+// CreateTranslationProject declares a project for a tenant's own strings. It
+// starts with the source language on and nothing declared.
+func (s *Service) CreateTranslationProject(ctx context.Context, tenantID, slug, name string) (TranslationProjectView, error) {
+	slug = strings.ToLower(strings.TrimSpace(slug))
+	if !validProjectSlug(slug) {
+		return TranslationProjectView{}, invalid("a project id is 2-64 characters of a-z, 0-9 and dashes")
+	}
+	if slug == i18n.PlatformProject {
+		return TranslationProjectView{}, invalid("that project id is reserved")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return TranslationProjectView{}, invalid("name is required")
+	}
+	existing, err := s.store.Translations().GetProject(ctx, tenantID, slug)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return TranslationProjectView{}, err
+	}
+	if existing != nil {
+		return TranslationProjectView{}, invalid("a project with that id already exists")
+	}
+	p := &models.TranslationProject{
+		TenantID: tenantID, Slug: slug, Name: name,
+		FallbackLocale: i18n.SourceLocale, UpdatedAt: s.now(),
+	}
+	if err := s.store.Translations().SaveProject(ctx, p, []string{i18n.SourceLocale}); err != nil {
+		return TranslationProjectView{}, err
+	}
+	return s.projectView(ctx, tenantID, slug, p)
+}
+
+// DeleteTranslationProject removes a tenant's project and everything in it. The
+// platform project is not a tenant's to remove.
+func (s *Service) DeleteTranslationProject(ctx context.Context, tenantID, project string) error {
+	if project == i18n.PlatformProject {
+		return invalid("the Sild project cannot be deleted")
+	}
+	if _, err := s.TranslationProject(ctx, tenantID, project); err != nil {
+		return err
+	}
+	return s.store.Translations().DeleteProject(ctx, tenantID, project)
+}
+
+// validProjectSlug keeps a project id usable in a URL path segment and in an
+// SDK's generated accessors.
+func validProjectSlug(slug string) bool {
+	if len(slug) < 2 || len(slug) > 64 {
+		return false
+	}
+	for _, r := range slug {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // SaveTranslationProject replaces the project's settings and enabled locales.
 // Locales are free-form BCP-47 tags, so a tenant may add a language Sild does
-// not ship.
-func (s *Service) SaveTranslationProject(ctx context.Context, tenantID, project, fallback string, autoPublish bool, locales []string) error {
-	if project != i18n.PlatformProject {
-		return ErrNotFound
+// not ship. The platform project's name is Sild's, so a name is ignored there.
+func (s *Service) SaveTranslationProject(ctx context.Context, tenantID, project, name, fallback string, autoPublish bool, locales []string) error {
+	cur, err := s.TranslationProject(ctx, tenantID, project)
+	if err != nil {
+		return err
 	}
 	fallback = i18n.Normalize(fallback)
 	if fallback == "" {
@@ -145,9 +306,18 @@ func (s *Service) SaveTranslationProject(ctx context.Context, tenantID, project,
 	}
 	slices.Sort(clean)
 
+	// The platform project's name is not the tenant's to set; its own is.
+	if !cur.Platform {
+		if n := strings.TrimSpace(name); n != "" {
+			cur.Name = n
+		}
+	} else {
+		cur.Name = ""
+	}
 	p := &models.TranslationProject{
 		TenantID:       tenantID,
 		Slug:           project,
+		Name:           cur.Name,
 		FallbackLocale: fallback,
 		AutoPublish:    autoPublish,
 		UpdatedAt:      s.now(),
@@ -156,7 +326,7 @@ func (s *Service) SaveTranslationProject(ctx context.Context, tenantID, project,
 }
 
 // TranslationKeys pages the project's keys as they stand in one locale.
-func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale, state, q string, pp store.PageParams) (store.Page[TranslationKeyView], error) {
+func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale, state, namespace, q string, pp store.PageParams) (store.Page[TranslationKeyView], error) {
 	var empty store.Page[TranslationKeyView]
 	proj, err := s.TranslationProject(ctx, tenantID, project)
 	if err != nil {
@@ -176,7 +346,10 @@ func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale
 		byKey[o.Key] = o
 	}
 
-	cat := i18n.Platform()
+	cat, err := s.catalogFor(ctx, tenantID, project)
+	if err != nil {
+		return empty, err
+	}
 	// The whole chain, so what the editor shows is what a bundle would publish.
 	// The requested locale's rows are already in hand.
 	ov, err := s.overridesFor(ctx, tenantID, project, proj.FallbackLocale, i18n.SourceLocale)
@@ -194,16 +367,20 @@ func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale
 	for _, k := range keys {
 		source := cat.Source(k)
 		v := TranslationKeyView{
-			Key:    k,
-			Source: source,
-			Value:  cat.Resolve(ov, locale, proj.FallbackLocale, k),
-			State:  TranslationDefault,
+			Key:       k,
+			Namespace: i18n.Namespace(k),
+			Source:    source,
+			Value:     cat.Resolve(ov, locale, proj.FallbackLocale, k),
+			State:     TranslationDefault,
 		}
 		if o, ok := byKey[k]; ok {
 			v.State = TranslationCustom
 			if o.SourceHash != sourceHash(source) {
 				v.State = TranslationNeedsReview
 			}
+		}
+		if namespace != "" && v.Namespace != namespace {
+			continue
 		}
 		if !matchesTranslationFilter(v, cat, locale, state, q) {
 			continue
@@ -246,7 +423,10 @@ func (s *Service) PutTranslationOverride(ctx context.Context, tenantID, project,
 	if !slices.Contains(proj.Locales, locale) {
 		return invalid("that language is not enabled for this project")
 	}
-	cat := i18n.Platform()
+	cat, err := s.catalogFor(ctx, tenantID, project)
+	if err != nil {
+		return err
+	}
 	if !cat.Declared(key) {
 		return invalid("unknown key")
 	}
@@ -274,6 +454,56 @@ func (s *Service) DeleteTranslationOverride(ctx context.Context, tenantID, proje
 		return err
 	}
 	return s.autoPublish(ctx, tenantID, proj, "")
+}
+
+// DeclareTranslationKey adds a key to a tenant's own project, or rewords the
+// source of one already there — which is what flags its translations for review.
+func (s *Service) DeclareTranslationKey(ctx context.Context, tenantID, project, key, source string) error {
+	proj, err := s.ownProject(ctx, tenantID, project)
+	if err != nil {
+		return err
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || len(key) > 255 || strings.ContainsAny(key, " \t\r\n") {
+		return invalid("a key is up to 255 characters and contains no spaces")
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return invalid("source is required")
+	}
+	k := &models.TranslationKey{
+		TenantID: tenantID, Project: project, Key: key,
+		Source: source, UpdatedAt: s.now(),
+	}
+	if err := s.store.Translations().PutKey(ctx, k); err != nil {
+		return err
+	}
+	return s.autoPublish(ctx, tenantID, proj, "")
+}
+
+// UndeclareTranslationKey removes a key and every translation of it.
+func (s *Service) UndeclareTranslationKey(ctx context.Context, tenantID, project, key string) error {
+	proj, err := s.ownProject(ctx, tenantID, project)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Translations().DeleteKey(ctx, tenantID, project, key); err != nil {
+		return err
+	}
+	return s.autoPublish(ctx, tenantID, proj, "")
+}
+
+// ownProject loads a project the tenant declares the keys of. The platform
+// project's are the repo's (docs/adr/0003), so it is never one of these.
+func (s *Service) ownProject(ctx context.Context, tenantID, project string) (TranslationProjectView, error) {
+	proj, err := s.TranslationProject(ctx, tenantID, project)
+	if err != nil {
+		return proj, err
+	}
+	if proj.Platform {
+		return proj, invalid("Sild's own keys are declared in its releases, not here")
+	}
+	return proj, nil
 }
 
 func (s *Service) autoPublish(ctx context.Context, tenantID string, proj TranslationProjectView, by string) error {
@@ -310,7 +540,10 @@ func (s *Service) publish(ctx context.Context, tenantID string, proj Translation
 		ov[o.Locale][o.Key] = o.Value
 	}
 
-	cat := i18n.Platform()
+	cat, err := s.catalogFor(ctx, tenantID, project)
+	if err != nil {
+		return TranslationReleaseView{}, err
+	}
 	version := nextVersion(proj.CurrentVersion)
 	bundles := make([]models.TranslationBundle, 0, len(proj.Locales))
 	for _, locale := range proj.Locales {

@@ -10,18 +10,20 @@ public extension SildConfig {
     static func make(
         baseUrl: String,
         token: @escaping () async throws -> String,
-        userId: String? = nil
+        userId: String? = nil,
+        locale: String? = nil
     ) -> SildConfig {
-        make(baseUrl: baseUrl, tokenProvider: ClosureTokenProvider(token), userId: userId)
+        make(baseUrl: baseUrl, tokenProvider: ClosureTokenProvider(token), userId: userId, locale: locale)
     }
 
     /// As above, for a host that already has a `TokenProvider`.
     static func make(
         baseUrl: String,
         tokenProvider: TokenProvider,
-        userId: String? = nil
+        userId: String? = nil,
+        locale: String? = nil
     ) -> SildConfig {
-        InteropKt.sildConfig(baseUrl: baseUrl, tokenProvider: tokenProvider, userId: userId)
+        InteropKt.sildConfig(baseUrl: baseUrl, tokenProvider: tokenProvider, userId: userId, locale: locale)
     }
 }
 
@@ -37,12 +39,13 @@ public extension SildMessenger {
         baseURL: String,
         token: @escaping () async throws -> String,
         userId: String? = nil,
+        locale: String? = nil,
         target: SildTarget = .list,
         onChime: @escaping () -> Void = {},
         onClose: @escaping () -> Void = {}
     ) {
         self.init(
-            config: .make(baseUrl: baseURL, token: token, userId: userId),
+            config: .make(baseUrl: baseURL, token: token, userId: userId, locale: locale),
             target: target,
             onChime: onChime,
             onClose: onClose
