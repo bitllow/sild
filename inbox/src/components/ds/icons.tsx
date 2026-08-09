@@ -44,6 +44,15 @@ export const SettingsIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const TranslateIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 5h9M8.5 5v2c0 3.5-2 6.5-5 8" />
+    <path d="M6 11c1.5 2.5 3.5 4.2 6 5" />
+    <path d="m12 20 4.5-10 4.5 10" />
+    <path d="M13.8 17h5.4" />
+  </Icon>
+);
+
 export const SearchIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="11" cy="11" r="8" />

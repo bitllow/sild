@@ -344,6 +344,35 @@ func (r *contactRepo) SetPushOptOut(ctx context.Context, tenantID, externalUserI
 	}).Error
 }
 
+func (r *contactRepo) SetLocale(ctx context.Context, tenantID, externalUserID, locale string) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "external_user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"locale", "updated_at"}),
+	}).Create(&models.Contact{
+		TenantID: tenantID, ExternalUserID: externalUserID,
+		Locale: locale, UpdatedAt: time.Now(),
+	}).Error
+}
+
+func (r *contactRepo) Locales(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(externalUserIDs) == 0 {
+		return out, nil
+	}
+	var rows []models.Contact
+	err := r.db.WithContext(ctx).
+		Select("external_user_id", "locale").
+		Where("tenant_id = ? AND locale <> '' AND external_user_id IN ?", tenantID, externalUserIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		out[rows[i].ExternalUserID] = rows[i].Locale
+	}
+	return out, nil
+}
+
 func (r *contactRepo) OptedOut(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if len(externalUserIDs) == 0 {

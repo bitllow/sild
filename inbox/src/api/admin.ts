@@ -307,6 +307,60 @@ export interface ApiBrands {
   active_brand_id: string;
 }
 
+// ── Translations ───────────────────────────────────────────────────────────
+// A project's strings in one locale, plus the releases that publish them.
+export interface ApiTranslationProject {
+  id: string;
+  slug: string;
+  name: string;
+  fallback_locale: string;
+  auto_publish: boolean;
+  /** Locales the tenant has turned on, a subset of available_locales. */
+  locales: string[];
+  platform: boolean;
+  available_locales: string[];
+  current_version: number | null;
+}
+
+export interface TranslationProjectSettings {
+  fallback_locale: string;
+  auto_publish: boolean;
+  locales: string[];
+}
+
+export type ApiTranslationState = "default" | "custom" | "needs_review";
+/** The state filter's values — `missing` is a query, never a returned state. */
+export type TranslationStateFilter = "" | "custom" | "missing" | "needs_review";
+
+export interface ApiTranslationKey {
+  key: string;
+  /** English source text. */
+  source: string;
+  /** Draft text for the requested locale: the override if one exists, else the default. */
+  value: string;
+  state: ApiTranslationState;
+}
+
+export interface TranslationKeyParams {
+  locale: string;
+  state?: TranslationStateFilter;
+  q?: string;
+  limit?: number;
+  cursor?: string | null;
+}
+
+export interface ApiTranslationRelease {
+  version: number;
+  published_at: string;
+  published_by?: string;
+}
+
+export interface ApiTranslationPublished {
+  version: number;
+  published_at: string;
+  locales: string[];
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 export const adminApi = {
   loginPassword: (email: string, password: string) =>
@@ -432,6 +486,49 @@ export const adminApi = {
     api.put<void>("/channels/push/credential", { credential }),
   deletePushCredential: () => api.del<void>("/channels/push/credential"),
   testPushSend: (token: string) => api.post<void>("/channels/push/test", { token }),
+
+  // ── Translations ──────────────────────────────────────────────────────
+  listTranslationProjects: () =>
+    collectAll<ApiTranslationProject>((cursor) =>
+      api.get<ApiPage<ApiTranslationProject>>(
+        `/translations/projects${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+      )
+    ),
+  // Replaces the project's settings whole, so every field is sent every time.
+  saveTranslationProject: (project: string, settings: TranslationProjectSettings) =>
+    api.put<void>(`/translations/projects/${encodeURIComponent(project)}`, settings as unknown as Record<string, unknown>),
+
+  // Filtering and search are server-side, on the same cursor as every other list.
+  listTranslationKeys: (project: string, params: TranslationKeyParams) => {
+    const q = new URLSearchParams({ locale: params.locale });
+    if (params.state) q.set("state", params.state);
+    if (params.q) q.set("q", params.q);
+    if (params.limit) q.set("limit", String(params.limit));
+    if (params.cursor) q.set("cursor", params.cursor);
+    return api.get<ApiPage<ApiTranslationKey>>(
+      `/translations/projects/${encodeURIComponent(project)}/keys?${q.toString()}`
+    );
+  },
+  setTranslationValue: (project: string, key: string, locale: string, value: string) =>
+    api.put<void>(
+      `/translations/projects/${encodeURIComponent(project)}/keys/${encodeURIComponent(key)}`,
+      { locale, value }
+    ),
+  resetTranslationValue: (project: string, key: string, locale: string) =>
+    api.del<void>(
+      `/translations/projects/${encodeURIComponent(project)}/keys/${encodeURIComponent(key)}?locale=${encodeURIComponent(locale)}`
+    ),
+
+  publishTranslationRelease: (project: string) =>
+    api.post<ApiTranslationPublished>(`/translations/projects/${encodeURIComponent(project)}/releases`),
+  listTranslationReleases: (project: string, cursor?: string | null) =>
+    api.get<ApiPage<ApiTranslationRelease>>(
+      `/translations/projects/${encodeURIComponent(project)}/releases${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  rollbackTranslationRelease: (project: string, version: number) =>
+    api.post<ApiTranslationPublished>(
+      `/translations/projects/${encodeURIComponent(project)}/releases/${version}/rollback`
+    ),
 
   // ── Settings: appearance (§8) — brands saved as one staged set ─────────
   getBrands: () => api.getVersioned<ApiBrands>("/brands"),

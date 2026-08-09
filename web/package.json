@@ -4,8 +4,9 @@
   "private": true,
   "description": "Sild web drop-in widget (Phase 3) — self-contained script-tag bundle (Preact + shadow DOM) over a framework-agnostic core.",
   "scripts": {
-    "build": "node build.mjs",
-    "watch": "node build.mjs --watch",
+    "i18n": "node ../scripts/gen-i18n.mjs",
+    "build": "npm run i18n && node build.mjs",
+    "watch": "npm run i18n && node build.mjs --watch",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

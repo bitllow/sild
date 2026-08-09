@@ -1,12 +1,24 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { BrandConfig, PendingAttachment, WidgetConversation, WidgetState } from "../core/types";
 import type { WidgetClient } from "../core/client";
+import type { I18n, Translate } from "../i18n";
 import { LAUNCHER_ICON, parseTopics, type WidgetMode } from "./theme";
 
-function useClientState(client: WidgetClient): WidgetState {
+// Repaint on every notification from the source — new client state, or a
+// published bundle replacing the strings currently on screen.
+function useSubscribed(source: { subscribe(fn: () => void): () => void }): void {
   const [, setTick] = useState(0);
-  useEffect(() => client.subscribe(() => setTick((t) => t + 1)), [client]);
+  useEffect(() => source.subscribe(() => setTick((t) => t + 1)), [source]);
+}
+
+function useClientState(client: WidgetClient): WidgetState {
+  useSubscribed(client);
   return client.state;
+}
+
+function useTranslate(i18n: I18n): Translate {
+  useSubscribed(i18n);
+  return i18n.t;
 }
 
 // ── icons ──────────────────────────────────────────────────────────────────
@@ -76,13 +88,14 @@ const SpeakerOffIcon = ({ s = 20 }: { s?: number }) => (
 // SoundToggle is the shared reply-notification control rendered in both widget
 // headers (home + thread); muted swaps to the slashed-speaker glyph. Icon stays
 // white — the brand-colored header already carries the emphasis.
-function SoundToggle({ on, onToggle, size = 20 }: { on: boolean; onToggle: () => void; size?: number }) {
+function SoundToggle({ on, onToggle, t, size = 20 }: { on: boolean; onToggle: () => void; t: Translate; size?: number }) {
+  const label = t(on ? "widget.notifications.disable" : "widget.notifications.enable");
   return (
     <button
       class="wsound"
       aria-pressed={on}
-      aria-label={on ? "Turn off reply notifications" : "Turn on reply notifications"}
-      title={on ? "Turn off reply notifications" : "Turn on reply notifications"}
+      aria-label={label}
+      title={label}
       onClick={onToggle}
     >
       {on ? <SpeakerIcon s={size} /> : <SpeakerOffIcon s={size} />}
@@ -114,6 +127,7 @@ const isInlineImage = (a: { disposition: string; mimeType: string; url?: string 
 export interface AppProps {
   client: WidgetClient;
   config: BrandConfig;
+  i18n: I18n;
   /** Conversation to open directly (guest, single-thread mode). */
   conversationId?: string;
   /** Brand name — the header fallback shown when no logo is set. */
@@ -128,21 +142,47 @@ export interface AppProps {
   command?: { seq: number; conversationId?: string };
 }
 
-export function App({ client, config, conversationId, name, mode = "live", previewView = "home", command }: AppProps) {
+export function App({ client, config, i18n, conversationId, name, mode = "live", previewView = "home", command }: AppProps) {
   const preview = mode === "preview";
   const [open, setOpen] = useState(preview);
   const started = useRef(false);
   const state = useClientState(client);
+  const t = useTranslate(i18n);
   const [draft, setDraft] = useState(false);
+  const recorded = useRef("");
+
+  // Only the locale the runtime settled on is worth reporting — an earlier guess
+  // may have been superseded by the tenant's offering.
+  const recordLocale = () => {
+    if (i18n.locale === recorded.current) return;
+    recorded.current = i18n.locale;
+    client.recordLocale(i18n.locale);
+  };
+
+  // Published strings are fetched once the client holds a token, off the boot path.
+  const start = (id?: string) => {
+    started.current = true;
+    void Promise.resolve(client.start(id))
+      .then(() => i18n.refresh())
+      .then(recordLocale);
+  };
+
+  // A tab left open for hours would never see a publish otherwise.
+  useEffect(() => {
+    if (preview || typeof document === "undefined") return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !started.current) return;
+      void i18n.refreshIfStale().then(recordLocale);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [i18n, client, preview]);
 
   const toggle = () => {
     if (preview) return; // in preview the panel + launcher are both always shown
     const next = !open;
     setOpen(next);
-    if (next && !started.current) {
-      started.current = true;
-      void client.start(conversationId);
-    }
+    if (next && !started.current) start(conversationId);
   };
 
   // Host-driven open (e.g. the "Your driver is on the way" card): open the panel
@@ -151,8 +191,7 @@ export function App({ client, config, conversationId, name, mode = "live", previ
     if (!command || preview) return;
     setOpen(true);
     if (!started.current) {
-      started.current = true;
-      void client.start(command.conversationId);
+      start(command.conversationId);
     } else if (command.conversationId) {
       // The socket connected earlier, before this conversation existed, so its
       // server-side subscriptions don't cover conv:<id> yet — reconnect to
@@ -172,14 +211,14 @@ export function App({ client, config, conversationId, name, mode = "live", previ
   return (
     <>
       {panelOpen && (
-        <div class="panel" role="dialog" aria-label="Support chat">
+        <div class="panel" role="dialog" aria-label={t("widget.thread.support")}>
           {/* One panel-level control cluster, pinned top-right and shared across
               every screen (home / support thread / peer thread) so the sound +
               close icons never shift position between views. */}
           <div class="wpanel-controls">
-            <SoundToggle on={state.soundOn} onToggle={() => client.toggleSound()} size={20} />
+            <SoundToggle on={state.soundOn} onToggle={() => client.toggleSound()} t={t} size={20} />
             {!preview && (
-              <button class="wpanel-close" aria-label="Close chat" onClick={() => setOpen(false)}>
+              <button class="wpanel-close" aria-label={t("widget.launcher.close")} onClick={() => setOpen(false)}>
                 <CloseIcon />
               </button>
             )}
@@ -188,6 +227,7 @@ export function App({ client, config, conversationId, name, mode = "live", previ
             <Thread
               client={client}
               config={config}
+              t={t}
               state={state}
               activeConv={activeConv}
               preview={preview}
@@ -200,6 +240,7 @@ export function App({ client, config, conversationId, name, mode = "live", previ
             <Home
               client={client}
               config={config}
+              t={t}
               name={name}
               state={state}
               preview={preview}
@@ -209,7 +250,7 @@ export function App({ client, config, conversationId, name, mode = "live", previ
           {config.poweredBy && <div class="powered">Powered by Sild</div>}
         </div>
       )}
-      <button class={`launcher${open && !preview ? " open" : ""}`} aria-label="Chat with us" onClick={toggle}>
+      <button class={`launcher${open && !preview ? " open" : ""}`} aria-label={t("widget.home.title")} onClick={toggle}>
         {open && !preview ? <CloseIcon /> : <LauncherGlyph config={config} size={iconSize} />}
       </button>
     </>
@@ -232,6 +273,7 @@ function TeamHeader() {
 function Home({
   client,
   config,
+  t,
   name,
   state,
   preview,
@@ -239,13 +281,14 @@ function Home({
 }: {
   client: WidgetClient;
   config: BrandConfig;
+  t: Translate;
   name?: string;
   state: WidgetState;
   preview: boolean;
   onNew: () => void;
 }) {
   const topics = parseTopics(config.topics);
-  const agentName = state.agentName || "Support";
+  const agentName = state.agentName || t("widget.home.support");
   const agentInitial = (agentName.trim()[0] || "S").toUpperCase();
   const startTopic = () => {
     if (preview) return;
@@ -257,7 +300,7 @@ function Home({
         <div class="toprow">
           <span class="brandhead-left">
             {config.logoUrl || config.logo ? (
-              <img class="logo" src={config.logoUrl || config.logo} alt={name || "Logo"} />
+              <img class="logo" src={config.logoUrl || config.logo} alt={name || t("widget.logoAlt")} />
             ) : (
               name && <div class="brandname">{name}</div>
             )}
@@ -270,23 +313,23 @@ function Home({
       </div>
       <div class="body">
         <div class="card">
-          <h2>Send us a message</h2>
-          <p>We'll get back to you here. No queue numbers.</p>
+          <h2>{t("widget.home.cta")}</h2>
+          <p>{t("widget.home.reassurance")}</p>
           <button class="btn" onClick={onNew}>
-            New conversation <ArrowIcon />
+            {t("widget.home.newConversation")} <ArrowIcon />
           </button>
         </div>
         {topics.length > 0 && (
           <div class="topics">
-            {topics.map((t) => (
-              <button class="topic" key={t} onClick={startTopic}>
-                {t}
+            {topics.map((topic) => (
+              <button class="topic" key={topic} onClick={startTopic}>
+                {topic}
                 <ChevronIcon />
               </button>
             ))}
           </div>
         )}
-        {state.conversations.length > 0 && <div class="eyebrow">Recent</div>}
+        {state.conversations.length > 0 && <div class="eyebrow">{t("widget.home.recent")}</div>}
         {state.conversations.map((c) => {
           const rowName = c.title || c.agentName || agentName;
           const rowInitial = (rowName.trim()[0] || "S").toUpperCase();
@@ -310,6 +353,7 @@ function Home({
 function Thread({
   client,
   config,
+  t,
   state,
   activeConv,
   preview,
@@ -320,6 +364,7 @@ function Thread({
 }: {
   client: WidgetClient;
   config: BrandConfig;
+  t: Translate;
   state: WidgetState;
   activeConv?: WidgetConversation;
   preview: boolean;
@@ -356,11 +401,11 @@ function Thread({
   const canSend = (!!text.trim() || atts.length > 0) && !closed && uploading === 0;
   // Prefer the real agent's first name (learned from incoming messages) over the
   // generic "Support"; fall back to a friendly default before any reply arrives.
-  const agentName = state.agentName || (config.showTeam ? "Eva" : "Support");
+  const agentName = state.agentName || (config.showTeam ? "Eva" : t("widget.home.support"));
   // A peer conversation (rider↔driver) has no agent framing: the header shows the
   // other party + "Direct chat · <ref>" instead of the support agent.
   const peer = !!activeConv?.peer;
-  const headName = peer ? activeConv?.title || "Direct chat" : agentName;
+  const headName = peer ? activeConv?.title || t("widget.home.directChat") : agentName;
   const headInitial = (headName.trim()[0] || "S").toUpperCase();
 
   const onFiles = (e: Event) => {
@@ -379,7 +424,7 @@ function Thread({
 
   const submit = () => {
     if (!canSend) return;
-    const t = text.trim();
+    const body = text.trim();
     const sending = atts;
     setText("");
     setAtts([]);
@@ -387,10 +432,10 @@ function Thread({
     if (draft) {
       void Promise.resolve(client.openSupportRequest()).then(() => {
         onCreated();
-        return client.send(t, sending);
+        return client.send(body, sending);
       });
     } else {
-      void client.send(t, sending);
+      void client.send(body, sending);
     }
   };
 
@@ -398,7 +443,7 @@ function Thread({
     <>
       <div class="threadhead">
         {!guestThreadOnly && (
-          <button class="iconbtn" aria-label="Back" onClick={onBack}>
+          <button class="iconbtn" aria-label={t("widget.thread.back")} onClick={onBack}>
             <BackIcon />
           </button>
         )}
@@ -411,21 +456,23 @@ function Thread({
           <div class="name">{headName}</div>
           <div class="sub">
             {peer
-              ? activeConv?.subtitle || "Direct chat"
+              ? activeConv?.reference
+                ? t("widget.thread.directRef", { ref: activeConv.reference })
+                : t("widget.home.directChat")
               : draft
-                ? "Type your message to start"
+                ? t("widget.home.start")
                 : state.connection === "connected" || preview
-                  ? "Replies in a few minutes"
-                  : "Connecting…"}
+                  ? t("widget.home.subtitle")
+                  : t("widget.status.connecting")}
           </div>
         </div>
         <div style={{ flex: 1 }} />
       </div>
       <div class="body" ref={scroller} onScroll={() => void onScroll()}>
-        {state.loadingThread && <div class="note">Loading…</div>}
+        {state.loadingThread && <div class="note">{t("widget.status.loading")}</div>}
         {state.olderCursor && !state.loadingThread && (
           <div class="note" data-sild-older>
-            {state.loadingOlder ? "Loading earlier messages…" : "Scroll up for earlier messages"}
+            {state.loadingOlder ? t("widget.thread.loadingOlder") : t("widget.thread.scrollUp")}
           </div>
         )}
         {state.messages.map((m) => {
@@ -459,33 +506,33 @@ function Thread({
           );
         })}
         {!state.loadingThread && state.messages.length === 0 && (
-          <div class="note">Send a message to start the conversation.</div>
+          <div class="note">{t("widget.thread.empty")}</div>
         )}
       </div>
       <div class="composer">
-        {closed && <div class="banner">This conversation is closed.</div>}
+        {closed && <div class="banner">{t("widget.thread.closed")}</div>}
         {(atts.length > 0 || uploading > 0) && (
           <div class="pending">
             {atts.map((a, i) => (
               <span class="pchip" key={i}>
                 <span class="att-name">{a.filename}</span>
-                <button aria-label="Remove" onClick={() => setAtts((p) => p.filter((_, j) => j !== i))}>
+                <button aria-label={t("widget.composer.remove")} onClick={() => setAtts((p) => p.filter((_, j) => j !== i))}>
                   ✕
                 </button>
               </span>
             ))}
-            {uploading > 0 && <span class="pchip muted">Uploading…</span>}
+            {uploading > 0 && <span class="pchip muted">{t("widget.composer.uploading")}</span>}
           </div>
         )}
         <div class="inputwrap">
-          <button class="attachbtn" aria-label="Attach a file" disabled={closed} onClick={() => fileRef.current?.click()}>
+          <button class="attachbtn" aria-label={t("widget.composer.attach")} disabled={closed} onClick={() => fileRef.current?.click()}>
             <ClipIcon />
           </button>
           <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={onFiles} />
           <textarea
             ref={taRef}
             rows={1}
-            placeholder="Write a message…"
+            placeholder={t("widget.composer.placeholder")}
             value={text}
             disabled={closed}
             onInput={(e) => {
@@ -501,7 +548,7 @@ function Thread({
               }
             }}
           />
-          <button class="send" aria-label="Send" disabled={!canSend} onClick={submit}>
+          <button class="send" aria-label={t("widget.composer.send")} disabled={!canSend} onClick={submit}>
             <SendIcon />
           </button>
         </div>

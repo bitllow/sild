@@ -228,7 +228,7 @@ func NewWithConfig(t *testing.T, cfg *config.Config) *Harness {
 		t.Fatalf("archive sink: %v", err)
 	}
 	svc := domain.New(st, pub, km, bucket, mailer, sink, notifier, box, cfg)
-	fanout := push.NewFanOut(st, notifier, box)
+	fanout := push.NewFanOut(st, notifier, box, svc.ResolveText)
 	searchSvc := domain.NewSearch(st, search.New(db))
 	svc.UseSearch(searchSvc)                 // GET /v1/conversations?q= runs search through the service
 	authn := auth.NewAdminAuthenticator(cfg) // dev stub (no Google configured)

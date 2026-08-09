@@ -32,5 +32,11 @@ func All() []any {
 		&Brand{},
 		&JobLease{},
 		&EmailIngest{},
+		&TranslationProject{},
+		&TranslationProjectLocale{},
+		&TranslationOverride{},
+		&TranslationRelease{},
+		&TranslationBundle{},
+		&TranslatorScope{},
 	}
 }

@@ -23,7 +23,7 @@ func TestComposeCoversEverySettingCombination(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			title, body := push.Compose(tc.s, "Alice", "running late")
+			title, body := push.Compose(tc.s, "New message", "Alice", "running late")
 			if title != tc.wantTitle || body != tc.wantBody {
 				t.Fatalf("Compose = (%q, %q), want (%q, %q)", title, body, tc.wantTitle, tc.wantBody)
 			}
@@ -34,7 +34,7 @@ func TestComposeCoversEverySettingCombination(t *testing.T) {
 // A sender the tenant wants named but whom we cannot name must not produce an
 // empty title.
 func TestComposeFallsBackWhenTheSenderIsUnknown(t *testing.T) {
-	title, _ := push.Compose(push.Settings{IncludeSender: true}, "", "hello")
+	title, _ := push.Compose(push.Settings{IncludeSender: true}, "New message", "", "hello")
 	if title != "New message" {
 		t.Fatalf("title with no sender = %q", title)
 	}
@@ -43,7 +43,7 @@ func TestComposeFallsBackWhenTheSenderIsUnknown(t *testing.T) {
 // An empty message body (an attachment-only message) must not leave the
 // notification repeating itself.
 func TestComposeDoesNotRepeatItself(t *testing.T) {
-	title, body := push.Compose(push.Settings{IncludeBody: true}, "", "")
+	title, body := push.Compose(push.Settings{IncludeBody: true}, "New message", "", "")
 	if title == body {
 		t.Fatalf("title and body are both %q", title)
 	}
@@ -54,7 +54,7 @@ func TestComposeTrimsALongBody(t *testing.T) {
 	for i := range long {
 		long[i] = 'a'
 	}
-	_, body := push.Compose(push.Settings{IncludeBody: true}, "Alice", string(long))
+	_, body := push.Compose(push.Settings{IncludeBody: true}, "New message", "Alice", string(long))
 	if len([]rune(body)) >= 500 {
 		t.Fatalf("body was not trimmed: %d runes", len([]rune(body)))
 	}

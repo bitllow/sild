@@ -106,7 +106,7 @@ export interface Brand {
   config: BrandConfig;
 }
 
-export type InboxView = "inbox" | "peer" | "settings";
+export type InboxView = "inbox" | "peer" | "settings" | "translations";
 export type SettingsTab = "installation" | "channels" | "appearance" | "keys" | "webhooks" | "team";
 export type InboxFilter = "you" | "unassigned" | "all";
 export type SessionState = "loading" | "authed" | "anon";

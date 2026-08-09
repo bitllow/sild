@@ -124,13 +124,24 @@ func (h *Handler) upsertContact(c *gin.Context, externalUserID string) {
 	}
 	var req struct {
 		Metadata json.RawMessage `json:"metadata"`
+		Locale   string          `json:"locale"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	if err := h.svc.UpsertContact(c.Request.Context(), apiutil.Tenant(c), externalUserID, req.Metadata); err != nil {
-		apiutil.Fail(c, err)
-		return
+	// No metadata field asserts nothing about the profile — a widget recording only
+	// its locale must not erase what the host's backend wrote. `null` still clears.
+	if req.Metadata != nil {
+		if err := h.svc.UpsertContact(c.Request.Context(), apiutil.Tenant(c), externalUserID, req.Metadata); err != nil {
+			apiutil.Fail(c, err)
+			return
+		}
+	}
+	if req.Locale != "" {
+		if err := h.svc.SetContactLocale(c.Request.Context(), apiutil.Tenant(c), externalUserID, req.Locale); err != nil {
+			apiutil.Fail(c, err)
+			return
+		}
 	}
 	c.Status(http.StatusNoContent)
 }

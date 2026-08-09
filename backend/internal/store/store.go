@@ -34,4 +34,5 @@ type Store interface {
 	Archives() ArchiveRepo
 	Brands() BrandRepo
 	Leases() LeaseRepo
+	Translations() TranslationRepo
 }

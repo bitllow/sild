@@ -32,6 +32,7 @@ const (
 	Outbox       = "evt"
 	PushOutbox   = "pev"
 	Brand        = "br"
+	Release      = "rel"
 	Request      = "req"
 	// Holder identifies one process's hold on something contended — a job lease,
 	// an outbox claim. Not a row id: it names the owner, not the work.

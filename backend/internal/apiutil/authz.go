@@ -141,6 +141,34 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, a policy.Action,
 	return true
 }
 
+// AuthorizeTranslation checks a translation action against a project and, when
+// the action names one, a locale. Only a translator carries a grant to load.
+func AuthorizeTranslation(c *gin.Context, svc *domain.Service, a policy.Action, project, locale string) bool {
+	if !declared(c, a) {
+		failUndeclared(c, a)
+		return false
+	}
+	p := middleware.Get(c)
+	if p == nil {
+		httpx.Unauthorized(c, "authentication required")
+		return false
+	}
+	var attrs policy.TranslationAttrs
+	if p.Kind == principal.KindAdmin && p.Role == models.PlatformTranslator {
+		var err error
+		attrs, err = svc.TranslationScope(c.Request.Context(), p.TenantID, p.AdminID)
+		if err != nil {
+			Fail(c, err)
+			return false
+		}
+	}
+	if err := policy.AuthorizeTranslation(p, a, attrs, project, locale); err != nil {
+		failPolicy(c, err)
+		return false
+	}
+	return true
+}
+
 // conversationAttrs loads only what the principal's branch actually needs, so a
 // tenant-wide owner/admin doesn't pay for an assignment lookup and a user
 // doesn't pay for a kind lookup.

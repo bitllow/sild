@@ -15,6 +15,12 @@ export class ApiError extends Error {
   }
 }
 
+// The backend's message is the useful part — it says which field was wrong.
+export function errorText(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  return e instanceof Error ? e.message : "Something went wrong.";
+}
+
 type Json = Record<string, unknown> | unknown[];
 
 async function request<T>(method: string, path: string, body?: Json, ifMatch?: string): Promise<T> {

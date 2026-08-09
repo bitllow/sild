@@ -16,7 +16,6 @@ import (
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/storage"
-	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/webasset"
 	"github.com/gin-gonic/gin"
 )
@@ -97,12 +96,8 @@ func (h *Handler) authChain(r routeSpec) []gin.HandlerFunc {
 		return nil // the signature is the credential; the handler verifies it
 	}
 	guard := []gin.HandlerFunc{h.credentialGuard(r.Principals)}
-	// Narrowest tier first: an owner-only route is privileged too.
-	switch {
-	case r.ownerOnly():
-		guard = append(guard, middleware.RequireRole(models.PlatformOwner))
-	case r.privilegedOnly():
-		guard = append(guard, middleware.RequireRole(models.PlatformOwner, models.PlatformAdmin))
+	if roles := r.roles(); len(roles) > 0 {
+		guard = append(guard, middleware.RequireRole(roles...))
 	}
 	return guard
 }

@@ -70,7 +70,7 @@ func New(opts ...Option) (*dig.Container, error) {
 		archive.NewJob,      // *archive.Job
 		providePushNotifier, // push.Notifier
 		provideSecrets,      // *secrets.Box
-		push.NewFanOut,      // *push.FanOut
+		newFanOut,           // *push.FanOut
 	}
 	for _, p := range providers {
 		if err := c.Provide(p); err != nil {
@@ -133,4 +133,10 @@ func newService(
 	svc := domain.New(st, pub, km, bucket, mailer, sink, notifier, box, cfg)
 	svc.UseSearch(ss)
 	return svc
+}
+
+// newFanOut attaches the tenant-aware string resolver, so a nudge is composed in
+// the language its recipient reads rather than in English.
+func newFanOut(st store.Store, n push.Notifier, box *secrets.Box, svc *domain.Service) *push.FanOut {
+	return push.NewFanOut(st, n, box, svc.ResolveText)
 }
