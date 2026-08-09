@@ -1,7 +1,5 @@
 package io.sild.core
 
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 // clock formats an ISO-8601 timestamp as 12-hour "h:mm AM/PM" in the device's local
 // time, matching the web client's clock() (which reads local hours off a Date).
@@ -12,10 +10,6 @@ import kotlinx.serialization.json.jsonPrimitive
 // Per-platform because the JVM side must stay on java.util (API 1): java.time would
 // oblige every Android host below API 26 to turn on core-library desugaring.
 internal expect fun clock(iso: String?, zoneId: String? = null): String
-
-/** Read a member metadata object's "name" field, or null. */
-internal fun JsonObject?.name(): String? =
-    this?.get("name")?.let { runCatching { it.jsonPrimitive.content }.getOrNull() }
 
 // rebaseLocalUrl re-bases a server URL that points at local-dev object storage
 // (contains "/v1/uploads/local/") onto [base], so images/files the backend hands

@@ -148,6 +148,13 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.ContactsList}, Principals: adminOnly, Handler: (*Handler).listContacts},
 		{Method: "GET", Path: "/v1/contacts/:external_user_id", Class: classAction,
 			Actions: []policy.Action{policy.ContactsRead}, Principals: adminOnly, Handler: (*Handler).getContact},
+		// Profile writes. The self-scoped route is the SDK's first call on start-up;
+		// the id-scoped one is the host's own backend writing from its system of
+		// record. Both replace the profile whole, and both are idempotent.
+		{Method: "PUT", Path: "/v1/contacts/me", Class: classAction,
+			Actions: []policy.Action{policy.ContactsWrite}, Principals: userOnly, Handler: (*Handler).putMyContact, Success: http.StatusNoContent},
+		{Method: "PUT", Path: "/v1/contacts/:external_user_id", Class: classAction,
+			Actions: []policy.Action{policy.ContactsWrite}, Principals: keyOnly, Handler: (*Handler).putContact, Success: http.StatusNoContent},
 		{Method: "GET", Path: "/v1/principal", Class: classAction,
 			Actions: []policy.Action{policy.PrincipalRead}, Principals: anyPrincipal, Handler: (*Handler).getPrincipal},
 		{Method: "GET", Path: "/v1/realtime/token", Class: classAction,
@@ -161,12 +168,13 @@ func routeManifest() []routeSpec {
 		{Method: "DELETE", Path: "/v1/push-tokens", Class: classAction,
 			Actions: []policy.Action{policy.PushTokensManage}, Principals: userOnly, Handler: (*Handler).deregisterPush, Success: http.StatusNoContent},
 
-		// Push control for the host's own backend: acting for one of its users,
-		// so a server credential rather than that user's token.
-		{Method: "PUT", Path: "/v1/users/:userID/push", Class: classAction,
-			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).setPushOptOut, Success: http.StatusNoContent},
-		{Method: "DELETE", Path: "/v1/users/:userID/push-tokens", Class: classAction,
-			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).deleteUserPushTokens},
+		// Push control for the host's own backend: acting for one of its users, so a
+		// server credential rather than that user's token. Addressed as the contact,
+		// which is the model a person now is.
+		{Method: "PUT", Path: "/v1/contacts/:external_user_id/push", Class: classAction,
+			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).setContactPush, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/contacts/:external_user_id/push-tokens", Class: classAction,
+			Actions: []policy.Action{policy.PushRecipientsManage}, Principals: keyOnly, Handler: (*Handler).deleteContactPushTokens},
 
 		// Brands: active is optional-auth, the set is owner/admin.
 		{Method: "GET", Path: "/v1/brands/active", Class: classPublic,

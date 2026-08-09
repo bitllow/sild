@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -19,11 +18,13 @@ import (
 // mkPeer creates a peer conversation (open, no assignment) between two users.
 func mkPeer(t *testing.T, h *testutil.Harness, tenantID, ref string) *models.Conversation {
 	t.Helper()
+	h.SeedContact(tenantID, "u_rider_"+ref, `{"name":"Rider"}`)
+	h.SeedContact(tenantID, "u_driver_"+ref, `{"name":"Driver"}`)
 	conv, err := h.Svc.CreateConversation(context.Background(), tenantID, domain.CreateConversationInput{
 		Reference: ref, OpenAssignment: false,
 		Members: []domain.MemberInput{
-			{UserID: "u_rider_" + ref, ConvRole: models.ConvRole("rider"), Metadata: json.RawMessage(`{"name":"Rider"}`)},
-			{UserID: "u_driver_" + ref, ConvRole: models.ConvRole("driver"), Metadata: json.RawMessage(`{"name":"Driver"}`)},
+			{UserID: "u_rider_" + ref, ConvRole: models.ConvRole("rider")},
+			{UserID: "u_driver_" + ref, ConvRole: models.ConvRole("driver")},
 		},
 	})
 	if err != nil {
@@ -216,12 +217,14 @@ func TestPeerSearchByIdAndMetadata(t *testing.T) {
 	tenant := h.SeedTenant()
 	ctx := context.Background()
 
-	// A peer conversation whose rider has a distinctive id + metadata value.
+	// A peer conversation whose rider has a distinctive id + profile value.
+	h.SeedContact(tenant.ID, "p_zorro", `{"name":"Zelda Xylophone","plan":"platinum"}`)
+	h.SeedContact(tenant.ID, "p_dd", `{"name":"Dan Driver"}`)
 	_, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
 		Reference: "trip_find", OpenAssignment: false,
 		Members: []domain.MemberInput{
-			{UserID: "p_zorro", ConvRole: models.ConvRole("rider"), Metadata: json.RawMessage(`{"name":"Zelda Xylophone","plan":"platinum"}`)},
-			{UserID: "p_dd", ConvRole: models.ConvRole("driver"), Metadata: json.RawMessage(`{"name":"Dan Driver"}`)},
+			{UserID: "p_zorro", ConvRole: models.ConvRole("rider")},
+			{UserID: "p_dd", ConvRole: models.ConvRole("driver")},
 		},
 	})
 	if err != nil {
@@ -483,11 +486,13 @@ func TestClosedPeerConversationStaysOutOfSupportSearch(t *testing.T) {
 	tenant := h.SeedTenant()
 	ctx := context.Background()
 
+	h.SeedContact(tenant.ID, "p_needle", `{"name":"Needle Haystack"}`)
+	h.SeedContact(tenant.ID, "p_drv", `{"name":"Dee Driver"}`)
 	peer, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
 		Reference: "trip_secret", OpenAssignment: false,
 		Members: []domain.MemberInput{
-			{UserID: "p_needle", ConvRole: models.ConvRole("rider"), Metadata: json.RawMessage(`{"name":"Needle Haystack"}`)},
-			{UserID: "p_drv", ConvRole: models.ConvRole("driver"), Metadata: json.RawMessage(`{"name":"Dee Driver"}`)},
+			{UserID: "p_needle", ConvRole: models.ConvRole("rider")},
+			{UserID: "p_drv", ConvRole: models.ConvRole("driver")},
 		},
 	})
 	if err != nil {

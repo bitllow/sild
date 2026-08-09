@@ -6,6 +6,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/search"
 	"github.com/bitllow/sild/backend/internal/store"
+	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/bitllow/sild/backend/internal/views"
 )
 
@@ -26,13 +27,22 @@ type ListConversationsInput struct {
 	UnreadFor string
 	// IncludeInternal permits internal notes to match a search (§5.6).
 	IncludeInternal bool
+	// WithProfiles reads the profile blobs too, for `expand=contacts.metadata`.
+	// Left false the page never touches the blob table.
+	WithProfiles bool
 }
 
-// ConversationPage is a rendered page plus the paging position.
+// ConversationPage is a rendered page plus the paging position. Participants,
+// Names and Profiles are the distinct external people on the page and what was
+// loaded for them, so an expansion re-reads nothing. Profiles is nil unless the
+// request asked for the blob.
 type ConversationPage struct {
-	Items      []map[string]any
-	NextCursor *store.Cursor
-	HasMore    bool
+	Items        []map[string]any
+	Participants []string
+	Names        map[string]string
+	Profiles     map[string][]byte
+	NextCursor   *store.Cursor
+	HasMore      bool
 }
 
 // ListConversations returns one page of conversations visible to the scope.
@@ -64,6 +74,7 @@ type rowExtras struct {
 	agentNames map[string]string
 	unread     map[string]int
 	snippets   map[string]search.ConversationHit
+	profiles   views.Profiles
 }
 
 // renderPage batches every per-row lookup, then renders.
@@ -79,16 +90,31 @@ func (s *Service) renderPage(ctx context.Context, tenantID string, items []store
 
 	ids := make([]string, 0, len(items))
 	actors := make([]string, 0, len(items))
+	var members []models.ConversationMember
 	for i := range items {
 		ids = append(ids, items[i].Conversation.ID)
 		if a := items[i].Assignment; a != nil && a.AssigneeActorID != nil {
 			actors = append(actors, *a.AssigneeActorID)
 		}
+		members = append(members, items[i].Members...)
 	}
 
-	x := rowExtras{snippets: snippets}
+	// Assignees resolve in the same pass as agent members: an operator who is both
+	// would otherwise be read twice.
+	load := s.MemberNames
+	if in.WithProfiles {
+		load = s.MemberProfiles
+	}
+	profiles, err := load(ctx, tenantID, members, actors...)
+	if err != nil {
+		return ConversationPage{}, err
+	}
+	out.Participants = ExternalParticipants(members)
+	out.Names = profiles.Names
+	out.Profiles = profiles.Contacts
+
+	x := rowExtras{snippets: snippets, profiles: profiles, agentNames: profiles.Agents}
 	x.subjects, _ = s.store.Email().Subjects(ctx, tenantID, ids)
-	x.agentNames = s.agentNames(ctx, tenantID, actors)
 	if in.IncludeUnread && in.UnreadFor != "" {
 		x.unread, _ = s.store.Messages().UnreadCounts(ctx, tenantID, ids, in.UnreadFor)
 	}
@@ -183,7 +209,7 @@ func (s *Service) searchConversations(ctx context.Context, tenantID string, scop
 // the widget and search all render the same shape.
 func (s *Service) renderRow(it *store.ConversationItem, x rowExtras) map[string]any {
 	id := it.Conversation.ID
-	conv := views.Conversation(&it.Conversation, it.Members, it.Assignment)
+	conv := views.Conversation(&it.Conversation, it.Members, it.Assignment, x.profiles)
 	conv["kind"] = it.Conversation.Kind
 	conv["last_activity"] = it.LastActivity
 	if it.Conversation.LastMessagePreview != "" {

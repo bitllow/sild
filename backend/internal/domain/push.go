@@ -150,22 +150,9 @@ func (s *Service) TestPushSend(ctx context.Context, tenantID, token string) erro
 	return s.store.PushConfigs().MarkVerified(ctx, tenantID)
 }
 
-// SetUserPush turns nudges on or off for one user, on behalf of the tenant's own
-// backend. Suppression survives the app re-registering — that is what makes it a
-// preference rather than a token deletion.
-func (s *Service) SetUserPush(ctx context.Context, tenantID, externalUserID string, enabled bool) error {
-	if externalUserID == "" {
-		return invalid("user_id is required")
-	}
-	if enabled {
-		return s.store.PushOptOuts().Clear(ctx, tenantID, externalUserID)
-	}
-	return s.store.PushOptOuts().Set(ctx, tenantID, externalUserID)
-}
-
 // DeleteUserPushTokens drops every device a user registered — the host's
 // account-deletion call. The app can register again, so this is not a
-// preference; SetUserPush is.
+// preference; SetContactPush is.
 func (s *Service) DeleteUserPushTokens(ctx context.Context, tenantID, externalUserID string) (int, error) {
 	if externalUserID == "" {
 		return 0, invalid("user_id is required")

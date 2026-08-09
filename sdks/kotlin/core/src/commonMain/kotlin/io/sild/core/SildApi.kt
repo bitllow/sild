@@ -112,12 +112,19 @@ internal class SildApi(
             api("GET", "/conversations/$id/messages?since=${since.encodeURLParameter()}&limit=$limit"),
         )
 
-    /** POST /v1/conversations { metadata } → { id }; always a support request. */
-    suspend fun openSupportRequest(): String {
+    /** PUT /v1/contacts/me { metadata } → 204. The configured profile replaces
+     *  whatever Sild holds for the token's subject; it is not a patch. */
+    suspend fun upsertOwnProfile() {
         val body = buildJsonObject {
-            put("metadata", JsonObject(cfg.metadata.mapValues { JsonPrimitive(it.value) }))
+            put("metadata", JsonObject(cfg.metadata.orEmpty().mapValues { JsonPrimitive(it.value) }))
         }
-        val obj = json.parseToJsonElement(api("POST", "/conversations", body.toString())).jsonObject
+        api("PUT", "/contacts/me", body.toString())
+    }
+
+    /** POST /v1/conversations → { id }; always a support request. Participants are
+     *  named by id alone — their profile is already stored. */
+    suspend fun openSupportRequest(): String {
+        val obj = json.parseToJsonElement(api("POST", "/conversations", "{}")).jsonObject
         return obj.getValue("id").jsonPrimitive.content
     }
 

@@ -107,3 +107,33 @@ func TestMigrateDoesNotReclassifyAssignmentless(t *testing.T) {
 		})
 	}
 }
+
+// The profile move replaced per-membership metadata and the opt-out table.
+// AutoMigrate never drops, so a database upgraded in place must be cleaned up
+// explicitly — and the cleanup has to survive a second migration.
+func TestMigrateDropsRetiredProfileObjects(t *testing.T) {
+	for _, dbc := range dialects(t) {
+		t.Run(string(dbc.Driver), func(t *testing.T) {
+			db, err := gormstore.Open(&config.Config{DB: dbc})
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if err := gormstore.Migrate(db); err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			// Reintroduce the pre-move shape, then migrate over it.
+			db.Exec(`ALTER TABLE conversation_members ADD COLUMN member_search_text text`)
+			db.Exec(`CREATE TABLE push_opt_outs (tenant_id varchar(40), external_user_id varchar(255))`)
+			if err := gormstore.Migrate(db); err != nil {
+				t.Fatalf("re-migrate: %v", err)
+			}
+
+			if hasColumn(t, db, "conversation_members", "member_search_text") {
+				t.Errorf("[%s] member_search_text survived", dbc.Driver)
+			}
+			if db.Migrator().HasTable("push_opt_outs") {
+				t.Errorf("[%s] push_opt_outs survived", dbc.Driver)
+			}
+		})
+	}
+}

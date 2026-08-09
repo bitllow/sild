@@ -236,7 +236,7 @@ across dialects; here's the portable form:
 `search.Backend` has two implementations, chosen by dialect at startup:
 
 - **`postgres`** — full mixed-token search: `pg_trgm` similarity ranking on
-  `messages.body` and the materialized `member_search_text`, plus jsonb
+  `messages.body` and the materialized `contacts.search_text`, plus jsonb
   `meta.<key>` fallback. This is the spec's intended experience.
 - **`portable`** — `LIKE '%term%'` across the same columns, no similarity
   ranking. Correct, slower, unranked. MySQL can later gain a FULLTEXT/ngram
@@ -257,7 +257,7 @@ built, and whose expiry would hand the lock to a second migrator mid-DDL:
 1. `db.AutoMigrate(models.All()...)` — builds every table on any dialect.
 2. `applyDialectIndexes(db)` — branches on `db.Dialector.Name()`:
    - **postgres** → `CREATE EXTENSION pg_trgm`; `GIN (… gin_trgm_ops)` on
-     `messages.body` and `member_search_text`.
+     `messages.body` and `contacts.search_text`.
    - **mysql** → `FULLTEXT` (ngram) on the same columns.
    - **sqlite** → none (LIKE path).
 
@@ -322,9 +322,10 @@ differs per consumer, so `/v1/admin/auth/*` stays consumer-shaped. A route that
 exists because "the inbox needs it" and not because it addresses a distinct
 model is a bug.
 
-A resource may be a **read model** rather than a table — `contacts` projects over
-`conversation_members` — provided its projection rules (identity, precedence,
-ordering, what counts) are written down. A resource may also be an **aggregate**
+A resource may be **part table, part read model** — a `contacts` row stores a
+person's profile, while their presence in the directory is projected over
+`conversation_members` — provided its projection rules (identity, ordering, what
+counts, and which half a field comes from) are written down. A resource may also be an **aggregate**
 rather than a collection when it is read and written as a unit: `/v1/brands`
 returns `{brands, active_brand_id}` and `PUT` replaces the whole set, so a
 paginated read would be incoherent. The test is the write path — if `PUT`
@@ -352,6 +353,45 @@ Catch-up is not pagination. `?since=<message_id>` is the reconnect primitive
 (§5.4): oldest-first, bounded, continued by re-issuing with the last id received.
 It shares the envelope so clients keep one parser, but `next_cursor` is always
 null — the message id *is* the position.
+
+### Related resources are expanded, never re-fetched per row
+
+`?expand=` takes a comma-separated list of expansion paths. Each adds a
+**top-level block** of that resource's view objects beside the response —
+`GET /v1/conversations?expand=contacts` returns `{items, …, contacts:[…]}` — so
+rendering thirty rows' worth of participant profiles is one request, not thirty.
+
+A bare resource name (`contacts`) yields that resource's **default fields** — the
+cheap identifying ones, not everything it can carry. A **dotted field path**
+(`contacts.metadata`) adds a field beyond the default set, and a **key path**
+(`contacts.metadata.plan`) narrows a blob-valued field to the keys named. Several
+paths for one resource union, and the field whole always beats a key selection of
+it however the paths are ordered — a union must never return less than one of its
+parts asked for.
+
+Field selection is **not byte-shaving — it selects a query plan.** A contact's
+profile blob lives in its own table, and nothing on a conversation surface reads
+it unless a path names it: member views carry the person's `name` (a narrow
+column) and no blob at all. So `?expand=contacts` on a page of thirty
+conversations touches only the narrow table, and `?expand=contacts.metadata` is
+the request that pays for the join. That is the whole reason the dot exists
+rather than a bare resource list.
+
+Three rules keep it from rotting:
+
+- Field names are the resource's **wire** names, never storage names. The path is
+  `contacts.metadata` because that is the field the view emits; a table split must
+  not surface in the API. A contact has no `id`, so `contacts.id` is an error.
+- An unknown resource or field name is a **400**, as is a key path into a field
+  that has no keys. A typo must never return an unenriched page that looks
+  complete.
+- A block always carries its resource's **identity** field, selected or not.
+  Profiles nobody can attribute to a person are not a narrower response, they are
+  an unusable one.
+
+`expand` narrows expanded blocks only; it never trims the primary resource's own
+objects. Sparse fieldsets on the base resource are a separate convention with
+separate consequences, and nothing asks for them.
 
 ### Authorization is attribute-based and lives in one package
 

@@ -9,12 +9,12 @@ import kotlin.test.assertEquals
 class MappingTest {
     private val json = Json { ignoreUnknownKeys = true }
 
-    @Test fun memberMetadataNameParses() {
+    @Test fun memberNameParses() {
         val body = """
         {"conv_role":"driver","external_user_id":"u_driver_x","member_kind":"user",
-         "metadata":{"name":"Toomas Vaher","role":"driver"}}
+         "name":"Toomas Vaher"}
         """.trimIndent()
         val m = json.decodeFromString(ApiMember.serializer(), body)
-        assertEquals("Toomas Vaher", m.metadata.name())
+        assertEquals("Toomas Vaher", m.name)
     }
 }

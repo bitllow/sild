@@ -6,7 +6,6 @@ package views
 import (
 	"encoding/json"
 
-	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
@@ -70,16 +69,54 @@ func Attachment(a *models.MessageAttachment, urlFn URLFunc) map[string]any {
 	return out
 }
 
-// Member renders a conversation member.
-func Member(m *models.ConversationMember) map[string]any {
+// Profiles resolves the metadata a member view renders inline. Contacts are the
+// stored profiles, keyed by external_user_id; Agents are operator display names,
+// keyed by internal_actor_id — an agent has no contact row, so their member
+// metadata is synthesized rather than joined.
+type Profiles struct {
+	Contacts map[string][]byte
+	Names    map[string]string
+	Agents   map[string]string
+}
+
+// Contact renders a contact's stored profile. An absent profile omits the field
+// rather than emitting null, so a person nobody described reads the same on
+// every contact surface.
+func Contact(externalUserID string, metadata []byte) map[string]any {
+	out := map[string]any{"external_user_id": externalUserID}
+	if len(metadata) > 0 {
+		out["metadata"] = rawJSON(metadata)
+	}
+	return out
+}
+
+// Member renders a conversation member: who they are, not who they are to the
+// tenant. The profile blob is a contacts resource, reached through
+// `expand=contacts.metadata`; only the display name is inline, because every
+// surface renders it and it costs no join.
+func Member(m *models.ConversationMember, p Profiles) map[string]any {
 	out := map[string]any{
 		"member_kind": m.MemberKind,
 		"conv_role":   m.ConvRole,
-		"metadata":    rawJSON(m.Metadata),
 		"joined_at":   m.JoinedAt,
+	}
+	if name := memberName(m, p); name != "" {
+		out["name"] = name
 	}
 	participantID(out, m.ExternalUserID, m.InternalActorID)
 	return out
+}
+
+// memberName reads the narrow name for an end user and the actor's name for an
+// agent, so a client renders one field whoever the participant is.
+func memberName(m *models.ConversationMember, p Profiles) string {
+	if m.ExternalUserID != nil {
+		return p.Names[*m.ExternalUserID]
+	}
+	if m.InternalActorID == nil {
+		return ""
+	}
+	return p.Agents[*m.InternalActorID]
 }
 
 // Assignment renders an assignment (§5.3 assignment.updated data is a subset).
@@ -99,26 +136,8 @@ func Assignment(a *models.Assignment) map[string]any {
 	return out
 }
 
-// QueueRow renders one inbox queue row: the assignment + its conversation
-// (members + last message preview + last activity), but NO message history —
-// the client fetches that lazily when the conversation is opened (§4.3).
-func QueueRow(it *store.QueueItem) map[string]any {
-	conv := Conversation(&it.Conversation, it.Members, nil)
-	conv["last_activity"] = it.LastActivity
-	if it.Conversation.LastMessagePreview != "" {
-		conv["last_message"] = map[string]any{
-			"body":       it.Conversation.LastMessagePreview,
-			"created_at": it.Conversation.LastMessageAt,
-		}
-	}
-	return map[string]any{
-		"assignment":   Assignment(&it.Assignment),
-		"conversation": conv,
-	}
-}
-
 // Conversation renders the full conversation (§4.1 fetch, §4.2 GET).
-func Conversation(c *models.Conversation, members []models.ConversationMember, assignment *models.Assignment) map[string]any {
+func Conversation(c *models.Conversation, members []models.ConversationMember, assignment *models.Assignment, p Profiles) map[string]any {
 	out := map[string]any{
 		"id":         c.ID,
 		"status":     c.Status,
@@ -128,7 +147,7 @@ func Conversation(c *models.Conversation, members []models.ConversationMember, a
 	}
 	ms := make([]map[string]any, 0, len(members))
 	for i := range members {
-		ms = append(ms, Member(&members[i]))
+		ms = append(ms, Member(&members[i], p))
 	}
 	out["members"] = ms
 	if assignment != nil {

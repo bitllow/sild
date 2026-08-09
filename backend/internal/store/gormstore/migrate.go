@@ -3,6 +3,7 @@ package gormstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/bitllow/sild/backend/internal/config"
@@ -20,6 +21,12 @@ func Migrate(db *gorm.DB) error {
 			return err
 		}
 		if err := backfillLastActivity(db); err != nil {
+			return err
+		}
+		if err := backfillContactNames(db); err != nil {
+			return err
+		}
+		if err := dropRetiredObjects(db); err != nil {
 			return err
 		}
 		return applyDialectIndexes(db)
@@ -99,6 +106,59 @@ func backfillLastActivity(db *gorm.DB) error {
 		  AND last_message_at IS NOT NULL`).Error
 }
 
+// backfillContactNames fills contacts.name for rows whose profile predates the
+// column. Decoded in Go, not SQL: the three dialects spell JSON extraction three
+// different ways, and a contact table is small enough to walk.
+//
+// Only empty names are written, so it is idempotent and never overwrites a name
+// a later profile write already materialized.
+func backfillContactNames(db *gorm.DB) error {
+	var rows []models.ContactMeta
+	if err := db.
+		Joins("JOIN contacts c ON c.tenant_id = contacts_meta.tenant_id AND c.external_user_id = contacts_meta.external_user_id").
+		Where("c.name IS NULL OR c.name = ''").
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	for i := range rows {
+		var profile struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(rows[i].Metadata, &profile) != nil || profile.Name == "" {
+			continue
+		}
+		if err := db.Model(&models.Contact{}).
+			Where("tenant_id = ? AND external_user_id = ?", rows[i].TenantID, rows[i].ExternalUserID).
+			Update("name", profile.Name).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dropRetiredObjects removes what the profile move replaced. AutoMigrate never
+// drops, so a database upgraded in place would keep them forever.
+//
+// Raw DDL by table NAME: the fields are gone from the models, so gorm's
+// model-driven migrator has no schema to resolve them against. Dropping a column
+// takes its indexes with it on every dialect.
+func dropRetiredObjects(db *gorm.DB) error {
+	const members = "conversation_members"
+	m := db.Migrator()
+	for _, col := range []string{"metadata", "member_search_text"} {
+		if !m.HasColumn(members, col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE " + members + " DROP COLUMN " + col).Error; err != nil {
+			return err
+		}
+	}
+	if m.HasTable("push_opt_outs") {
+		return db.Exec("DROP TABLE push_opt_outs").Error
+	}
+	return nil
+}
+
 // applyDialectIndexes adds the search indexes that AutoMigrate can't express:
 //   - postgres: pg_trgm extension + GIN(gin_trgm_ops) for partial/substring search
 //   - mysql:    FULLTEXT (ngram) — partial-ish, the middle capability tier
@@ -112,7 +172,7 @@ func applyDialectIndexes(db *gorm.DB) error {
 		stmts := []string{
 			`CREATE EXTENSION IF NOT EXISTS pg_trgm`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_body_trgm ON messages USING gin (body gin_trgm_ops)`,
-			`CREATE INDEX IF NOT EXISTS idx_member_search_trgm ON conversation_members USING gin (member_search_text gin_trgm_ops)`,
+			`CREATE INDEX IF NOT EXISTS idx_contact_search_trgm ON contacts USING gin (search_text gin_trgm_ops)`,
 		}
 		for _, s := range stmts {
 			if err := db.Exec(s).Error; err != nil {
@@ -124,7 +184,7 @@ func applyDialectIndexes(db *gorm.DB) error {
 		// CREATE FULLTEXT INDEX has no IF NOT EXISTS; guard via catalog check.
 		stmts := []struct{ name, table, col string }{
 			{"idx_messages_body_ft", "messages", "body"},
-			{"idx_member_search_ft", "conversation_members", "member_search_text"},
+			{"idx_contact_search_ft", "contacts", "search_text"},
 		}
 		for _, s := range stmts {
 			var n int64

@@ -52,19 +52,17 @@ func (c *Conversation) BeforeCreate(*gorm.DB) error {
 // ConversationMember is a participant. Exactly one of ExternalUserID /
 // InternalActorID is set (§3 identity namespaces). LeftAt!=nil = removed.
 type ConversationMember struct {
-	ID              string         `gorm:"primaryKey;size:40"`
-	TenantID        string         `gorm:"size:40;not null;index:idx_member_tenant"`
-	ConversationID  string         `gorm:"size:40;not null;index:idx_member_conv"`
-	MemberKind      MemberKind     `gorm:"size:16;not null"`
-	ExternalUserID  *string        `gorm:"size:255;index:idx_member_external"` // host namespace (incl. guests, email address)
-	InternalActorID *string        `gorm:"size:40"`                            // our namespace (admin_users.id)
-	ConvRole        ConvRole       `gorm:"size:16"`
-	Metadata        datatypes.JSON `gorm:"type:json"` // per-participant, host-defined
-	// MemberSearchText is the materialized concat of searchable_metadata_keys
-	// values, refreshed on write; the trigram/LIKE index targets THIS (§3).
-	MemberSearchText string `gorm:"type:text"`
-	JoinedAt         time.Time
-	LeftAt           *time.Time
+	ID              string     `gorm:"primaryKey;size:40"`
+	TenantID        string     `gorm:"size:40;not null;index:idx_member_tenant"`
+	ConversationID  string     `gorm:"size:40;not null;index:idx_member_conv"`
+	MemberKind      MemberKind `gorm:"size:16;not null"`
+	ExternalUserID  *string    `gorm:"size:255;index:idx_member_external"` // host namespace (incl. guests, email address)
+	InternalActorID *string    `gorm:"size:40"`                            // our namespace (admin_users.id)
+	// The participant's profile is not here: it lives on the Contact row, one per
+	// person per tenant, and is joined outward on read.
+	ConvRole ConvRole `gorm:"size:16"`
+	JoinedAt time.Time
+	LeftAt   *time.Time
 }
 
 func (m *ConversationMember) BeforeCreate(*gorm.DB) error {
@@ -139,13 +137,4 @@ func (p *PushToken) BeforeCreate(*gorm.DB) error {
 		p.ID = id.New(id.PushToken)
 	}
 	return nil
-}
-
-// PushOptOut suppresses nudges for one user, set by the tenant's own backend
-// (§5.5). A table because end users have no row of their own — only external ids
-// on membership, receipt and token rows.
-type PushOptOut struct {
-	TenantID       string `gorm:"primaryKey;size:40"`
-	ExternalUserID string `gorm:"primaryKey;size:255"`
-	CreatedAt      time.Time
 }

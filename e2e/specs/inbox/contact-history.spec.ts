@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures";
+import { uid } from "../../support/env";
 import {
   gotoInbox,
   filterTab,
@@ -9,6 +10,14 @@ import {
   contactHistoryRows,
   contactFilterChip,
 } from "../../support/inbox";
+import {
+  createWidgetPage,
+  openWidgetPanel,
+  widgetNewConversation,
+  widgetComposer,
+  widgetSend,
+  widgetBubble,
+} from "../../support/widget";
 
 // The Details-panel contact history. The dev seed gives "Mari Tamm" (u_mari)
 // three threads — one open (claimed by the seeded admin) plus two earlier,
@@ -37,5 +46,36 @@ test.describe("contact history", () => {
     await contactFilterChip(page).getByRole("button", { name: "Clear contact filter" }).click();
     await expect(contactFilterChip(page)).toHaveCount(0);
     await expect(rowByText(page, "Mari Tamm")).toBeVisible();
+  });
+
+  // The profile the SDK configures is upserted on start(), before any
+  // conversation exists — so the agent reads a name rather than an opaque id.
+  test("a profile written at widget start-up reaches the agent's member panel", async ({ page, browser }) => {
+    const userId = uid("rider");
+    const name = `Profile ${uid("n")}`;
+    const plate = uid("plate");
+
+    const { context, page: widget } = await createWidgetPage(browser, {
+      mode: "user",
+      userId,
+      metadata: { name, plate },
+    });
+    try {
+      await openWidgetPanel(widget);
+      await widgetNewConversation(widget).click();
+      const msg = `hello from ${userId}`;
+      await widgetComposer(widget).fill(msg);
+      await widgetSend(widget).click();
+      await expect(widgetBubble(widget, msg)).toBeVisible();
+
+      await gotoInbox(page);
+      await filterTab(page, "unassigned").click();
+      await openConversationByText(page, name);
+
+      await expect(page.getByText(name).first()).toBeVisible();
+      await expect(page.getByText(plate).first()).toBeVisible();
+    } finally {
+      await context.close();
+    }
   });
 });

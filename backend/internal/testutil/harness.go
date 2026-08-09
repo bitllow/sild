@@ -259,6 +259,14 @@ func (h *Harness) SeedTenant(searchableKeys ...string) *models.Tenant {
 	return t
 }
 
+// SeedContact stores a person's profile, the way the SDK or a host backend does.
+func (h *Harness) SeedContact(tenantID, externalUserID, metadata string) {
+	h.T.Helper()
+	if err := h.Svc.UpsertContact(context.Background(), tenantID, externalUserID, json.RawMessage(metadata)); err != nil {
+		h.T.Fatalf("seed contact: %v", err)
+	}
+}
+
 // SeedAPIKey mints an API key for a tenant and returns the full secret string.
 func (h *Harness) SeedAPIKey(tenantID string) string {
 	h.T.Helper()

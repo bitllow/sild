@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -80,11 +79,11 @@ func TestListContactConversations(t *testing.T) {
 	owner := loginAs(t, h, "owner@test")
 	ctx := context.Background()
 
-	meta := json.RawMessage(`{"name":"Mari Tamm"}`)
+	h.SeedContact(tenant.ID, "u_mari", `{"name":"Mari Tamm"}`)
 	for _, ref := range []string{"trip_1", "trip_2"} {
 		if _, err := h.Svc.CreateConversation(ctx, tenant.ID, domain.CreateConversationInput{
 			Reference: ref, OpenAssignment: true,
-			Members: []domain.MemberInput{{UserID: "u_mari", ConvRole: models.RoleClient, Metadata: meta}},
+			Members: []domain.MemberInput{{UserID: "u_mari", ConvRole: models.RoleClient}},
 		}); err != nil {
 			t.Fatalf("create %s: %v", ref, err)
 		}

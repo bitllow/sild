@@ -92,14 +92,23 @@ conversations      (id, tenant_id, reference, metadata, status, created_at)
                    -- reference: host object id (free-form). metadata: jsonb, host-defined
                    --   (host uses these to tell its own chats apart; platform stays agnostic)
 conversation_members (conversation_id, member_kind, external_user_id, internal_actor_id,
-                    conv_role, metadata, member_search_text, joined_at, left_at)
+                    conv_role, joined_at, left_at)
                    -- member_kind: user|agent|bot|email ; exactly one id column non-null
                    --   email = external party reachable by email; external_user_id holds the address
                    -- conv_role: dispatcher|client|driver|agent
-                   -- metadata: jsonb, host-defined per-PARTICIPANT (phone, app_version, role,
-                   --   guest:true …); a guest is just a user with a host-generated external_user_id
-                   -- member_search_text: materialized concat of searchable_metadata_keys values,
-                   --   refreshed on member write; GIN(gin_trgm_ops) on THIS (not live jsonb extraction)
+                   -- NO profile here: a participant is named by id, and their profile is the
+                   --   contacts row, joined outward on read
+contacts           (tenant_id, external_user_id, search_text, push_opted_out_at, updated_at)
+                   -- one stored profile per person per tenant, shared by every conversation
+                   -- search_text: materialized concat of searchable_metadata_keys values,
+                   --   rebuilt on every profile write; GIN(gin_trgm_ops) on THIS (not live
+                   --   jsonb extraction). Narrow because contact search scans it tenant-wide
+                   -- push_opted_out_at: Sild's own state, typed so a host profile write
+                   --   cannot disturb a suppression the tenant set
+contacts_meta      (tenant_id, external_user_id, metadata)
+                   -- metadata: jsonb, host-defined (name, phone, app_version, plan …); split off
+                   --   so a text scan never drags profile pages through memory. A guest is just
+                   --   a user with a host-generated external_user_id
 assignments        (id, tenant_id, conversation_id, assignee_actor_id, status, created_at, closed_at)
                    -- status state machine: queued → assigned → closed ; assigned → queued (return to
                    --   queue) allowed. closed is TERMINAL (no reopen). assignee_actor_id null until claimed.
@@ -139,9 +148,9 @@ id in this same space). `internal_actor_id` = our namespace (`agent` → `admin_
 The host owns its id space and is responsible for keeping guest ids distinct from real ones.
 
 **Metadata is two-layer, both host-defined and opaque to the platform.**
-`conversations.metadata` = conversation-level facts. `conversation_members.metadata` = per-participant
-facts the host attaches when adding the member (e.g. `phone`, `app_version`, `role: "driver"`). The
-inbox renders member metadata in the agent's member panel; the platform never interprets either.
+`conversations.metadata` = conversation-level facts. `contacts_meta.metadata` = the person's profile
+(e.g. `phone`, `app_version`, `role: "driver"`), written once and shared by every conversation they
+are in. The inbox renders the profile inline on each member; the platform never interprets either.
 
 ---
 
@@ -256,17 +265,37 @@ GET /v1/contacts?q=&limit=&cursor=
 GET /v1/contacts/:external_user_id
 ```
 
+```
+PUT /v1/contacts/me                              -- user token, self-scoped
+PUT /v1/contacts/:external_user_id               -- api_key
+PUT /v1/contacts/:external_user_id/push          -- api_key
+DELETE /v1/contacts/:external_user_id/push-tokens -- api_key
+```
+
 Contacts and conversations are both searchable, as separate resources — a contact
 search returns people, a conversation search returns threads. A contact's history
 is `GET /v1/conversations?participant=<id>`, so there is no
 `/contacts/:id/conversations`.
 
-A contact is a **read model** over `conversation_members`, keyed
-`(tenant_id, external_user_id)`. Projection rules:
+A contact is a **stored profile** keyed `(tenant_id, external_user_id)`, written
+once and shared by every conversation that person is in. The SDK upserts it on
+every `start()`, self-scoped by its token; a host backend writes the same row for
+any of its users, whether or not they have ever talked to anyone. Writes:
 
-- **Metadata**: the most recently joined *authorized* membership wins whole; keys
-  are never unioned across memberships. Merging would fabricate a person who
-  never existed and make the result order-dependent.
+- **Metadata is replaced whole.** No key merging: a key the host removes actually
+  disappears, and a read always returns a profile some writer asserted.
+- **Sild never writes into the host's blob.** Platform state gets a typed column
+  — `push_opted_out_at` is the first — and a metadata write never touches one, so
+  an app launch cannot un-suppress an opted-out person.
+- Agents cannot write a profile. A correction made in the inbox would be
+  overwritten by the person's next app launch, so it needs its own storage.
+
+The **directory** (the two `GET`s) is still a read model over
+`conversation_members`, joined outward to the profile. So a contact row may exist
+for someone invisible in the directory (profile written, never talked), and a
+contact may appear with no row (talked, no profile ever written). Projection
+rules:
+
 - **Existence**: any authorized membership, in any state (left, closed,
   archived).
 - **`conversation_count`**: current memberships only.
@@ -274,6 +303,11 @@ A contact is a **read model** over `conversation_members`, keyed
   stays findable with a count of zero.
 - The scope is applied **before** aggregation. Two operators may legitimately see
   different counts for the same contact; that is the scope working.
+
+Member views keep emitting the profile inline as `metadata`, joined from the
+contact row; an agent participant has no contact, so theirs is synthesized from
+their display name. A conversation list or detail can carry every participant's
+profile in one request with `?expand=contacts` (ARCHITECTURE §5).
 
 ### 4.5 `brands`
 
@@ -519,7 +553,7 @@ assignment.
 | Login               | Google OIDC                                                               |
 | Inbox list          | assignments filtered by status (queued/assigned/closed) + assignee; unread badges; **open new support request with a user** |
 | Search              | one bar, mixed tokens: `status:`/`assignee:`/`role:`/`channel:`/`meta.*:` qualifiers + free keywords (partial match on body & party metadata); hot data only |
-| Conversation view   | transcript (live via WS as agent), composer + attachments, **internal-note toggle** (agent-only), member panel showing per-member metadata, claim + close; email threads render inline |
+| Conversation view   | transcript (live via WS as agent), composer + attachments, **internal-note toggle** (agent-only), member panel showing each participant's profile, claim + close; email threads render inline |
 | Settings → API keys | issue (shown once), list, revoke                                         |
 | Settings → Webhooks | add (url + events), list, delete, delivery log                           |
 | Settings → Team     | invite agents, set platform role                                         |

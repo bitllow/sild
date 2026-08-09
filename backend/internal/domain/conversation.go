@@ -12,12 +12,12 @@ import (
 	"gorm.io/datatypes"
 )
 
-// MemberInput describes a member to add (§4.1).
+// MemberInput describes a member to add (§4.1). No profile: a participant is
+// named by id, and their profile is whatever their contact row says.
 type MemberInput struct {
 	UserID   string
 	ConvRole models.ConvRole
 	Kind     models.MemberKind // defaults to user
-	Metadata json.RawMessage
 }
 
 // CreateConversationInput is the host-backend create (§4.1).
@@ -56,7 +56,7 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 			return err
 		}
 		for _, mi := range in.Members {
-			m, err := s.buildMember(ctx, tenantID, conv.ID, mi)
+			m, err := s.buildMember(tenantID, conv.ID, mi)
 			if err != nil {
 				return err
 			}
@@ -75,7 +75,11 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 			}
 		}
 		// webhook events, atomic with the create (§6.1)
-		data := views.Conversation(conv, members, assignment)
+		profiles, err := s.MemberProfiles(ctx, tenantID, members)
+		if err != nil {
+			return err
+		}
+		data := views.Conversation(conv, members, assignment, profiles)
 		if err := s.enqueueWebhook(ctx, tx, tenantID, conv.ID, "conversation.created", data); err != nil {
 			return err
 		}
@@ -105,8 +109,8 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	return conv, nil
 }
 
-// buildMember constructs a member row with materialized search text.
-func (s *Service) buildMember(ctx context.Context, tenantID, convID string, mi MemberInput) (*models.ConversationMember, error) {
+// buildMember constructs a member row.
+func (s *Service) buildMember(tenantID, convID string, mi MemberInput) (*models.ConversationMember, error) {
 	if err := ValidateExternalUserID(mi.UserID); err != nil {
 		return nil, err
 	}
@@ -114,16 +118,13 @@ func (s *Service) buildMember(ctx context.Context, tenantID, convID string, mi M
 	if kind == "" {
 		kind = models.MemberUser
 	}
-	st, _ := s.searchText(ctx, tenantID, mi.Metadata)
 	id := mi.UserID
 	m := &models.ConversationMember{
-		TenantID:         tenantID,
-		ConversationID:   convID,
-		MemberKind:       kind,
-		ConvRole:         mi.ConvRole,
-		Metadata:         datatypes.JSON(mi.Metadata),
-		MemberSearchText: st,
-		JoinedAt:         s.now(),
+		TenantID:       tenantID,
+		ConversationID: convID,
+		MemberKind:     kind,
+		ConvRole:       mi.ConvRole,
+		JoinedAt:       s.now(),
 	}
 	// Exactly one identity column is set, keyed by kind: an agent member carries
 	// the admin_users.id in internal_actor_id; everyone else is external.
@@ -170,7 +171,7 @@ func (s *Service) AddMember(ctx context.Context, tenantID, convID string, mi Mem
 	if err != nil {
 		return nil, mapStoreErr(err)
 	}
-	m, err := s.buildMember(ctx, tenantID, convID, mi)
+	m, err := s.buildMember(tenantID, convID, mi)
 	if err != nil {
 		return nil, err
 	}

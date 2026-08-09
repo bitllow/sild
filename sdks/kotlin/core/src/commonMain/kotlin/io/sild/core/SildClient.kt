@@ -73,6 +73,8 @@ class SildClient internal constructor(
             // UI showing a connection that is permanently pending.
             val conn = if (realtime == null) ConnectionState.IDLE else ConnectionState.CONNECTING
             _state.update { it.copy(connection = conn, error = null) }
+            // Fire-and-forget: never gate the support channel on the profile write.
+            scope.launch { writeProfile() }
             runCatching {
                 loadBrand()
                 realtime?.connect()
@@ -128,6 +130,20 @@ class SildClient internal constructor(
      */
     fun shouldShow(data: Map<String, String>): Boolean =
         SildPush.shouldShow(data, _state.value.activeId)
+
+    /**
+     * Upserts the configured profile, so Sild knows who this is before they ever
+     * write a message. A missing profile costs a display name.
+     *
+     * No configured profile means nothing to assert: the write replaces the
+     * profile whole, so writing one would erase what the host's backend holds.
+     * A configured-empty profile is an assertion and still writes.
+     */
+    private suspend fun writeProfile() {
+        if (cfg.metadata == null) return
+        runCatching { api.upsertOwnProfile() }
+            .onFailure { println("sild: profile write failed: ${it.message}") }
+    }
 
     private suspend fun loadBrand() {
         runCatching { api.fetchBrand() }.onSuccess { res ->
@@ -444,10 +460,10 @@ class SildClient internal constructor(
         val names = HashMap<String, String>()
         for (m in c.members) {
             val ext = m.externalUserId ?: continue
-            names[ext] = m.metadata.name() ?: ext
+            names[ext] = m.name ?: ext
         }
         val other = c.members.firstOrNull { it.memberKind != "agent" && it.externalUserId != null && it.externalUserId != selfId }
-        val otherName = other?.let { it.metadata.name() ?: it.externalUserId }
+        val otherName = other?.let { it.name ?: it.externalUserId }
         val reference = c.reference ?: ""
         val closed = c.status == "closed" || c.assignment?.status == "closed"
         return Conversation(

@@ -36,7 +36,9 @@ data class ApiMember(
     @SerialName("conv_role") val convRole: String = "",
     @SerialName("external_user_id") val externalUserId: String? = null,
     @SerialName("internal_actor_id") val internalActorId: String? = null,
-    val metadata: JsonObject? = null,
+    /** Display name. The rest of the profile is the contacts resource, fetched
+     *  with expand=contacts.metadata — the widget surfaces only need the name. */
+    val name: String? = null,
 )
 
 @Serializable
