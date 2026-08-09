@@ -2,7 +2,6 @@ package push
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -271,21 +270,14 @@ func (f *FanOut) senderName(ctx context.Context, tenantID string, s Settings, co
 	return f.contactName(ctx, tenantID, *msg.ExternalUserID)
 }
 
-// contactName reads the host-supplied display name off the sender's stored
-// profile, the same `name` key the inbox and widget render.
+// contactName reads the sender's display name off the narrow contact row, the
+// same name the inbox and widget render. No blob: a nudge needs one field.
 func (f *FanOut) contactName(ctx context.Context, tenantID, externalUserID string) string {
-	profiles, err := f.store.Contacts().Profiles(ctx, tenantID, []string{externalUserID})
-	if err != nil {
+	names, err := f.store.Contacts().Names(ctx, tenantID, []string{externalUserID})
+	if err != nil || names[externalUserID] == "" {
 		return externalUserID
 	}
-	var meta map[string]any
-	if json.Unmarshal(profiles[externalUserID], &meta) != nil {
-		return externalUserID
-	}
-	if name, ok := meta["name"].(string); ok && name != "" {
-		return name
-	}
-	return externalUserID
+	return names[externalUserID]
 }
 
 func (f *FanOut) unread(ctx context.Context, tenantID, convID, externalUserID string) int {
