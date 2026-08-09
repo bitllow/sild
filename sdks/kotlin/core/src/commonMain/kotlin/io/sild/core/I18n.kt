@@ -72,7 +72,9 @@ fun negotiateLocale(prefs: List<String>, offered: List<String>): String {
     return ""
 }
 
-private val PLACEHOLDER = Regex("""\{(\w+)}""")
+// Both braces escaped: Android's regex engine rejects a bare `}`, and a pattern
+// that only the desktop JVM accepts fails at class-init time on a device.
+private val PLACEHOLDER = Regex("""\{(\w+)\}""")
 
 internal fun interpolate(text: String, vars: Map<String, Any>?): String {
     if (vars.isNullOrEmpty()) return text
