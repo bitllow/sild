@@ -10,6 +10,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/apiutil"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/gin-gonic/gin"
@@ -141,6 +142,9 @@ func (h *Handler) adminLogout(c *gin.Context) {
 // egress-only realtime connection (§5). The session cookie can't ride a
 // cross-origin WebSocket, so the browser swaps it for this token over REST.
 func (h *Handler) realtimeToken(c *gin.Context) {
+	if !apiutil.Authorize(c, policy.RealtimeToken) {
+		return
+	}
 	p := middleware.Get(c)
 	tok, exp, err := h.km.MintAgent(c.Request.Context(), p.AdminID, p.TenantID, time.Hour)
 	if err != nil {

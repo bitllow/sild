@@ -48,4 +48,11 @@ type ContactRepo interface {
 	// OptedOut answers for a whole conversation's membership at once, so fan-out
 	// costs one query rather than one per member.
 	OptedOut(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]bool, error)
+	// SetLocale records the language a person reads, creating a profile-less row
+	// when they have none. Separate from Upsert so a host backend's profile write
+	// cannot blank what the SDK detected.
+	SetLocale(ctx context.Context, tenantID, externalUserID, locale string) error
+	// Locales answers for a whole membership at once, for the same reason
+	// OptedOut does. Unknown ones are omitted.
+	Locales(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]string, error)
 }

@@ -10,4 +10,9 @@ const (
 	resourceAPIKeys       = "api_keys"
 	resourceWebhooks      = "webhooks"
 	resourceDeliveries    = "webhook_deliveries"
+
+	resourceTranslationProjects = "translation_projects"
+	resourceTranslationKeys     = "translation_keys"
+	resourceTranslationReleases = "translation_releases"
+	resourceTranslatorGrants    = "translator_grants"
 )

@@ -2,10 +2,12 @@ package api
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/principal"
+	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/gin-gonic/gin"
 )
 
@@ -225,6 +227,33 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).updateAgent, Success: http.StatusNoContent},
 		{Method: "POST", Path: "/v1/team/:id/password", Class: classAction,
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).setAgentPassword, Success: http.StatusNoContent},
+
+		// Translations. The manifest and bundle reads are what every client polls;
+		// the rest is the editor.
+		{Method: "GET", Path: "/v1/translations/manifest", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsFetch}, Principals: anyPrincipal, Handler: (*Handler).translationManifest},
+		{Method: "GET", Path: "/v1/translations/bundle", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsFetch}, Principals: anyPrincipal, Handler: (*Handler).translationBundle},
+		{Method: "GET", Path: "/v1/translations/projects", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsRead}, Principals: adminOnly, Handler: (*Handler).listTranslationProjects},
+		{Method: "PUT", Path: "/v1/translations/projects/:project", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsManage}, Principals: adminOnly, Handler: (*Handler).saveTranslationProject, Success: http.StatusNoContent},
+		{Method: "GET", Path: "/v1/translations/projects/:project/keys", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsRead}, Principals: adminOnly, Handler: (*Handler).listTranslationKeys},
+		{Method: "PUT", Path: "/v1/translations/projects/:project/keys/:key", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsWrite}, Principals: adminOnly, Handler: (*Handler).putTranslationKey, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/translations/projects/:project/keys/:key", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsWrite}, Principals: adminOnly, Handler: (*Handler).deleteTranslationKey, Success: http.StatusNoContent},
+		{Method: "GET", Path: "/v1/translations/projects/:project/releases", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsRead}, Principals: adminOnly, Handler: (*Handler).listTranslationReleases},
+		{Method: "POST", Path: "/v1/translations/projects/:project/releases", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsPublish}, Principals: adminOnly, Handler: (*Handler).publishTranslations, Success: http.StatusCreated},
+		{Method: "POST", Path: "/v1/translations/projects/:project/releases/:version/rollback", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsPublish}, Principals: adminOnly, Handler: (*Handler).rollbackTranslations, Success: http.StatusCreated},
+		{Method: "GET", Path: "/v1/translations/grants", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsManage}, Principals: adminOnly, Handler: (*Handler).listTranslatorGrants},
+		{Method: "PUT", Path: "/v1/translations/grants/:id", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsManage}, Principals: adminOnly, Handler: (*Handler).setTranslatorGrant, Success: http.StatusNoContent},
 	}
 }
 
@@ -244,12 +273,10 @@ type RouteGuard struct {
 	Path       string
 	Actions    []policy.Action
 	Principals []principal.Kind
-	// PrivilegedOnly means every action on the route is owner/admin-only, so a
-	// plain agent session must be refused — the dimension Principals cannot
-	// express, since an agent and an owner are both principal.KindAdmin.
-	PrivilegedOnly bool
-	// OwnerOnly narrows that further: an admin session must be refused too.
-	OwnerOnly bool
+	// Roles is the platform roles the mounted guard admits — the dimension
+	// Principals cannot express, since every admin role is principal.KindAdmin.
+	// Empty means the route mounts no role guard.
+	Roles []models.PlatformRole
 }
 
 // RouteSuccess is a route's declared success status, exported so a test can
@@ -280,26 +307,33 @@ func RouteGuards() []RouteGuard {
 		out = append(out, RouteGuard{
 			Method: r.Method, Path: r.Path,
 			Actions: r.Actions, Principals: r.Principals,
-			PrivilegedOnly: r.privilegedOnly(), OwnerOnly: r.ownerOnly(),
+			Roles: r.roles(),
 		})
 	}
 	return out
 }
 
-// privilegedOnly reports that every action on the route is owner/admin-only.
-func (r routeSpec) privilegedOnly() bool { return r.everyAction(policy.RequiresPrivilegedAdmin) }
-
-// ownerOnly reports that every action on the route is the owner's alone.
-func (r routeSpec) ownerOnly() bool { return r.everyAction(policy.RequiresOwner) }
-
-func (r routeSpec) everyAction(pred func(policy.Action) bool) bool {
+// roles is the platform roles the route admits: the union across its declared
+// actions, since a multi-action route picks one at runtime and the handler
+// narrows from there. Empty when any action is reachable by a non-admin
+// credential — a role guard there would refuse a caller the route admits.
+func (r routeSpec) roles() []models.PlatformRole {
 	if len(r.Actions) == 0 {
-		return false
+		return nil
 	}
+	var out []models.PlatformRole
 	for _, a := range r.Actions {
-		if !pred(a) {
-			return false
+		if !policy.AdminOnly(a) {
+			return nil
+		}
+		for _, role := range policy.AdminRoles(a) {
+			if !slices.Contains(out, role) {
+				out = append(out, role)
+			}
 		}
 	}
-	return true
+	if len(out) == len(policy.EveryAdminRole()) {
+		return nil // admits every role: nothing left to guard
+	}
+	return out
 }

@@ -1,6 +1,6 @@
 # Sild monorepo orchestrator. Delegates to each component's own Makefile.
 
-.PHONY: build test dev dev-infra web-build backend-build backend-test backend-migrate up down logs docs openapi
+.PHONY: build test dev dev-infra web-build backend-build backend-test backend-migrate i18n up down logs docs openapi
 
 # Build the web drop-in FIRST so the backend embeds the current bundle (§9),
 # then build the Go binaries.
@@ -14,13 +14,18 @@ test: backend-test
 # it up. NVM_REQUIRED=0 skips nvm if your shell already has a new enough node.
 NVM_DIR ?= $(HOME)/.nvm
 
-web-build:
-	@if [ "$(NVM_REQUIRED)" != "0" ]; then \
-	  [ -s "$(NVM_DIR)/nvm.sh" ] || { echo "nvm not found at $(NVM_DIR) — install nvm, or run 'make web-build NVM_REQUIRED=0' to use the system node"; exit 1; }; \
+USE_NODE = if [ "$(NVM_REQUIRED)" != "0" ]; then \
+	  [ -s "$(NVM_DIR)/nvm.sh" ] || { echo "nvm not found at $(NVM_DIR) — install nvm, or add NVM_REQUIRED=0 to use the system node"; exit 1; }; \
+	  . "$(NVM_DIR)/nvm.sh" && nvm install; \
 	fi
-	cd web && \
-	if [ "$(NVM_REQUIRED)" != "0" ]; then . "$(NVM_DIR)/nvm.sh" && nvm install; fi && \
-	npm install && npm run build
+
+web-build:
+	cd web && $(USE_NODE) && npm install && npm run build
+
+# Regenerate the widget's bundled string defaults from backend/internal/i18n/locales.
+# `npm run build` runs this too; this target is for regenerating on its own.
+i18n:
+	cd web && $(USE_NODE) && node ../scripts/gen-i18n.mjs
 
 backend-build: ; $(MAKE) -C backend build
 backend-test:  ; $(MAKE) -C backend test

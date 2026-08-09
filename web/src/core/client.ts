@@ -5,6 +5,8 @@ import type {
   ConnectionState,
   PendingAttachment,
   SildConfig,
+  TranslationBundle,
+  TranslationManifest,
   WidgetConversation,
   WidgetMessage,
   WidgetState,
@@ -26,6 +28,8 @@ export interface WidgetClient {
   upload(file: File): Promise<PendingAttachment>;
   /** Toggle the reply-notification sound (shared across the home + thread headers). */
   toggleSound(): void;
+  /** Record the language this person reads, so server-composed nudges match it. */
+  recordLocale(locale: string): void;
   /** Force the realtime socket to reconnect so the server re-derives this user's
    *  channel subscriptions — needed after opening a conversation created after the
    *  socket connected (its conv:<id> channel isn't in the current subscription set). */
@@ -273,6 +277,17 @@ export class SildClient implements WidgetClient {
   }
 
   private async api<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return (await this.apiRes<T>(method, path, body)).data;
+  }
+
+  // apiRes is api() with the response status and validator kept, for the callers
+  // that make conditional requests.
+  private async apiRes<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>
+  ): Promise<{ status: number; data: T; etag: string }> {
     const send = async () => {
       const token = await this.getToken();
       return fetch(this.base + "/v1" + path, {
@@ -280,6 +295,7 @@ export class SildClient implements WidgetClient {
         headers: {
           Authorization: `Bearer ${token}`,
           ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+          ...headers,
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
@@ -289,11 +305,14 @@ export class SildClient implements WidgetClient {
       await this.getToken(true); // expired/rotated — refresh once
       res = await send();
     }
-    if (res.status === 204) return undefined as T;
+    const etag = res.headers.get("ETag") || "";
+    if (res.status === 204 || res.status === 304) {
+      return { status: res.status, data: undefined as T, etag };
+    }
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
     if (!res.ok) throw new Error(data?.error?.message || res.statusText);
-    return data as T;
+    return { status: res.status, data: data as T, etag };
   }
 
   // fetchBrand loads the active brand (name + config) for an already-authenticated
@@ -309,6 +328,28 @@ export class SildClient implements WidgetClient {
     const res = await fetch(this.base + `/v1/brands/active?app_id=${encodeURIComponent(appId)}`);
     if (!res.ok) throw new Error("brand fetch failed");
     return (await res.json()) as BrandResponse;
+  }
+
+  // fetchTranslationManifest reports the current published version per locale, so
+  // the widget only pulls a bundle when the one it holds has moved. Null means the
+  // held validator still matches and nothing was re-sent.
+  async fetchTranslationManifest(
+    project: string,
+    etag?: string
+  ): Promise<{ manifest: TranslationManifest; etag: string } | null> {
+    const res = await this.apiRes<TranslationManifest>(
+      "GET",
+      `/translations/manifest?project=${encodeURIComponent(project)}`,
+      undefined,
+      etag ? { "If-None-Match": etag } : undefined
+    );
+    if (res.status === 304) return null;
+    return { manifest: res.data, etag: res.etag };
+  }
+
+  async fetchTranslationBundle(project: string, locale: string, version: number): Promise<TranslationBundle> {
+    const q = `project=${encodeURIComponent(project)}&locale=${encodeURIComponent(locale)}&version=${version}`;
+    return this.api<TranslationBundle>("GET", `/translations/bundle?${q}`);
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────────
@@ -343,6 +384,16 @@ export class SildClient implements WidgetClient {
     } catch (e) {
       console.warn("sild: profile write failed", e);
     }
+  }
+
+  // recordLocale reports the language the widget settled on, so a push or an email
+  // composed server-side reads in it. Sent on its own — the profile is the host's
+  // to assert, and a locale-only write leaves it untouched.
+  recordLocale(locale: string): void {
+    if (!locale) return;
+    void this.api("PUT", "/contacts/me", { locale }).catch((e) => {
+      console.warn("sild: locale write failed", e);
+    });
   }
 
   private connectRealtime() {
@@ -457,7 +508,7 @@ export class SildClient implements WidgetClient {
         peer,
         names,
         title: peer ? otherName || "Direct chat" : agentName,
-        subtitle: peer ? "Direct chat" + (reference ? ` · ${reference}` : "") : undefined,
+        reference: peer && reference ? reference : undefined,
       };
     });
     // Seed a header fallback name from any conversation that already has an agent.
@@ -475,7 +526,7 @@ export class SildClient implements WidgetClient {
       olderCursor: null,
       loadingOlder: false,
     });
-    // The row carries the peer flag, title/subtitle, closed state and member names, so
+    // The row carries the peer flag, title/reference, closed state and member names, so
     // fetch the list when it's missing — the normal case for a late open(id).
     if (!this.state.conversations.some((c) => c.id === id)) {
       await this.loadConversations().catch(() => {});
@@ -662,6 +713,7 @@ export class PreviewClient implements WidgetClient {
   send(): void {}
   backToList(): void {}
   reconnect(): void {}
+  recordLocale(): void {}
   toggleSound(): void {
     this.state = { ...this.state, soundOn: !this.state.soundOn };
     for (const l of this.listeners) l();

@@ -11,26 +11,28 @@ type Settings struct {
 	SenderSource models.PushSenderSource
 }
 
-// genericTitle is what a nudge says when the tenant has turned the sender name
-// off — the notification still has to say something.
-const genericTitle = "New message"
+// GenericKey is what a nudge says when the tenant has turned the sender name off
+// — the notification still has to say something. Resolved per recipient, because
+// a backgrounded device displays what arrived and runs no app code.
+const GenericKey = "push.newMessage"
 
 // previewLimit keeps a body short enough that a lock screen shows the start of
 // it rather than a truncation of the middle.
 const previewLimit = 180
 
 // Compose turns a message into notification text under the tenant's settings.
+// generic is the recipient's own wording of "New message".
 //
 //	sender  body   title      text
-//	off     off    New message
-//	off     on     New message  <preview>
-//	on      off    <sender>     New message
-//	on      on     <sender>     <preview>
-func Compose(s Settings, senderName, body string) (title, text string) {
-	title, text = genericTitle, ""
+//	off     off    generic
+//	off     on     generic    <preview>
+//	on      off    <sender>   generic
+//	on      on     <sender>   <preview>
+func Compose(s Settings, generic, senderName, body string) (title, text string) {
+	title, text = generic, ""
 	if s.IncludeSender && senderName != "" {
 		title = senderName
-		text = genericTitle
+		text = generic
 	}
 	if s.IncludeBody {
 		if p := preview(body); p != "" {

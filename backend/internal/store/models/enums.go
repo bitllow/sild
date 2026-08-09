@@ -120,7 +120,16 @@ const (
 	PlatformOwner PlatformRole = "owner"
 	PlatformAdmin PlatformRole = "admin"
 	PlatformAgent PlatformRole = "agent"
+	// PlatformTranslator works translations and nothing else — no conversation,
+	// contact or message capability.
+	PlatformTranslator PlatformRole = "translator"
 )
+
+// Valid reports a recognised platform role, so an unknown one is refused at the
+// edge rather than stored and silently carrying no capability.
+func (r PlatformRole) Valid() bool {
+	return r == PlatformOwner || r == PlatformAdmin || r == PlatformAgent || r == PlatformTranslator
+}
 
 // ── Push / upload / archive ────────────────────────────────────────────────
 

@@ -92,6 +92,26 @@ export function soundBtnStyle(soundOn: boolean): CSSProperties {
   };
 }
 
+/** The bordered white panel every settings-shaped surface is built from. */
+export const cardStyle: CSSProperties = {
+  background: "var(--white)",
+  border: "1px solid var(--border-default)",
+  borderRadius: 12,
+  boxShadow: "var(--shadow-sm)",
+  overflow: "hidden",
+};
+
+export const rowBorder = "1px solid var(--border-subtle)";
+
+/** The uppercase label above a value field. */
+export const fieldLabel: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "var(--text-tertiary)",
+  textTransform: "uppercase",
+  letterSpacing: ".04em",
+};
+
 export function tabStyle(active: boolean): CSSProperties {
   return {
     border: 0,

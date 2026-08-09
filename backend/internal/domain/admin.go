@@ -105,8 +105,7 @@ func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, ro
 // validPlatformRole rejects a role outside the §7 set: one no permission check
 // matches would store an operator who can do nothing.
 func validPlatformRole(role models.PlatformRole) error {
-	switch role {
-	case models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent:
+	if role.Valid() {
 		return nil
 	}
 	return invalid("invalid platform role")

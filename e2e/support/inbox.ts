@@ -124,6 +124,30 @@ export async function toggleSwitch(page: Page, n = 0): Promise<boolean> {
   return !before;
 }
 
+// ── Translations ─────────────────────────────────────────────────────────────
+export const translationRows = (page: Page): Locator => page.getByTestId("translations-row");
+export const translationRow = (page: Page, key: string): Locator =>
+  page.locator(`[data-testid="translations-row"][data-key="${key}"]`);
+
+// Land on the Translations section with the given locale selected and its keys
+// loaded. Selecting a locale re-queries the server, so wait for the rows.
+export async function gotoTranslations(page: Page, locale: string): Promise<void> {
+  await gotoInbox(page);
+  await page.getByTestId("translations-nav").click();
+  await expect(page.getByRole("heading", { name: "Translations" })).toBeVisible();
+  await expect(translationRows(page).first()).toBeVisible();
+  await page.getByTestId("translations-locale").selectOption(locale);
+  await expect(translationRow(page, "widget.home.cta")).toBeVisible();
+}
+
+// Type a value into a row and commit it (Enter flushes the debounced save).
+export async function setTranslation(page: Page, key: string, value: string): Promise<void> {
+  const input = translationRow(page, key).getByTestId("translations-value");
+  await input.fill(value);
+  await input.press("Enter");
+  await expect(translationRow(page, key).getByText("Saved")).toBeVisible();
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 export async function gotoSettings(page: Page, tab: "Channels" | "Appearance" | "API keys" | "Webhooks" | "Team"): Promise<void> {
   await navSettings(page).click();

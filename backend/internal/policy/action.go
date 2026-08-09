@@ -4,7 +4,11 @@
 // store — see internal/principal.
 package policy
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/bitllow/sild/backend/internal/store/models"
+)
 
 // Action names something a caller may attempt. The set is API surface.
 type Action string
@@ -65,17 +69,27 @@ const (
 	WebhooksManage         Action = "webhooks.manage"
 	WebhooksReadDeliveries Action = "webhooks.read_deliveries"
 	TeamManage             Action = "team.manage"
+
+	// TranslationsFetch is the client read of a published bundle — every
+	// principal that renders Sild's own strings.
+	TranslationsFetch   Action = "translations.fetch"
+	TranslationsRead    Action = "translations.read"
+	TranslationsWrite   Action = "translations.write"
+	TranslationsPublish Action = "translations.publish"
+	// TranslationsManage covers the project's locales and translator scopes.
+	TranslationsManage Action = "translations.manage"
 )
 
 // grant lists which principals hold an action — the only place roles map to
 // capabilities.
 type grant struct {
-	apiKey    bool
-	user      bool
-	admin     bool // admin session, any platform role
-	adminPriv bool // admin session, owner/admin only
-	owner     bool // admin session, owner only
-	signed    bool // signed upload capability
+	apiKey     bool
+	user       bool
+	admin      bool // admin session: owner, admin or agent
+	adminPriv  bool // admin session, owner/admin only
+	owner      bool // admin session, owner only
+	signed     bool // signed upload capability
+	translator bool // admin session, translator only
 }
 
 var capabilities = map[Action]grant{
@@ -110,7 +124,7 @@ var capabilities = map[Action]grant{
 
 	TokensMint:    {apiKey: true},
 	RealtimeToken: {admin: true},
-	PrincipalRead: {apiKey: true, user: true, admin: true},
+	PrincipalRead: {apiKey: true, user: true, admin: true, translator: true},
 
 	PushTokensManage:     {user: true},
 	PushConfigManage:     {owner: true},
@@ -127,26 +141,77 @@ var capabilities = map[Action]grant{
 	WebhooksManage:         {adminPriv: true},
 	WebhooksReadDeliveries: {adminPriv: true},
 	TeamManage:             {adminPriv: true},
+
+	TranslationsFetch:   {apiKey: true, user: true, admin: true},
+	TranslationsRead:    {admin: true, translator: true},
+	TranslationsWrite:   {adminPriv: true, translator: true},
+	TranslationsPublish: {adminPriv: true},
+	TranslationsManage:  {adminPriv: true},
+}
+
+// TranslatorActions is the translator role's whole capability set, so a test can
+// assert it has not widened.
+func TranslatorActions() []Action {
+	out := []Action{}
+	for a, g := range capabilities {
+		if g.translator {
+			out = append(out, a)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Actions returns every declared action, so the route manifest can be checked
 // against the catalog.
 func Actions() []Action { return sortedActions() }
 
-// RequiresPrivilegedAdmin reports that an agent session cannot carry the action,
-// so a route guarding it must refuse one — owner-only actions included. Exported
-// for the manifest conformance test, which asserts the mounted guard against it.
-func RequiresPrivilegedAdmin(a Action) bool {
-	g, ok := capabilities[a]
-	return ok && (g.adminPriv || g.owner) && !g.admin && !g.apiKey && !g.user
+// adminRoles is every platform role, narrowest first.
+var adminRoles = []models.PlatformRole{
+	models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent, models.PlatformTranslator,
 }
 
-// RequiresOwner reports that the action is the owner's alone, so a route
-// guarding it must refuse an admin as well as an agent. Owner wins over
-// adminPriv here for the same reason it does in holds.
-func RequiresOwner(a Action) bool {
+// AdminRoles returns the platform roles carrying the action, so a route's role
+// guard is derived from its declaration rather than assigned beside it.
+func AdminRoles(a Action) []models.PlatformRole {
 	g, ok := capabilities[a]
-	return ok && g.owner && !g.admin && !g.apiKey && !g.user
+	if !ok {
+		return nil
+	}
+	out := make([]models.PlatformRole, 0, len(adminRoles))
+	for _, r := range adminRoles {
+		if roleHolds(g, r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// AdminOnly reports that no other kind of principal holds the action, so a role
+// guard may be mounted without refusing a credential the route admits.
+func AdminOnly(a Action) bool {
+	g, ok := capabilities[a]
+	return ok && !g.apiKey && !g.user && !g.signed
+}
+
+// EveryAdminRole is the full role set, so a caller can tell "all of them" from a
+// narrowed set without knowing the list.
+func EveryAdminRole() []models.PlatformRole { return slices.Clone(adminRoles) }
+
+// roleHolds answers for one platform role. Owner wins over adminPriv, and the
+// translator's bit stands alone: a capability added later stays out of reach
+// until someone lists it.
+func roleHolds(g grant, r models.PlatformRole) bool {
+	if r == models.PlatformTranslator {
+		return g.translator
+	}
+	if g.owner {
+		return r == models.PlatformOwner
+	}
+	if g.adminPriv {
+		return r == models.PlatformOwner || r == models.PlatformAdmin
+	}
+	return g.admin
 }
 
 func sortedActions() []Action {

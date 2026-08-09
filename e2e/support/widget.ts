@@ -26,12 +26,16 @@ export async function seedDemoSession(
 // internals by role/label/text off the returned page or via the helpers below.
 export async function openDemo(page: Page): Promise<void> {
   await page.goto(`${BACKEND_URL}/sild-demo`);
-  await widgetLauncher(page).waitFor({ state: "visible" });
+  await widgetLauncherEl(page).waitFor({ state: "visible" });
 }
 
 // ── Widget element locators (pierce shadow DOM) ─────────────────────────────
-export const widgetLauncher = (page: Page): Locator => page.getByLabel("Chat with us");
-export const widgetPanel = (page: Page): Locator => page.getByRole("dialog", { name: "Support chat" });
+// The launcher's and panel's accessible names are themselves translated, so a
+// widget running in another locale is reached by class instead.
+export const widgetLauncherEl = (page: Page): Locator => page.locator("button.launcher");
+export const widgetPanelEl = (page: Page): Locator => page.locator("div.panel");
+export const widgetHomeCta = (page: Page): Locator => widgetPanelEl(page).locator(".card h2");
+export const widgetHomeNew = (page: Page): Locator => widgetPanelEl(page).locator(".card .btn");
 export const widgetComposer = (page: Page): Locator => page.getByPlaceholder(/Write a message/);
 export const widgetSend = (page: Page): Locator => page.getByLabel("Send");
 export const widgetAttach = (page: Page): Locator => page.getByLabel("Attach a file");
@@ -47,8 +51,8 @@ export const widgetBubble = (page: Page, text: string | RegExp): Locator => page
 
 // Open the launcher panel (first open triggers client.start()).
 export async function openWidgetPanel(page: Page): Promise<void> {
-  await widgetLauncher(page).click();
-  await widgetPanel(page).waitFor({ state: "visible" });
+  await widgetLauncherEl(page).click();
+  await widgetPanelEl(page).waitFor({ state: "visible" });
 }
 
 // Spin up an isolated end-user widget in its own browser context (a second
@@ -56,9 +60,11 @@ export async function openWidgetPanel(page: Page): Promise<void> {
 // inbox simultaneously against the one shared backend.
 export async function createWidgetPage(
   browser: Browser,
-  opts: { mode: WidgetMode; userId: string; metadata?: Record<string, unknown> }
+  opts: { mode: WidgetMode; userId: string; metadata?: Record<string, unknown>; locale?: string }
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ baseURL: BACKEND_URL });
+  // The demo host names no locale, so the widget negotiates the device's — which
+  // is what the context locale emulates.
+  const context = await browser.newContext({ baseURL: BACKEND_URL, locale: opts.locale });
   await seedDemoSession(context, opts);
   const page = await context.newPage();
   await openDemo(page);

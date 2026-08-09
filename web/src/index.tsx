@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { PreviewClient, SildClient } from "./core/client";
 import { App } from "./widget/App";
+import { I18n } from "./i18n";
 import { buildStyles, GOOGLE_FONT_HREF } from "./widget/theme";
 import { DEFAULT_BRAND, type BrandConfig, type SildConfig } from "./core/types";
 
@@ -34,6 +35,7 @@ function resolveBrand(partial?: Partial<BrandConfig>): BrandConfig {
 
 class SildWidgetElement extends HTMLElement {
   private client?: SildClient;
+  private i18n?: I18n;
   config?: SildConfig;
   private styleEl?: HTMLStyleElement;
   private mount?: HTMLDivElement;
@@ -56,6 +58,7 @@ class SildWidgetElement extends HTMLElement {
     this.mount = document.createElement("div");
     root.appendChild(this.mount);
     this.client = new SildClient(cfg);
+    this.i18n = new I18n({ locale: cfg.locale, appId: cfg.appId, source: this.client });
 
     // Render immediately with defaults (+ any inline overrides) so the launcher
     // is up instantly, then refine once the active brand arrives. The fetch is
@@ -78,13 +81,14 @@ class SildWidgetElement extends HTMLElement {
   }
 
   private paint() {
-    if (!this.styleEl || !this.mount || !this.client) return;
+    if (!this.styleEl || !this.mount || !this.client || !this.i18n) return;
     injectFont(this.brand.font);
     this.styleEl.textContent = buildStyles(this.brand, "live");
     render(
       <App
         client={this.client}
         config={this.brand}
+        i18n={this.i18n}
         conversationId={this.config?.conversationId}
         name={this.name}
         mode="live"
@@ -141,11 +145,12 @@ const Sild = {
     const mount = document.createElement("div");
     root.appendChild(mount);
     const client = new PreviewClient();
+    const i18n = new I18n(); // no source: the preview renders the bundled defaults
 
     const paint = (cfg: BrandConfig, v: "home" | "chat") => {
       injectFont(cfg.font);
       styleEl.textContent = buildStyles(cfg, "preview");
-      render(<App client={client} config={cfg} mode="preview" previewView={v} name="Acme Rides" />, mount);
+      render(<App client={client} config={cfg} i18n={i18n} mode="preview" previewView={v} name="Acme Rides" />, mount);
     };
     paint(config, view);
 

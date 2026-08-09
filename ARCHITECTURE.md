@@ -92,6 +92,7 @@ backend/
 │   │   ├── models/           #   GORM models = the §3 schema (portable)
 │   │   └── gormstore/        #   GORM impl + dialect Open() + AutoMigrate
 │   │
+│   ├── i18n/                 # Sild's own strings: canonical locale files + resolution
 │   ├── search/               # search.Backend iface; postgres(trgm)+portable(LIKE)
 │   ├── auth/                 # JWT mint/verify, JWKS, API-key hash/verify
 │   ├── realtime/             # Centrifuge node, channels, publishers (egress)

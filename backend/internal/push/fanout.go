@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/bitllow/sild/backend/internal/i18n"
 	"github.com/bitllow/sild/backend/internal/secrets"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
@@ -22,17 +23,43 @@ const renewAfter = store.ClaimTTL / 2
 // the row belongs to whoever holds it, and a lapsed lock frees it anyway.
 var errClaimLost = errors.New("claim lost")
 
+// TextResolver returns Sild's own text for a key at a recipient's locale, with
+// the tenant's overrides applied. Declared here so the use-case layer can supply
+// one without this package importing it.
+type TextResolver func(ctx context.Context, tenantID, locale, key string) string
+
 // FanOut drains the nudge queue and delivers through each tenant's own push
 // project.
 type FanOut struct {
 	store    store.Store
 	notifier Notifier
 	box      *secrets.Box
+	text     TextResolver
 }
 
 // NewFanOut constructs the fan-out. dig provides it for the push job.
-func NewFanOut(st store.Store, n Notifier, box *secrets.Box) *FanOut {
-	return &FanOut{store: st, notifier: n, box: box}
+func NewFanOut(st store.Store, n Notifier, box *secrets.Box, text TextResolver) *FanOut {
+	if text == nil {
+		text = ShippedText
+	}
+	return &FanOut{store: st, notifier: n, box: box, text: text}
+}
+
+// ShippedText resolves from the embedded catalog alone, ignoring any tenant
+// override — what a fan-out wired without the use-case layer can still say.
+func ShippedText(_ context.Context, _, locale, key string) string {
+	return i18n.Platform().Resolve(nil, locale, i18n.SourceLocale, key)
+}
+
+// generic is the recipient's wording of "New message", resolved once per
+// language for the whole drain pass rather than once per message.
+func (f *FanOut) generic(ctx context.Context, tp *tenantPush, locale string) string {
+	if v, ok := tp.generic[locale]; ok {
+		return v
+	}
+	v := f.text(ctx, tp.tenantID, locale, GenericKey)
+	tp.generic[locale] = v
+	return v
 }
 
 // tenantPush is everything a tenant's nudges need, resolved once per pass —
@@ -42,6 +69,9 @@ type tenantPush struct {
 	cred     Credential
 	settings Settings
 	verified bool
+	// generic memoizes "New message" per language for the pass — the same read
+	// otherwise repeats for every queued row of the same tenant.
+	generic map[string]string
 }
 
 // ProcessOnce delivers up to limit queued nudges and reports how many it
@@ -150,11 +180,26 @@ func (f *FanOut) deliver(ctx context.Context, tp *tenantPush, messageID string, 
 	if tp.settings.IncludeSender {
 		sender = f.senderName(ctx, tenantID, tp.settings, conv, msg)
 	}
-	title, body := Compose(tp.settings, sender, msg.Body)
+	locales, err := f.store.Contacts().Locales(ctx, tenantID, recipients)
+	if err != nil {
+		return err
+	}
+	// Composed once per distinct language, not per recipient: a busy conversation
+	// is many people reading a handful of languages.
+	composed := map[string][2]string{}
+	textFor := func(locale string) (string, string) {
+		if c, ok := composed[locale]; ok {
+			return c[0], c[1]
+		}
+		title, body := Compose(tp.settings, f.generic(ctx, tp, locale), sender, msg.Body)
+		composed[locale] = [2]string{title, body}
+		return title, body
+	}
 
 	var failed error
 	sent := false
 	for _, uid := range recipients {
+		title, body := textFor(locales[uid])
 		tokens, err := f.store.PushTokens().ListForUser(ctx, tenantID, uid)
 		if err != nil {
 			return err // not "this user has no devices" — try the row again
@@ -196,7 +241,7 @@ func (f *FanOut) deliver(ctx context.Context, tp *tenantPush, messageID string, 
 func (f *FanOut) resolve(ctx context.Context, tenantID string) (*tenantPush, error) {
 	cfg, err := f.store.PushConfigs().Get(ctx, tenantID)
 	if errors.Is(err, store.ErrNotFound) {
-		return &tenantPush{tenantID: tenantID}, nil
+		return &tenantPush{tenantID: tenantID, generic: map[string]string{}}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -211,6 +256,7 @@ func (f *FanOut) resolve(ctx context.Context, tenantID string) (*tenantPush, err
 	}
 	return &tenantPush{
 		tenantID: tenantID,
+		generic:  map[string]string{},
 		cred:     Credential{ProjectID: cfg.ProjectID, ServiceAccountJSON: raw},
 		settings: Settings{
 			IncludeSender: tenant.PushIncludeSender,

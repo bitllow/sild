@@ -42,6 +42,14 @@ SILD_TEST_MYSQL_DSN="sild:sild@tcp(127.0.0.1:3307)/sild?charset=utf8mb4&parseTim
 | §7 conversation RBAC | non-member → 403 | `…: TestNonMemberForbidden` |
 | §11 uploads | size cap enforced; ownership record; attachments validated against completed uploads | exercised via `domain.IssueUpload` + `SendMessage` attachment resolution |
 | §12 archival | write-then-delete (verified), tombstone + membership snapshot, sink rehydrate; OPEN never archived | `archive/job_test.go` |
+| translations: overrides | a tenant override shadows the shipped default and only that key; reset restores it | `api/translation_test.go` |
+| translations: staleness | an override written against older source text reads needs_review and keeps rendering | `…: TestASourceChangeFlagsTheOverrideForReview` |
+| translations: releases | an unpublished edit is invisible to a bundle read; a published version's content never changes; rollback cuts a new version with the old content | `…: TestAnUnpublishedEditIsInvisibleToABundleRead`, `TestAPublishedVersionNeverChanges`, `TestRollbackRestoresEarlierContent` |
+| translations: manifest | reports the version per locale and answers 304 to an unchanged ETag | `…: TestManifestReportsTheCurrentVersionAndAnswers304` |
+| translations: fallback | a language Sild does not ship falls through to the tenant's fallback rather than rendering keys | `…: TestATenantAddedLanguageFallsBackRatherThanShowingKeys`, `i18n/catalog_test.go` |
+| translations: recipient locale | a nudge is composed in the recipient's language, follows a PUBLISHED override, and ignores an unpublished one | `…: TestNudgeTextFollowsTheRecipientsLanguage`, `TestNudgeTextFollowsAPublishedOverride`, `TestAnUnpublishedOverrideDoesNotReachANudge` |
+| translations: translator role | holds exactly the translation capabilities and nothing else; a grant narrows projects and languages; cannot publish | `policy/translator_test.go`, `api/translation_test.go` |
+| translations: catalog | every locale covers every key; the generated web catalog is not stale | `i18n/catalog_test.go` |
 
 ## Horizontal scalability
 

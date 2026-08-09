@@ -48,6 +48,21 @@ export interface BrandResponse {
   config: Partial<BrandConfig>;
 }
 
+/** GET /v1/translations/manifest — each locale's current published version. */
+export interface TranslationManifest {
+  project: string;
+  fallback_locale: string;
+  locales: Record<string, number>;
+}
+
+/** GET /v1/translations/bundle — every key resolved for one locale. */
+export interface TranslationBundle {
+  project: string;
+  locale: string;
+  version: number;
+  strings: Record<string, string>;
+}
+
 // Public configuration for the drop-in (spec §9).
 export interface SildConfig {
   /** Mints a user JWT via the host backend (which holds the API key). Never the
@@ -78,6 +93,8 @@ export interface SildConfig {
   /** Optional inline brand overrides. When omitted, the widget fetches the
    *  active brand from GET /v1/me/brand at load. */
   brand?: Partial<BrandConfig>;
+  /** Render in this language instead of the visitor's browser preference. */
+  locale?: string;
 }
 
 export type Direction = "in" | "out";
@@ -124,8 +141,8 @@ export interface WidgetConversation {
   peer?: boolean;
   /** Row/header title — the other party for a peer chat, else the agent. */
   title?: string;
-  /** Peer thread subtitle, e.g. "Direct chat · trip 9021". */
-  subtitle?: string;
+  /** The host's reference for a peer chat, e.g. "trip 9021" — shown under the title. */
+  reference?: string;
   /** external_user_id → display name, for resolving message authors in the thread. */
   names?: Record<string, string>;
 }

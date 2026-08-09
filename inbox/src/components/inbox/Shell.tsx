@@ -2,8 +2,9 @@
 
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Avatar, InboxIcon, PeopleIcon, SettingsIcon } from "@/components/ds";
+import { Avatar, InboxIcon, PeopleIcon, SettingsIcon, TranslateIcon } from "@/components/ds";
 import { navStyle } from "./styles";
+import { Translations } from "./Translations";
 import { ConversationList } from "./ConversationList";
 import { ConversationView } from "./ConversationView";
 import { MemberPanel } from "./MemberPanel";
@@ -15,8 +16,8 @@ import { KeyDialog } from "./KeyDialog";
 
 export const Shell = observer(function Shell() {
   const store = useStore();
-  const isList = store.inboxView === "inbox";
-  const isPeer = store.inboxView === "peer";
+  const view = store.inboxView;
+  const nav = store.navViews;
 
   return (
     <div style={{ height: "100%", display: "flex" }}>
@@ -36,8 +37,9 @@ export const Shell = observer(function Shell() {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/assets/sild-mark-tile.svg" width={34} alt="Sild" style={{ borderRadius: 10, marginBottom: 8 }} />
+        {nav.includes("inbox") && (
         <div style={{ position: "relative" }}>
-          <button onClick={store.goInbox} aria-label="Inbox" style={navStyle(isList)}>
+          <button onClick={() => store.goView("inbox")} aria-label="Inbox" style={navStyle(view === "inbox")}>
             <InboxIcon size={22} />
           </button>
           {store.attentionCount > 0 && (
@@ -68,9 +70,10 @@ export const Shell = observer(function Shell() {
             </span>
           )}
         </div>
-        {store.peerAccess && (
+        )}
+        {nav.includes("peer") && (
           <div style={{ position: "relative" }}>
-            <button onClick={store.goPeer} aria-label="Peer conversations" style={navStyle(isPeer)}>
+            <button onClick={() => store.goView("peer")} aria-label="Peer conversations" style={navStyle(view === "peer")}>
               <PeopleIcon size={22} />
             </button>
             {store.peer.attention > 0 && (
@@ -104,9 +107,21 @@ export const Shell = observer(function Shell() {
             )}
           </div>
         )}
-        <button onClick={store.goSettings} aria-label="Settings" style={navStyle(store.inboxView === "settings")}>
-          <SettingsIcon size={22} />
-        </button>
+        {nav.includes("translations") && (
+          <button
+            data-testid="translations-nav"
+            onClick={() => store.goView("translations")}
+            aria-label="Translations"
+            style={navStyle(view === "translations")}
+          >
+            <TranslateIcon size={22} />
+          </button>
+        )}
+        {nav.includes("settings") && (
+          <button onClick={() => store.goView("settings")} aria-label="Settings" style={navStyle(view === "settings")}>
+            <SettingsIcon size={22} />
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         <button
           onClick={store.logout}
@@ -118,18 +133,20 @@ export const Shell = observer(function Shell() {
       </div>
 
       {/* Stage */}
-      {isList ? (
+      {view === "inbox" ? (
         <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
           <ConversationList />
           <ConversationView />
           {store.panelOpen && <MemberPanel />}
         </div>
-      ) : isPeer ? (
+      ) : view === "peer" ? (
         <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
           <PeerList />
           <PeerView />
           {store.panelOpen && <PeerPanel />}
         </div>
+      ) : view === "translations" ? (
+        <Translations />
       ) : (
         <Settings />
       )}

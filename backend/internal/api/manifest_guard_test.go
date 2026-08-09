@@ -33,12 +33,13 @@ func probePath(p string) string {
 // session per platform role, since an agent, an admin and an owner are all
 // principal.KindAdmin.
 type probeEnv struct {
-	h     *testutil.Harness
-	key   string
-	jwt   string
-	owner string
-	admin string
-	agent string
+	h          *testutil.Harness
+	key        string
+	jwt        string
+	owner      string
+	admin      string
+	agent      string
+	translator string
 }
 
 func newProbeEnv(t *testing.T) probeEnv {
@@ -48,13 +49,15 @@ func newProbeEnv(t *testing.T) probeEnv {
 	h.SeedAdmin(tenant.ID, "owner@probe", models.PlatformOwner)
 	h.SeedAdmin(tenant.ID, "admin@probe", models.PlatformAdmin)
 	h.SeedAdmin(tenant.ID, "agent@probe", models.PlatformAgent)
+	h.SeedAdmin(tenant.ID, "translator@probe", models.PlatformTranslator)
 	return probeEnv{
-		h:     h,
-		key:   h.SeedAPIKey(tenant.ID),
-		jwt:   h.MintToken(tenant.ID, "u_probe"),
-		owner: loginAs(t, h, "owner@probe"),
-		admin: loginAs(t, h, "admin@probe"),
-		agent: loginAs(t, h, "agent@probe"),
+		h:          h,
+		key:        h.SeedAPIKey(tenant.ID),
+		jwt:        h.MintToken(tenant.ID, "u_probe"),
+		owner:      loginAs(t, h, "owner@probe"),
+		admin:      loginAs(t, h, "admin@probe"),
+		agent:      loginAs(t, h, "agent@probe"),
+		translator: loginAs(t, h, "translator@probe"),
 	}
 }
 
@@ -87,28 +90,29 @@ func TestMountedRoutesRefuseUndeclaredPrincipalKinds(t *testing.T) {
 	}
 }
 
-// The role dimension Principals cannot express: every session below the tier a
-// route declares must be refused.
-func TestMountedRoutesRefuseSessionsBelowTheDeclaredRole(t *testing.T) {
+// The role dimension Principals cannot express: every role a route does not
+// declare must be refused by the mounted guard, not merely by the handler.
+func TestMountedRoutesRefuseUndeclaredRoles(t *testing.T) {
 	e := newProbeEnv(t)
-	for _, tier := range []struct {
-		role    string
-		session string
-		guards  func(api.RouteGuard) bool
-	}{
-		{"agent", e.agent, func(g api.RouteGuard) bool { return g.PrivilegedOnly }},
-		{"admin", e.admin, func(g api.RouteGuard) bool { return g.OwnerOnly }},
-	} {
-		for _, g := range api.RouteGuards() {
-			if !tier.guards(g) {
+	sessions := map[models.PlatformRole]string{
+		models.PlatformAdmin:      e.admin,
+		models.PlatformAgent:      e.agent,
+		models.PlatformTranslator: e.translator,
+	}
+	for _, g := range api.RouteGuards() {
+		if len(g.Roles) == 0 {
+			continue
+		}
+		for role, session := range sessions {
+			if slices.Contains(g.Roles, role) {
 				continue
 			}
-			t.Run(tier.role+" "+g.Method+" "+g.Path, func(t *testing.T) {
+			t.Run(string(role)+" "+g.Method+" "+g.Path, func(t *testing.T) {
 				code := e.fire(g.Method, probePath(g.Path), func(r *testutil.Req) *testutil.Req {
-					return r.Cookie("sild_admin", tier.session)
+					return r.Cookie("sild_admin", session)
 				})
 				if code != http.StatusForbidden {
-					t.Errorf("guards %v, but an %s session got %d — want 403", g.Actions, tier.role, code)
+					t.Errorf("admits %v, but a %s session got %d — want 403", g.Roles, role, code)
 				}
 			})
 		}

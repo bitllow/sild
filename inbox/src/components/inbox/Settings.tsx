@@ -5,7 +5,7 @@ import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { Avatar, Badge, Button, CopyIcon, Input, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
 import type { PlatformRole } from "@/store/types";
-import { tabStyle } from "./styles";
+import { cardStyle as card, fieldLabel, rowBorder, tabStyle } from "./styles";
 import { Appearance } from "./Appearance";
 
 const ROLE_OPTIONS = [
@@ -19,15 +19,6 @@ const PlusInline = () => (
     <path d="M5 12h14M12 5v14" />
   </svg>
 );
-
-const card: React.CSSProperties = {
-  background: "var(--white)",
-  border: "1px solid var(--border-default)",
-  borderRadius: 12,
-  boxShadow: "var(--shadow-sm)",
-  overflow: "hidden",
-};
-const rowBorder = "1px solid var(--border-subtle)";
 
 export const Settings = observer(function Settings() {
   const store = useStore();
@@ -309,15 +300,6 @@ const monoField: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-// The uppercase label above a value field.
-const fieldLabel: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: "var(--text-tertiary)",
-  textTransform: "uppercase",
-  letterSpacing: ".04em",
-};
-
 const Channels = observer(function Channels() {
   const store = useStore();
   const ch = store.emailChannel;
@@ -410,7 +392,7 @@ const Push = observer(function Push() {
   const store = useStore();
   const ch = store.pushChannel;
   // The credential is the owner's capability, so an admin never sees the panel.
-  if (!store.canManagePush || !ch) return null;
+  if (!store.can("push_config.manage") || !ch) return null;
   const configured = !!ch.project_id;
 
   const onFile = (file: File | undefined) => {

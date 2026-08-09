@@ -51,7 +51,9 @@ type AdminUser struct {
 	// PasswordHash is set when the admin uses email/password login (§2.4
 	// alternative to Google OIDC); nil for OIDC-only admins.
 	PasswordHash *string `gorm:"size:255"`
-	CreatedAt    time.Time
+	// Locale is the language this operator reads. Empty means unknown.
+	Locale    string `gorm:"size:16"`
+	CreatedAt time.Time
 }
 
 func (a *AdminUser) BeforeCreate(*gorm.DB) error {

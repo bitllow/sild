@@ -22,7 +22,10 @@ type Contact struct {
 	// PushOptedOutAt is Sild's own per-contact state, in a typed column so a
 	// profile write can never disturb a suppression the tenant set.
 	PushOptedOutAt *time.Time
-	UpdatedAt      time.Time
+	// Locale is the language this person reads, written by the SDK on start-up.
+	// Empty means unknown, and server-composed text falls back to the tenant's.
+	Locale    string `gorm:"size:16"`
+	UpdatedAt time.Time
 }
 
 // ContactMeta is the host-defined profile blob, split off so the scanned table

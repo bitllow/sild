@@ -149,6 +149,33 @@ func TestProfileAppliesToEveryConversation(t *testing.T) {
 	}
 }
 
+func TestLocaleOnlyWriteKeepsTheStoredProfile(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
+	owner := loginAs(t, h, "owner@test")
+	key := h.SeedAPIKey(tenant.ID)
+	newConversation(t, h, tenant.ID, "u_mari")
+	putProfile(h, "/v1/contacts/u_mari", key, map[string]any{"name": "Mari Tamm"})
+
+	tok := h.MintToken(tenant.ID, "u_mari")
+	if w := h.Request("PUT", "/v1/contacts/me").Bearer(tok).
+		JSON(map[string]any{"locale": "lv"}).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("locale write = %d", w.Code)
+	}
+
+	if got := contactMeta(t, h, owner, "u_mari")["name"]; got != "Mari Tamm" {
+		t.Fatalf("profile after a locale write = %v", got)
+	}
+	locales, err := h.Store.Contacts().Locales(context.Background(), tenant.ID, []string{"u_mari"})
+	if err != nil {
+		t.Fatalf("locales: %v", err)
+	}
+	if locales["u_mari"] != "lv" {
+		t.Fatalf("stored locale = %q, want lv", locales["u_mari"])
+	}
+}
+
 // The SDK writes on every launch, so an unchanged profile must cost the tenant
 // channel nothing.
 func TestProfileWriteEmitsOnlyOnChange(t *testing.T) {

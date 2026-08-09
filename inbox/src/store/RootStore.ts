@@ -13,10 +13,11 @@ import {
   type PushSettingsPatch,
   profilesOf,
 } from "@/api/admin";
-import { ApiError } from "@/api/client";
+import { ApiError, errorText } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
 import { AttachmentQueue } from "./attachments";
 import { PeerStore } from "./peer";
+import { TranslationsStore } from "./translations";
 import {
   buildConversation,
   buildQueueRow,
@@ -115,12 +116,12 @@ function playChime(): void {
   else fire();
 }
 
-// errorText renders a failed request for the settings panels. The backend's
-// message is the useful part — it says which credential field was wrong.
-function errorText(e: unknown): string {
-  if (e instanceof ApiError) return e.message;
-  return e instanceof Error ? e.message : "Something went wrong.";
-}
+// Nav entries beyond the two scope-derived ones, in rail order, each with the
+// action that admits it.
+const NAV_ACTIONS: [InboxView, string][] = [
+  ["translations", "translations.read"],
+  ["settings", "settings.read"],
+];
 
 export class RootStore {
   // --- session ---
@@ -240,11 +241,17 @@ export class RootStore {
   appIdCopied = false;
   snippetCopied = false;
   peerAccess = false;
-  canManagePush = false;
+  // Every nav entry and the landing route come from the grants the backend
+  // returns, so a principal is never shown a surface it would be refused.
+  canReadConversations = false;
+  private held = new Set<string>();
   peer = new PeerStore(this);
+  translations = new TranslationsStore();
 
   constructor() {
-    makeAutoObservable(this, { peer: false, atts: false });
+    // `can` stays unannotated: as an action it would read `held` untracked, and
+    // observers would not re-render when the grants change.
+    makeAutoObservable(this, { peer: false, atts: false, translations: false, can: false });
     if (typeof window !== "undefined") {
       this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
       installAudioUnlock(); // prime notification audio on the agent's first gesture
@@ -252,47 +259,53 @@ export class RootStore {
   }
 
   // ─────────────────────────── session ───────────────────────────
-  // loadMe resolves the signed-in operator (id + peer access). Best-effort — a
-  // failure just leaves the peer nav hidden; it never blocks the inbox.
+  // loadMe resolves the signed-in operator and every capability the shell reads.
+  // It is also the session probe: a translator holds no conversation capability,
+  // so the queue cannot answer "am I signed in".
   loadMe = async () => {
-    try {
-      const me = await adminApi.me();
-      runInAction(() => {
-        this.meId = me.subject?.id ?? "";
-        this.appId = me.tenant_id;
-        // Peer visibility is the scope of conversations.list, not a flag
-        // re-interpreted here.
-        const list = me.grants.find((g) => g.action === "conversations.list");
-        const kinds = list?.scope?.kinds;
-        this.peerAccess = !!list && (!kinds || kinds.includes("peer"));
-        // Same rule for the push credential: it is a capability the server
-        // grants, not a role this re-derives.
-        this.canManagePush = me.grants.some((g) => g.action === "push_config.manage");
-      });
-      // Load peer conversations up front (not lazily on first visit) so the nav
-      // attention badge is live from session start and realtime peer messages
-      // route to the peer store — otherwise, until the surface is opened once,
-      // peer.owns() is false and peer arrivals are dropped into a queue refetch.
-      if (this.peerAccess) void this.peer.loadConversations();
-    } catch {
-      /* leave peer surface hidden */
-    }
+    const me = await adminApi.me();
+    runInAction(() => {
+      this.meId = me.subject?.id ?? "";
+      this.appId = me.tenant_id;
+      this.held = new Set(me.grants.map((g) => g.action));
+      // Peer visibility is the scope of conversations.list, not a flag
+      // re-interpreted here.
+      const list = me.grants.find((g) => g.action === "conversations.list");
+      const kinds = list?.scope?.kinds;
+      this.canReadConversations = !!list;
+      this.peerAccess = !!list && (!kinds || kinds.includes("peer"));
+    });
+    // Load peer conversations up front (not lazily on first visit) so the nav
+    // attention badge is live from session start and realtime peer messages
+    // route to the peer store — otherwise, until the surface is opened once,
+    // peer.owns() is false and peer arrivals are dropped into a queue refetch.
+    if (this.peerAccess) void this.peer.loadConversations();
   };
+
+  /** Does this principal hold the grant for `action`? */
+  can = (action: string): boolean => this.held.has(action);
 
   bootstrap = async () => {
     try {
-      await this.loadConversations();
-      void this.loadMe();
-      runInAction(() => {
-        this.session = "authed";
-      });
-      this.connectRealtime();
+      await this.loadMe();
+      await this.enterSession();
     } catch (e) {
       runInAction(() => {
-        this.session = e instanceof ApiError && e.isUnauthorized ? "anon" : "anon";
+        this.session = "anon";
         if (e instanceof ApiError && !e.isUnauthorized) this.convError = e.message;
       });
     }
+  };
+
+  // Open the surface this principal actually holds, and connect realtime only
+  // when there are conversations to receive.
+  private enterSession = async () => {
+    if (this.canReadConversations) await this.loadConversations();
+    runInAction(() => {
+      this.session = "authed";
+    });
+    this.goView(this.landingView);
+    if (this.canReadConversations) this.connectRealtime();
   };
 
   loginPassword = async (email: string, password: string) => {
@@ -300,13 +313,11 @@ export class RootStore {
     this.authError = null;
     try {
       await adminApi.loginPassword(email, password);
-      await this.loadConversations();
-      void this.loadMe();
+      await this.loadMe();
+      await this.enterSession();
       runInAction(() => {
-        this.session = "authed";
         this.authBusy = false;
       });
-      this.connectRealtime();
     } catch (e) {
       runInAction(() => {
         this.authBusy = false;
@@ -340,8 +351,10 @@ export class RootStore {
       this.meId = null;
     this.appId = "";
       this.peerAccess = false;
-      this.canManagePush = false;
+      this.canReadConversations = false;
+      this.held.clear();
       this.peer.reset();
+      this.translations.reset();
     });
   };
 
@@ -773,18 +786,28 @@ export class RootStore {
   };
 
   // ─────────────────────────── navigation ───────────────────────────
-  goInbox = () => {
-    this.inboxView = "inbox";
+  // The nav rail, in rail order. A view absent here is one the principal holds
+  // no capability for, so it is neither offered nor reachable.
+  get navViews(): InboxView[] {
+    const views: InboxView[] = [];
+    if (this.canReadConversations) views.push("inbox");
+    if (this.peerAccess) views.push("peer");
+    for (const [view, action] of NAV_ACTIONS) if (this.can(action)) views.push(view);
+    return views;
+  }
+
+  get landingView(): InboxView {
+    return this.navViews[0] ?? "inbox";
+  }
+
+  goView = (view: InboxView) => {
+    if (!this.navViews.includes(view)) return;
+    this.inboxView = view;
+    if (view === "peer" && !this.peer.loaded) void this.peer.loadConversations();
+    if (view === "settings" && !this.settingsLoaded) void this.loadSettings();
+    if (view === "translations") void this.translations.load();
   };
-  goPeer = () => {
-    if (!this.peerAccess) return; // gated per-user (Settings → Team)
-    this.inboxView = "peer";
-    if (!this.peer.loaded) void this.peer.loadConversations();
-  };
-  goSettings = () => {
-    this.inboxView = "settings";
-    if (!this.settingsLoaded) void this.loadSettings();
-  };
+
   setSettingsTab = (t: SettingsTab) => {
     this.settingsTab = t;
   };
@@ -1534,7 +1557,7 @@ export class RootStore {
       if (t) t.peerAccess = value;
       if (id === this.meId) {
         this.peerAccess = value;
-        if (!value && this.inboxView === "peer") this.inboxView = "inbox";
+        if (!value && this.inboxView === "peer") this.goView("inbox");
       }
     });
     try {

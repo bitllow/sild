@@ -17,7 +17,10 @@ func CORS() gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
-			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, If-None-Match")
+			// ETag is not a safelisted response header, so a conditional request
+			// cannot revalidate without it being exposed.
+			c.Header("Access-Control-Expose-Headers", "ETag")
 			c.Header("Access-Control-Max-Age", "600")
 		}
 		if c.Request.Method == http.MethodOptions {

@@ -62,13 +62,7 @@ func holds(p *principal.Principal, a Action) bool {
 	case principal.KindSigned:
 		return g.signed
 	case principal.KindAdmin:
-		if g.owner {
-			return p.Role == models.PlatformOwner
-		}
-		if g.adminPriv {
-			return p.Privileged()
-		}
-		return g.admin
+		return roleHolds(g, p.Role)
 	}
 	return false
 }

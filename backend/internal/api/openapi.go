@@ -101,11 +101,8 @@ func (r routeSpec) openAPIOperation() map[string]any {
 	if sec := r.openAPISecurity(); sec != nil {
 		op["security"] = sec
 	}
-	if r.privilegedOnly() {
-		op["x-sild-privileged"] = true
-	}
-	if r.ownerOnly() {
-		op["x-sild-owner-only"] = true
+	if roles := r.roles(); len(roles) > 0 {
+		op["x-sild-roles"] = roles
 	}
 	if r.Rate != rateNone {
 		op["x-sild-rate-class"] = string(r.Rate)
