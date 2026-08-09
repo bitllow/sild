@@ -1,6 +1,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import {
   adminApi,
+  profilesOf,
   type ApiMember,
   type ApiMessage,
   type ApiQueueConversation,
@@ -9,7 +10,7 @@ import {
 import type { RealtimeEnvelope } from "@/api/realtime";
 import type { MessageAttachment, Presence } from "@/components/ds";
 import { AttachmentQueue } from "./attachments";
-import { clockTime, mapAttachments, relativeTime } from "./map";
+import { clockTime, mapAttachments, relativeTime, type Profiles } from "./map";
 
 // Peer conversations are direct chats between end-user parties with no support
 // assignment. Everything role-related is DERIVED from the participants present —
@@ -63,16 +64,18 @@ export interface PeerRoot {
 const isAgentRole = (role: string) => role === "support" || role === "agent";
 
 function participantName(m: ApiMember): string {
-  return m.metadata?.name || m.external_user_id || m.internal_actor_id || "Member";
+  return m.name || m.external_user_id || m.internal_actor_id || "Member";
 }
 
-function mapParticipant(m: ApiMember): PeerParticipant {
+// profile is the person's blob from the response's contacts block; a member view
+// carries only the name.
+function mapParticipant(m: ApiMember, profile?: Record<string, unknown>): PeerParticipant {
   const meta: Record<string, string> = {};
-  for (const [k, v] of Object.entries(m.metadata || {})) {
+  for (const [k, v] of Object.entries(profile || {})) {
     if (k === "name" || k === "role") continue; // name is the title; role is its own pill
     meta[k] = String(v);
   }
-  const presence = (m.metadata?.presence as Presence | undefined) || null;
+  const presence = (profile?.presence as Presence | undefined) || null;
   return {
     id: m.external_user_id || m.internal_actor_id || "",
     name: participantName(m),
@@ -81,6 +84,11 @@ function mapParticipant(m: ApiMember): PeerParticipant {
     meta,
     isAgent: m.member_kind === "agent",
   };
+}
+
+// mapParticipants pairs each member with its profile from the response's block.
+function mapParticipants(members: ApiMember[], profiles: Profiles): PeerParticipant[] {
+  return members.map((m) => mapParticipant(m, m.external_user_id ? profiles[m.external_user_id] : undefined));
 }
 
 function mapPeerMessage(m: ApiMessage, participants: PeerParticipant[], meId: string | null): PeerMessage {
@@ -182,10 +190,11 @@ export class PeerStore {
   loadConversations = async () => {
     const seq = ++this.listSeq;
     try {
-      const { items, next_cursor, has_more } = await adminApi.listConversations(this.listParams());
+      const { items, next_cursor, has_more, contacts } = await adminApi.listConversations(this.listParams());
       if (seq !== this.listSeq) return; // a newer load superseded this one
+      const profiles = profilesOf(contacts);
       runInAction(() => {
-        this.conversations = items.map((c) => this.buildRow(c));
+        this.conversations = items.map((c) => this.buildRow(c, profiles));
         this.cursor = has_more ? next_cursor : null;
         this.hasMore = has_more;
         this.loaded = true;
@@ -206,15 +215,16 @@ export class PeerStore {
       this.loadingMore = true;
     });
     try {
-      const { items, next_cursor, has_more } = await adminApi.listConversations({
+      const { items, next_cursor, has_more, contacts } = await adminApi.listConversations({
         ...this.listParams(),
         cursor: this.cursor,
       });
       if (seq !== this.listSeq) return; // filter changed mid-flight — drop this page
+      const profiles = profilesOf(contacts);
       runInAction(() => {
         const seen = new Set(this.conversations.map((c) => c.id));
         for (const it of items) {
-          if (!seen.has(it.id)) this.conversations.push(this.buildRow(it));
+          if (!seen.has(it.id)) this.conversations.push(this.buildRow(it, profiles));
         }
         this.cursor = has_more ? next_cursor : null;
         this.hasMore = has_more;
@@ -239,10 +249,11 @@ export class PeerStore {
       this.searching = true;
     });
     try {
-      const { items, next_cursor, has_more } = await adminApi.listConversations({ kind: "peer", q });
+      const { items, next_cursor, has_more, contacts } = await adminApi.listConversations({ kind: "peer", q });
       if (seq !== this.searchSeq) return; // stale response
+      const profiles = profilesOf(contacts);
       runInAction(() => {
-        this.conversations = items.map((it) => this.buildRow(it, it.snippet));
+        this.conversations = items.map((it) => this.buildRow(it, profiles, it.snippet));
         this.cursor = has_more ? next_cursor : null;
         this.hasMore = has_more;
         this.searching = false;
@@ -260,7 +271,7 @@ export class PeerStore {
   private async fetchRow(id: string, snippet?: string): Promise<PeerConversation | null> {
     try {
       const [conv, page] = await Promise.all([adminApi.getConversation(id), adminApi.listMessages(id)]);
-      const participants = conv.members.map(mapParticipant);
+      const participants = mapParticipants(conv.members, profilesOf(conv.contacts));
       const messages = [...page.items]
         .sort((a, b) => a.id.localeCompare(b.id))
         .map((m) => mapPeerMessage(m, participants, this.root.meId));
@@ -318,7 +329,7 @@ export class PeerStore {
     if (!this.conversations.some((c) => c.id === id)) return;
     try {
       const conv = await adminApi.getConversation(id);
-      const participants = conv.members.map(mapParticipant);
+      const participants = mapParticipants(conv.members, profilesOf(conv.contacts));
       runInAction(() => {
         const row = this.conversations.find((c) => c.id === id);
         if (!row) return;
@@ -337,8 +348,8 @@ export class PeerStore {
     return !!me && participants.some((p) => p.isAgent && p.id === me);
   }
 
-  private buildRow(c: ApiQueueConversation, snippet?: string): PeerConversation {
-    const participants = c.members.map(mapParticipant);
+  private buildRow(c: ApiQueueConversation, profiles: Profiles, snippet?: string): PeerConversation {
+    const participants = mapParticipants(c.members, profiles);
     const joined = this.hasJoined(participants);
     const existing = this.conversations.find((x) => x.id === c.id);
     return {
@@ -518,6 +529,32 @@ export class PeerStore {
     // nudge falls back to a first-page refresh.
     if (cid) void this.surface(cid);
     else void this.loadConversations();
+  };
+
+  // A profile changed somewhere in the tenant. Names live on the contact, so a
+  // loaded row can be showing a stale one — but a profile can never create,
+  // remove or reorder a conversation. So this merges into rows already loaded
+  // and does nothing else: no append, no cursor move, no selection change,
+  // which is what keeps later pages, a search result set and the open thread
+  // intact where a list reload would collapse them to page one.
+  onProfileNudge = async () => {
+    if (!this.loaded) return;
+    const seq = this.listSeq;
+    try {
+      const { items, contacts } = await adminApi.listConversations(this.listParams());
+      if (seq !== this.listSeq) return; // the list moved under us
+      const profiles = profilesOf(contacts);
+      runInAction(() => {
+        for (const it of items) {
+          const row = this.conversations.find((c) => c.id === it.id);
+          if (!row) continue;
+          row.participants = mapParticipants(it.members, profiles);
+          row.joined = this.hasJoined(row.participants);
+        }
+      });
+    } catch {
+      /* transient; the next event or reconnect reconciles */
+    }
   };
 
   // ── search + filter (server-side) ────────────────────────────────────────

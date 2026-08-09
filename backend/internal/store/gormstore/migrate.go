@@ -3,6 +3,7 @@ package gormstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/bitllow/sild/backend/internal/config"
@@ -20,6 +21,9 @@ func Migrate(db *gorm.DB) error {
 			return err
 		}
 		if err := backfillLastActivity(db); err != nil {
+			return err
+		}
+		if err := backfillContactNames(db); err != nil {
 			return err
 		}
 		if err := dropRetiredObjects(db); err != nil {
@@ -100,6 +104,36 @@ func backfillLastActivity(db *gorm.DB) error {
 		ORDER BY m.created_at DESC, m.id DESC LIMIT 1)
 		WHERE (last_message_preview IS NULL OR last_message_preview = '')
 		  AND last_message_at IS NOT NULL`).Error
+}
+
+// backfillContactNames fills contacts.name for rows whose profile predates the
+// column. Decoded in Go, not SQL: the three dialects spell JSON extraction three
+// different ways, and a contact table is small enough to walk.
+//
+// Only empty names are written, so it is idempotent and never overwrites a name
+// a later profile write already materialized.
+func backfillContactNames(db *gorm.DB) error {
+	var rows []models.ContactMeta
+	if err := db.
+		Joins("JOIN contacts c ON c.tenant_id = contacts_meta.tenant_id AND c.external_user_id = contacts_meta.external_user_id").
+		Where("c.name IS NULL OR c.name = ''").
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	for i := range rows {
+		var profile struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(rows[i].Metadata, &profile) != nil || profile.Name == "" {
+			continue
+		}
+		if err := db.Model(&models.Contact{}).
+			Where("tenant_id = ? AND external_user_id = ?", rows[i].TenantID, rows[i].ExternalUserID).
+			Update("name", profile.Name).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // dropRetiredObjects removes what the profile move replaced. AutoMigrate never

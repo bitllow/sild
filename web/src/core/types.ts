@@ -72,7 +72,8 @@ export interface SildConfig {
    *  conversation they are in (shown in the inbox member panel). Host-defined and
    *  opaque, e.g. { name, email, phone, plan }. This is the WHOLE profile, not a
    *  patch: it replaces whatever Sild holds, and the last writer wins across a
-   *  person's devices. */
+   *  person's devices. An empty object asserts an empty profile and erases it;
+   *  omitting it asserts nothing and leaves whatever Sild holds. */
   metadata?: Record<string, unknown>;
   /** Optional inline brand overrides. When omitted, the widget fetches the
    *  active brand from GET /v1/me/brand at load. */

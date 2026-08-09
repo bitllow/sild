@@ -44,6 +44,7 @@ func (h *Handler) listConversations(c *gin.Context) {
 		Search:          c.Query("q"),
 		CallerActorID:   adminIDOf(c),
 		IncludeInternal: apiutil.IsAgent(c),
+		WithProfiles:    wantsProfiles(expansion),
 	}
 	// Only messenger surfaces render unread counts; the queue shows assignment
 	// state and would pay for the extra query.
@@ -67,7 +68,7 @@ func (h *Handler) listConversations(c *gin.Context) {
 		extra["counts"] = <-countsCh
 	}
 	if expansion.Has(resourceContacts) {
-		extra[resourceContacts] = contactsBlock(res.Participants, res.Profiles, expansion)
+		extra[resourceContacts] = contactsBlock(res.Participants, res.Names, res.Profiles, expansion)
 	}
 	apiutil.RespondPageWith(c, resourceConversations, store.Page[map[string]any]{
 		Items: res.Items, NextCursor: res.NextCursor, HasMore: res.HasMore,

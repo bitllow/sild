@@ -31,14 +31,19 @@ func (h *Handler) getConversation(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	profiles, err := h.svc.MemberProfiles(c.Request.Context(), apiutil.Tenant(c), members)
+	load := h.svc.MemberNames
+	if wantsProfiles(expansion) {
+		load = h.svc.MemberProfiles
+	}
+	profiles, err := load(c.Request.Context(), apiutil.Tenant(c), members)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
 	view := views.Conversation(conv, members, assignment, profiles)
 	if expansion.Has(resourceContacts) {
-		view[resourceContacts] = contactsBlock(domain.ExternalParticipants(members), profiles.Contacts, expansion)
+		view[resourceContacts] = contactsBlock(
+			domain.ExternalParticipants(members), profiles.Names, profiles.Contacts, expansion)
 	}
 	view["kind"] = conv.Kind
 	// Archival keeps the conversation and its members, so the view is served from

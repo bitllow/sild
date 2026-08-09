@@ -35,10 +35,13 @@ type ContactRepo interface {
 	// Upsert replaces the profile whole and rematerializes the search text. It
 	// never writes a system column, so an app launch cannot un-suppress someone.
 	// changed reports whether the stored metadata actually moved.
-	Upsert(ctx context.Context, tenantID, externalUserID string, metadata []byte, searchText string) (changed bool, err error)
+	Upsert(ctx context.Context, tenantID, externalUserID string, metadata []byte, searchText, name string) (changed bool, err error)
 	// Profiles returns stored metadata by external_user_id, missing rows omitted:
 	// a person may be in a conversation without anyone ever writing their profile.
 	Profiles(ctx context.Context, tenantID string, externalUserIDs []string) (map[string][]byte, error)
+	// Names returns display names from the narrow table, missing ones omitted.
+	// Separate from Profiles so rendering participants never reads the blob.
+	Names(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]string, error)
 	// SetPushOptOut sets or clears the suppression, creating a profile-less row
 	// when the person has none — the tenant may suppress before they ever talk.
 	SetPushOptOut(ctx context.Context, tenantID, externalUserID string, optedOut bool) error

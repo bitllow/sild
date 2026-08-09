@@ -11,6 +11,7 @@ import {
   type QueueSort,
   type ApiPushChannel,
   type PushSettingsPatch,
+  profilesOf,
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
@@ -25,6 +26,7 @@ import {
   mapTeamMember,
   mapWebhook,
   relativeTime,
+  type Profiles,
 } from "./map";
 import type {
   ApiKey,
@@ -387,7 +389,8 @@ export class RootStore {
     try {
       const page = await adminApi.listConversations(this.queueParams);
       if (seq !== this.queueSeq) return; // a newer load superseded this one
-      const built = page.items.map(buildQueueRow);
+      const profiles = profilesOf(page.contacts);
+      const built = page.items.map((it) => buildQueueRow(it, profiles));
       runInAction(() => {
         this.convs = built;
         this.nextCursor = page.next_cursor;
@@ -425,10 +428,11 @@ export class RootStore {
     try {
       const page = await adminApi.listConversations({ ...this.queueParams, cursor: this.nextCursor });
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop this page
+      const profiles = profilesOf(page.contacts);
       runInAction(() => {
         const have = new Set(this.convs.map((c) => c.id));
         for (const it of page.items) {
-          if (!have.has(it.id)) this.convs.push(buildQueueRow(it));
+          if (!have.has(it.id)) this.convs.push(buildQueueRow(it, profiles));
         }
         this.nextCursor = page.next_cursor;
         this.hasMore = page.has_more;
@@ -612,13 +616,14 @@ export class RootStore {
     try {
       const page = await adminApi.listConversations(this.queueParams);
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop the merge
+      const profiles = profilesOf(page.contacts);
       runInAction(() => {
         this.applyCounts(page);
         const byId = new Map(this.convs.map((c) => [c.id, c]));
         let added = false;
         for (const it of page.items) {
           const existing = byId.get(it.id);
-          const fresh = buildQueueRow(it);
+          const fresh = buildQueueRow(it, profiles);
           if (existing) {
             // refresh lightweight row fields; keep any loaded history. Members and
             // the row label come from the server every sync — a contact's profile
@@ -654,7 +659,7 @@ export class RootStore {
       void this.syncQueue();
       void this.refreshActiveMessages();
       void this.refreshContactHistory();
-      if (this.peerAccess) this.peer.onTenantNudge();
+      if (this.peerAccess) void this.peer.onProfileNudge();
       return;
     }
     // agents:<tenant> carries every support conversation this operator may read
@@ -891,8 +896,9 @@ export class RootStore {
       return;
     }
     try {
-      const items = await adminApi.listAllConversations({ participant: contact.extId });
-      const built = items.map(buildQueueRow);
+      const { items, contacts } = await adminApi.listAllConversations({ participant: contact.extId });
+      const profiles = profilesOf(contacts);
+      const built = items.map((it) => buildQueueRow(it, profiles));
       runInAction(() => {
         // Drop a response that a newer active-contact switch has superseded.
         if (seq === this.contactSeq) this.contactHistory = built;
@@ -986,7 +992,7 @@ export class RootStore {
     });
     try {
       const page = await adminApi.listConversations({ kind: "support", q });
-      const built = await this.hydrateHits(page.items);
+      const built = await this.hydrateHits(page.items, profilesOf(page.contacts));
       if (seq !== this.searchSeq) return; // stale response
       runInAction(() => {
         this.searchResults = built;
@@ -1019,7 +1025,7 @@ export class RootStore {
         q: this.searchQuery.trim(),
         cursor: this.searchCursor,
       });
-      const built = await this.hydrateHits(page.items);
+      const built = await this.hydrateHits(page.items, profilesOf(page.contacts));
       if (seq !== this.searchSeq) return; // query changed mid-flight
       runInAction(() => {
         const have = new Set((this.searchResults ?? []).map((c) => c.id));
@@ -1038,11 +1044,11 @@ export class RootStore {
 
   // hydrateHits turns list rows into conversations. Rows arrive whole from the
   // list, so only the thread is fetched.
-  private hydrateHits = async (items: ApiQueueConversation[]): Promise<Conversation[]> =>
+  private hydrateHits = async (items: ApiQueueConversation[], profiles: Profiles): Promise<Conversation[]> =>
     Promise.all(
       items.map(async (hit) => {
         const page = await adminApi.listMessages(hit.id);
-        const c = buildConversation(hit, page);
+        const c = buildConversation(hit, page, undefined, profiles);
         if (hit.snippet) c.preview = hit.snippet;
         return c;
       })

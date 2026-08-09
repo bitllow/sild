@@ -26,7 +26,7 @@ func (s *Service) UpsertContact(ctx context.Context, tenantID, externalUserID st
 	if err != nil {
 		return err
 	}
-	changed, err := s.store.Contacts().Upsert(ctx, tenantID, externalUserID, canonical, text)
+	changed, err := s.store.Contacts().Upsert(ctx, tenantID, externalUserID, canonical, text, profileName(canonical))
 	if err != nil {
 		return err
 	}
@@ -39,6 +39,20 @@ func (s *Service) UpsertContact(ctx context.Context, tenantID, externalUserID st
 	return nil
 }
 
+// profileName lifts the display name out of the blob so it can live in a narrow
+// column. Only a string counts: `name` is host-defined and may be anything.
+func profileName(metadata []byte) string {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(metadata, &m) != nil {
+		return ""
+	}
+	var name string
+	if json.Unmarshal(m["name"], &name) != nil {
+		return ""
+	}
+	return name
+}
+
 // SetContactPush turns nudges on or off for one contact, on behalf of the
 // tenant's own backend. Suppression survives the app re-registering — that is
 // what makes it a preference rather than a token deletion.
@@ -49,22 +63,40 @@ func (s *Service) SetContactPush(ctx context.Context, tenantID, externalUserID s
 	return s.store.Contacts().SetPushOptOut(ctx, tenantID, externalUserID, !enabled)
 }
 
-// MemberProfiles resolves what member views render inline: one query for every
-// contact profile among the members, one lookup per distinct agent. Batched
+// MemberNames resolves what member views render: the narrow display name for
+// every contact among the members, one lookup per distinct agent. Batched
 // because the conversation list renders a page of them at once. extraActors are
 // agents named by something other than membership (a page's assignees).
-func (s *Service) MemberProfiles(ctx context.Context, tenantID string, members []models.ConversationMember, extraActors ...string) (views.Profiles, error) {
-	actors := extraActors
+//
+// The profile blob is NOT read here — it is a contacts expansion, and reading it
+// for every page is the fan-out the split exists to avoid.
+func (s *Service) MemberNames(ctx context.Context, tenantID string, members []models.ConversationMember, extraActors ...string) (views.Profiles, error) {
+	actors := make([]string, 0, len(extraActors)+len(members))
+	actors = append(actors, extraActors...)
 	for i := range members {
 		if id := members[i].InternalActorID; id != nil {
 			actors = append(actors, *id)
 		}
 	}
-	contacts, err := s.store.Contacts().Profiles(ctx, tenantID, ExternalParticipants(members))
+	names, err := s.store.Contacts().Names(ctx, tenantID, ExternalParticipants(members))
 	if err != nil {
 		return views.Profiles{}, err
 	}
-	return views.Profiles{Contacts: contacts, Agents: s.agentNames(ctx, tenantID, actors)}, nil
+	return views.Profiles{Names: names, Agents: s.agentNames(ctx, tenantID, actors)}, nil
+}
+
+// MemberProfiles is MemberNames plus the profile blobs, for a caller that asked
+// for them with `expand=contacts.metadata`.
+func (s *Service) MemberProfiles(ctx context.Context, tenantID string, members []models.ConversationMember, extraActors ...string) (views.Profiles, error) {
+	p, err := s.MemberNames(ctx, tenantID, members, extraActors...)
+	if err != nil {
+		return views.Profiles{}, err
+	}
+	p.Contacts, err = s.store.Contacts().Profiles(ctx, tenantID, ExternalParticipants(members))
+	if err != nil {
+		return views.Profiles{}, err
+	}
+	return p, nil
 }
 
 // ExternalParticipants lists the distinct end users among a set of members, in a

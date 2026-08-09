@@ -361,30 +361,37 @@ null — the message id *is* the position.
 `GET /v1/conversations?expand=contacts` returns `{items, …, contacts:[…]}` — so
 rendering thirty rows' worth of participant profiles is one request, not thirty.
 
-A path is either a bare resource name (`contacts`, the resource's full view) or a
-**dotted field path** (`contacts.metadata`), which narrows the block to the named
-fields. Several paths for one resource union: `expand=contacts.external_user_id,contacts.metadata`
-is the same block as `expand=contacts`.
+A bare resource name (`contacts`) yields that resource's **default fields** — the
+cheap identifying ones, not everything it can carry. A **dotted field path**
+(`contacts.metadata`) adds a field beyond the default set, and a **key path**
+(`contacts.metadata.plan`) narrows a blob-valued field to the keys named. Several
+paths for one resource union, and the field whole always beats a key selection of
+it however the paths are ordered — a union must never return less than one of its
+parts asked for.
 
 Field selection is **not byte-shaving — it selects a query plan.** A contact's
-profile blob lives in its own table, so an expansion naming no blob-backed field
-reads none of it. That is the whole reason the dot exists rather than a bare
-resource list. (On the conversation surfaces the saving is currently nil either
-way: member views emit the profile inline, so the page has already read it and
-the block is built from what is in hand rather than re-queried.)
+profile blob lives in its own table, and nothing on a conversation surface reads
+it unless a path names it: member views carry the person's `name` (a narrow
+column) and no blob at all. So `?expand=contacts` on a page of thirty
+conversations touches only the narrow table, and `?expand=contacts.metadata` is
+the request that pays for the join. That is the whole reason the dot exists
+rather than a bare resource list.
 
-Two rules keep it from rotting:
+Three rules keep it from rotting:
 
 - Field names are the resource's **wire** names, never storage names. The path is
   `contacts.metadata` because that is the field the view emits; a table split must
   not surface in the API. A contact has no `id`, so `contacts.id` is an error.
-- An unknown resource or field name is a **400**. A typo must never return an
-  unenriched page that looks complete.
+- An unknown resource or field name is a **400**, as is a key path into a field
+  that has no keys. A typo must never return an unenriched page that looks
+  complete.
+- A block always carries its resource's **identity** field, selected or not.
+  Profiles nobody can attribute to a person are not a narrower response, they are
+  an unusable one.
 
 `expand` narrows expanded blocks only; it never trims the primary resource's own
-objects, and there is no second level (`resource.relation.field`). Sparse
-fieldsets on the base resource are a separate convention with separate
-consequences, and nothing asks for them.
+objects. Sparse fieldsets on the base resource are a separate convention with
+separate consequences, and nothing asks for them.
 
 ### Authorization is attribute-based and lives in one package
 

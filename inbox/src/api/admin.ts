@@ -26,13 +26,34 @@ export interface ApiAssignment {
 export interface ApiMember {
   member_kind: ApiMemberKind;
   conv_role: ApiConvRole;
-  metadata: Record<string, string> | null;
+  /** Display name, inline because every surface renders it. The rest of the
+   *  profile is the contacts resource — ask for it with expand=contacts.metadata. */
+  name?: string;
   joined_at: string;
   external_user_id?: string;
   internal_actor_id?: string;
 }
 
+// One entry of the `contacts` expansion block. Distinct from ApiContact below,
+// which is the directory projection with its aggregates.
+export interface ApiExpandedContact {
+  external_user_id: string;
+  name?: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+// profilesOf indexes an expansion block by person, so a member view can be
+// rendered with the profile the same response already carried.
+export function profilesOf(block?: ApiExpandedContact[] | null): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const c of block || []) {
+    if (c.metadata) out[c.external_user_id] = c.metadata;
+  }
+  return out;
+}
+
 export interface ApiConversation {
+  contacts?: ApiExpandedContact[];
   id: string;
   status: ApiConvStatus;
   reference: string;
@@ -101,6 +122,7 @@ export interface ApiQueueConversation extends ApiConversation {
 }
 
 export interface ApiQueuePage extends ApiPage<ApiQueueConversation> {
+  contacts?: ApiExpandedContact[];
   // Support queue only. closed counts closed CONVERSATIONS, not assignments.
   counts?: {
     open: number;
@@ -296,10 +318,17 @@ export const adminApi = {
   // One endpoint backs the queue, the peer inbox, contact history and search.
   // Drains the cursor: the Details-panel history and the contact filter render a
   // whole list, with no scroll affordance to continue from.
-  listAllConversations: (params?: ConversationParams) =>
-    collectAll<ApiQueueConversation>((cursor) =>
-      adminApi.listConversations({ ...params, cursor })
-    ),
+  listAllConversations: async (params?: ConversationParams) => {
+    // collectAll keeps only the items, so the per-page contacts blocks are
+    // re-read here and merged into one lookup for the whole drained list.
+    const pages: ApiExpandedContact[] = [];
+    const items = await collectAll<ApiQueueConversation>(async (cursor) => {
+      const page = await adminApi.listConversations({ ...params, cursor });
+      pages.push(...(page.contacts || []));
+      return page;
+    });
+    return { items, contacts: pages };
+  },
   listConversations: (params?: ConversationParams) => {
     const q = new URLSearchParams();
     if (params?.kind) q.set("kind", params.kind);
@@ -313,10 +342,14 @@ export const adminApi = {
     if (params?.order) q.set("order", params.order);
     if (params?.limit) q.set("limit", String(params.limit));
     if (params?.cursor) q.set("cursor", params.cursor);
+    // The panels render whole profiles, so the blob is asked for by name; the
+    // page carries one block instead of a fetch per row.
+    q.set("expand", "contacts.metadata");
     const qs = q.toString();
     return api.get<ApiQueuePage>(`/conversations${qs ? `?${qs}` : ""}`);
   },
-  getConversation: (id: string) => api.get<ApiConversation>(`/conversations/${id}`),
+  getConversation: (id: string) =>
+    api.get<ApiConversation>(`/conversations/${id}?expand=contacts.metadata`),
   // cursor pages BACKWARD (older); ?since= below is the opposite direction.
   listMessages: (id: string, cursor?: string) =>
     api.get<ApiMessagesPage>(

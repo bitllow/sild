@@ -55,7 +55,8 @@ func contactsBlock(t *testing.T, body map[string]any) []map[string]any {
 }
 
 // The list is where the expansion earns its keep — the inbox renders many names
-// at once, and a per-row fetch is the fan-out this exists to remove.
+// at once, and a per-row fetch is the fan-out this exists to remove. The bare
+// name yields identity and display name, and NOT the profile blob.
 func TestExpandContactsOnListAndDetail(t *testing.T) {
 	f := newExpandFixture(t)
 
@@ -70,20 +71,66 @@ func TestExpandContactsOnListAndDetail(t *testing.T) {
 		if block[0]["external_user_id"] != "u_mari" {
 			t.Fatalf("%s: %v", path, block[0])
 		}
-		meta, _ := block[0]["metadata"].(map[string]any)
-		if meta["name"] != "Mari Tamm" {
-			t.Fatalf("%s: metadata = %v", path, block[0]["metadata"])
+		if block[0]["name"] != "Mari Tamm" {
+			t.Fatalf("%s: name = %v", path, block[0]["name"])
+		}
+		if _, present := block[0]["metadata"]; present {
+			t.Fatalf("%s: the default expansion carried the blob: %v", path, block[0])
 		}
 	}
 }
 
-// A dotted path narrows the block; several paths for one resource union, so the
-// union of every field is the bare resource name.
+// The blob is a separate entity: it arrives only when a path names it.
+func TestExpandMetadataIsOptIn(t *testing.T) {
+	f := newExpandFixture(t)
+	block := contactsBlock(t, f.get(t, "/v1/conversations/"+f.convID+"?expand=contacts.metadata"))[0]
+
+	meta, _ := block["metadata"].(map[string]any)
+	if meta["name"] != "Mari Tamm" || meta["plan"] != "gold" {
+		t.Fatalf("metadata = %v", block["metadata"])
+	}
+	// Identity rides along regardless, or the caller cannot attribute the profile.
+	if block["external_user_id"] != "u_mari" {
+		t.Fatalf("no identity on a metadata-only path: %v", block)
+	}
+}
+
+// One key of the blob, for a caller that wants a field and not a page of JSON.
+func TestExpandSelectsOneMetadataKey(t *testing.T) {
+	f := newExpandFixture(t)
+	block := contactsBlock(t, f.get(t, "/v1/conversations/"+f.convID+"?expand=contacts.metadata.plan"))[0]
+
+	meta, _ := block["metadata"].(map[string]any)
+	if meta["plan"] != "gold" {
+		t.Fatalf("selected key missing: %v", block["metadata"])
+	}
+	if _, present := meta["name"]; present {
+		t.Fatalf("an unselected key came along: %v", meta)
+	}
+}
+
+// Asking for the field whole and for one of its keys must not return less than
+// the whole — whichever order the paths arrive in.
+func TestExpandWholeFieldBeatsKeySelection(t *testing.T) {
+	f := newExpandFixture(t)
+	for _, expand := range []string{
+		"contacts.metadata,contacts.metadata.plan",
+		"contacts.metadata.plan,contacts.metadata",
+	} {
+		block := contactsBlock(t, f.get(t, "/v1/conversations/"+f.convID+"?expand="+expand))[0]
+		meta, _ := block["metadata"].(map[string]any)
+		if meta["name"] != "Mari Tamm" || meta["plan"] != "gold" {
+			t.Fatalf("expand=%s narrowed the whole field: %v", expand, meta)
+		}
+	}
+}
+
+// A dotted path narrows the block; several paths for one resource union.
 func TestExpandFieldSelection(t *testing.T) {
 	f := newExpandFixture(t)
 	base := "/v1/conversations/" + f.convID
 
-	narrow := contactsBlock(t, f.get(t, base+"?expand=contacts.external_user_id"))[0]
+	narrow := contactsBlock(t, f.get(t, base+"?expand=contacts.name"))[0]
 	if _, present := narrow["metadata"]; present {
 		t.Fatalf("a narrow expansion carried metadata: %v", narrow)
 	}
@@ -91,13 +138,12 @@ func TestExpandFieldSelection(t *testing.T) {
 		t.Fatalf("narrow identity = %v", narrow["external_user_id"])
 	}
 
-	full := contactsBlock(t, f.get(t, base+"?expand=contacts"))[0]
-	union := contactsBlock(t, f.get(t, base+"?expand=contacts.external_user_id,contacts.metadata"))[0]
-	if len(full) != len(union) || full["external_user_id"] != union["external_user_id"] {
-		t.Fatalf("union %v != bare resource %v", union, full)
+	union := contactsBlock(t, f.get(t, base+"?expand=contacts,contacts.metadata"))[0]
+	if union["name"] != "Mari Tamm" {
+		t.Fatalf("union lost the default fields: %v", union)
 	}
-	if narrow["external_user_id"] != full["external_user_id"] {
-		t.Fatal("a narrow expansion returned different identity values")
+	if _, present := union["metadata"]; !present {
+		t.Fatalf("union lost the named field: %v", union)
 	}
 }
 
@@ -105,7 +151,11 @@ func TestExpandFieldSelection(t *testing.T) {
 func TestExpandRejectsUnknownNames(t *testing.T) {
 	f := newExpandFixture(t)
 
-	for _, expand := range []string{"contact", "contacts.id", "contacts.search_text", "conversations"} {
+	for _, expand := range []string{
+		"contact", "contacts.id", "contacts.search_text", "conversations",
+		"contacts.name.first", // name is a plain field; it has no keys
+		"contacts.metadata.",  // an empty key selects nothing
+	} {
 		w := f.h.Request("GET", "/v1/conversations/"+f.convID+"?expand="+expand).
 			Cookie("sild_admin", f.owner).Do()
 		if w.Code != http.StatusBadRequest {

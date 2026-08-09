@@ -50,8 +50,8 @@ class SildClientThreadTest {
     private val peerRow = """
         {"id":"c_deep","status":"open","reference":"trip_9021",
          "members":[
-           {"member_kind":"user","external_user_id":"u_rider","metadata":{"name":"Riia"}},
-           {"member_kind":"user","external_user_id":"u_driver","metadata":{"name":"Toomas Vaher"}}
+           {"member_kind":"user","external_user_id":"u_rider","name":"Riia"},
+           {"member_kind":"user","external_user_id":"u_driver","name":"Toomas Vaher"}
          ]}
     """.trimIndent()
 

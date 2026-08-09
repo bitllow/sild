@@ -21,8 +21,9 @@ data class SildConfig(
     /** The signed-in user's profile, upserted on every start() and shared by every
      *  conversation they are in (shown in the inbox). This is the WHOLE profile,
      *  not a patch: it replaces whatever Sild holds, and the last writer wins
-     *  across a person's devices. */
-    val metadata: Map<String, String> = emptyMap(),
+     *  across a person's devices. An empty map asserts an empty profile and
+     *  erases it; null asserts nothing and leaves whatever Sild holds. */
+    val metadata: Map<String, String>? = null,
     /** Client-side ceiling (bytes) on a picked attachment before it is buffered into
      *  memory — a safety bound against OOM, NOT the business limit (the backend enforces
      *  the authoritative per-tenant max). Raise it to match a larger tenant limit. */

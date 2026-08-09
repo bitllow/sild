@@ -116,7 +116,7 @@ internal class SildApi(
      *  whatever Sild holds for the token's subject; it is not a patch. */
     suspend fun upsertOwnProfile() {
         val body = buildJsonObject {
-            put("metadata", JsonObject(cfg.metadata.mapValues { JsonPrimitive(it.value) }))
+            put("metadata", JsonObject(cfg.metadata.orEmpty().mapValues { JsonPrimitive(it.value) }))
         }
         api("PUT", "/contacts/me", body.toString())
     }

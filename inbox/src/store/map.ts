@@ -9,8 +9,12 @@ import type {
 } from "@/api/admin";
 import type { ApiMessagesPage, ApiQueueConversation } from "@/api/admin";
 import type { ApiAssignment } from "@/api/admin";
+import { profilesOf } from "@/api/admin";
 import type { MessageAttachment } from "@/components/ds";
 import type { Channel, Conversation, EmailChannel, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
+
+/** Profile blobs by external_user_id, from a response's contacts block. */
+export type Profiles = Record<string, Record<string, unknown>>;
 
 export function clockTime(iso: string): string {
   const d = new Date(iso);
@@ -45,12 +49,14 @@ export function shortDate(iso: string): string {
 }
 
 function memberDisplayName(m: ApiMember): string {
-  return m.metadata?.name || m.external_user_id || m.internal_actor_id || "Member";
+  return m.name || m.external_user_id || m.internal_actor_id || "Member";
 }
 
-export function mapMember(m: ApiMember): Member {
+// profile is the person's blob from the response's contacts block; a member view
+// carries only the name.
+export function mapMember(m: ApiMember, profile?: Record<string, unknown>): Member {
   const meta: Record<string, string> = {};
-  for (const [k, v] of Object.entries(m.metadata || {})) {
+  for (const [k, v] of Object.entries(profile || {})) {
     if (k === "name") continue; // shown as the title
     meta[k] = String(v);
   }
@@ -125,7 +131,7 @@ function deriveStatus(conv: ApiConversation, a?: ApiAssignment): UiStatus {
 // conversationShell derives the row fields shared by the queue list and the full
 // fetch (identity, name, channel, status, members). Each builder fills in the
 // parts that differ: history, preview, and last-activity timestamp.
-function conversationShell(conv: ApiConversation, a?: ApiAssignment) {
+function conversationShell(conv: ApiConversation, a: ApiAssignment | undefined, profiles: Profiles) {
   const client = conv.members.find((m) => m.conv_role === "client") || conv.members[0];
   const name = client ? memberDisplayName(client) : conv.reference || "Conversation";
   const channel = conv.members.some((m) => m.member_kind === "email") ? "email" : "app";
@@ -142,14 +148,15 @@ function conversationShell(conv: ApiConversation, a?: ApiAssignment) {
     unread: 0,
     dateStarted: conv.created_at,
     waitingSince: a?.created_at ?? conv.created_at,
-    members: conv.members.map(mapMember),
+    members: conv.members.map((m) => mapMember(m, m.external_user_id ? profiles[m.external_user_id] : undefined)),
   };
 }
 
 export function buildConversation(
   conv: ApiConversation,
   page: ApiMessagesPage,
-  assignment?: ApiAssignment
+  assignment?: ApiAssignment,
+  profiles: Profiles = profilesOf(conv.contacts)
 ): Conversation {
   const a = assignment || conv.assignment;
   const msgs = [...page.items]
@@ -160,7 +167,7 @@ export function buildConversation(
   const lastTs = page.items.length ? page.items[page.items.length - 1].created_at : conv.created_at;
 
   return {
-    ...conversationShell(conv, a),
+    ...conversationShell(conv, a, profiles),
     subject: conv.subject,
     time: relativeTime(lastTs),
     lastActivity: lastTs,
@@ -172,13 +179,13 @@ export function buildConversation(
 
 /** Build a queue row from the paginated list endpoint: members + last-message
  *  preview + last activity, but NO history (messages load on open). */
-export function buildQueueRow(conv: ApiQueueConversation): Conversation {
+export function buildQueueRow(conv: ApiQueueConversation, profiles: Profiles = {}): Conversation {
   const lastTs = conv.last_activity;
   // Preview the matching fragment, or an old-message hit looks unrelated.
   const preview =
     conv.snippet || (conv.status === "closed" ? "Conversation closed" : conv.last_message?.body || "");
   return {
-    ...conversationShell(conv, conv.assignment),
+    ...conversationShell(conv, conv.assignment, profiles),
     time: relativeTime(lastTs),
     lastActivity: lastTs,
     preview,

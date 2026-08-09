@@ -248,8 +248,7 @@ func memberName(conv map[string]any, externalUserID string) string {
 		if mm["external_user_id"] != externalUserID {
 			continue
 		}
-		meta, _ := mm["metadata"].(map[string]any)
-		name, _ := meta["name"].(string)
+		name, _ := mm["name"].(string)
 		return name
 	}
 	return ""

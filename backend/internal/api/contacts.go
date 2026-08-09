@@ -20,10 +20,20 @@ import (
 
 // expandContacts declares what an `expand=contacts` path may name. A contact has
 // no id — its wire identity is external_user_id — so `contacts.id` is a 400.
+//
+// Default is who the person is, served from the narrow table. The profile blob
+// lives in its own table and is named explicitly (`contacts.metadata`, or one
+// key of it) — that is the difference the dot exists to make.
 var expandContacts = apiutil.Expandable{
 	Resource: resourceContacts,
-	Fields:   []string{"external_user_id", "metadata"},
+	Default:  []string{"external_user_id", "name"},
+	Fields:   []string{"metadata"},
+	Keyed:    []string{"metadata"},
 }
+
+// wantsProfiles reports that the expansion named the blob, so the page must read
+// contacts_meta. Nothing else on a conversation surface touches it.
+func wantsProfiles(ex apiutil.Expansion) bool { return ex.Wants(resourceContacts, "metadata") }
 
 // contactView renders a directory entry: the stored profile plus the aggregates
 // only the scoped directory query can produce. No display name — the client
@@ -174,20 +184,50 @@ func contactPathID(c *gin.Context) (string, bool) {
 }
 
 // contactsBlock renders the `expand=contacts` block for a page's participants,
-// from the profiles the member views already loaded. Profiles only: the
-// directory aggregates need the scoped query the contacts resource itself is
-// for, and computing them per page would restore the fan-out this removes.
-func contactsBlock(ids []string, profiles map[string][]byte, ex apiutil.Expansion) []map[string]any {
+// from what the page already loaded. Profiles only: the directory aggregates
+// need the scoped query the contacts resource itself is for, and computing them
+// per page would restore the fan-out this removes.
+//
+// external_user_id is always carried: without it the block is a list of profiles
+// nobody can attribute to a person.
+func contactsBlock(ids []string, names map[string]string, profiles map[string][]byte, ex apiutil.Expansion) []map[string]any {
 	out := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
-		block := map[string]any{}
-		if ex.Wants(resourceContacts, "external_user_id") {
-			block["external_user_id"] = id
+		block := map[string]any{"external_user_id": id}
+		if ex.Wants(resourceContacts, "name") && names[id] != "" {
+			block["name"] = names[id]
 		}
-		if ex.Wants(resourceContacts, "metadata") && len(profiles[id]) > 0 {
-			block["metadata"] = json.RawMessage(profiles[id])
+		if meta := selectedMetadata(profiles[id], ex); meta != nil {
+			block["metadata"] = meta
 		}
 		out = append(out, block)
 	}
 	return out
+}
+
+// selectedMetadata narrows a stored profile to the keys the path named, or
+// returns it whole. An absent key is simply absent — a profile no writer
+// asserted must not read as one they did.
+func selectedMetadata(blob []byte, ex apiutil.Expansion) any {
+	if !ex.Wants(resourceContacts, "metadata") || len(blob) == 0 {
+		return nil
+	}
+	keys := ex.Keys(resourceContacts, "metadata")
+	if keys == nil {
+		return json.RawMessage(blob)
+	}
+	var all map[string]json.RawMessage
+	if json.Unmarshal(blob, &all) != nil {
+		return nil
+	}
+	picked := map[string]json.RawMessage{}
+	for k := range keys {
+		if v, ok := all[k]; ok {
+			picked[k] = v
+		}
+	}
+	if len(picked) == 0 {
+		return nil
+	}
+	return picked
 }

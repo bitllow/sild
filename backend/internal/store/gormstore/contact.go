@@ -3,7 +3,9 @@ package gormstore
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/policy"
@@ -211,25 +213,25 @@ func (r *contactRepo) GetContact(ctx context.Context, tenantID string, scope pol
 //
 // A write that moves nothing writes nothing: the SDK upserts on every start-up,
 // so the settled state is the common one and it must not cost a transaction.
-func (r *contactRepo) Upsert(ctx context.Context, tenantID, externalUserID string, metadata []byte, searchText string) (bool, error) {
+func (r *contactRepo) Upsert(ctx context.Context, tenantID, externalUserID string, metadata []byte, searchText, name string) (bool, error) {
 	var prev models.ContactMeta
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).First(&prev).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, err
 	}
-	changed := err != nil || !bytes.Equal(prev.Metadata, metadata)
-	if !changed && r.searchTextMatches(ctx, tenantID, externalUserID, searchText) {
+	changed := err != nil || !sameJSON(prev.Metadata, metadata)
+	if !changed && r.narrowMatches(ctx, tenantID, externalUserID, searchText, name) {
 		return false, nil
 	}
 
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "external_user_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"search_text", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"search_text", "name", "updated_at"}),
 		}).Create(&models.Contact{
 			TenantID: tenantID, ExternalUserID: externalUserID,
-			SearchText: searchText, UpdatedAt: time.Now(),
+			SearchText: searchText, Name: name, UpdatedAt: time.Now(),
 		}).Error; err != nil {
 			return err
 		}
@@ -244,15 +246,66 @@ func (r *contactRepo) Upsert(ctx context.Context, tenantID, externalUserID strin
 	return changed, err
 }
 
-// searchTextMatches reports that the materialized text is already what a write
+// sameJSON compares two blobs as JSON VALUES. MySQL re-serializes a json column
+// on read — keys reordered, spacing its own — so raw bytes would report every
+// profile write as a change and invalidate the whole tenant on each app launch.
+func sameJSON(a, b []byte) bool {
+	if bytes.Equal(a, b) {
+		return true
+	}
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	x, errX := decodeJSONValue(a)
+	y, errY := decodeJSONValue(b)
+	if errX != nil || errY != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+// decodeJSONValue keeps numbers as their written digits: the blob is opaque and
+// may carry ids past float64's exact range.
+func decodeJSONValue(b []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var v any
+	err := dec.Decode(&v)
+	return v, err
+}
+
+// narrowMatches reports that the materialized columns are already what a write
 // would store — the tenant's searchable keys can change without the profile
-// doing so, and that alone has to rewrite the row.
-func (r *contactRepo) searchTextMatches(ctx context.Context, tenantID, externalUserID, searchText string) bool {
-	var stored string
-	err := r.db.WithContext(ctx).Model(&models.Contact{}).
+// doing so, and that alone has to rewrite the row. Checking name here is also
+// what fills it in for rows written before the column existed.
+func (r *contactRepo) narrowMatches(ctx context.Context, tenantID, externalUserID, searchText, name string) bool {
+	var stored models.Contact
+	err := r.db.WithContext(ctx).
+		Select("search_text", "name").
 		Where("tenant_id = ? AND external_user_id = ?", tenantID, externalUserID).
-		Pluck("search_text", &stored).Error
-	return err == nil && stored == searchText
+		First(&stored).Error
+	return err == nil && stored.SearchText == searchText && stored.Name == name
+}
+
+func (r *contactRepo) Names(ctx context.Context, tenantID string, externalUserIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(externalUserIDs) == 0 {
+		return out, nil
+	}
+	var rows []models.Contact
+	err := r.db.WithContext(ctx).
+		Select("external_user_id", "name").
+		Where("tenant_id = ? AND external_user_id IN ?", tenantID, externalUserIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if rows[i].Name != "" {
+			out[rows[i].ExternalUserID] = rows[i].Name
+		}
+	}
+	return out, nil
 }
 
 func (r *contactRepo) Profiles(ctx context.Context, tenantID string, externalUserIDs []string) (map[string][]byte, error) {

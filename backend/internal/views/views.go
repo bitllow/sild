@@ -75,6 +75,7 @@ func Attachment(a *models.MessageAttachment, urlFn URLFunc) map[string]any {
 // metadata is synthesized rather than joined.
 type Profiles struct {
 	Contacts map[string][]byte
+	Names    map[string]string
 	Agents   map[string]string
 }
 
@@ -89,36 +90,33 @@ func Contact(externalUserID string, metadata []byte) map[string]any {
 	return out
 }
 
-// Member renders a conversation member, with the participant's profile inline.
+// Member renders a conversation member: who they are, not who they are to the
+// tenant. The profile blob is a contacts resource, reached through
+// `expand=contacts.metadata`; only the display name is inline, because every
+// surface renders it and it costs no join.
 func Member(m *models.ConversationMember, p Profiles) map[string]any {
 	out := map[string]any{
 		"member_kind": m.MemberKind,
 		"conv_role":   m.ConvRole,
-		"metadata":    memberMetadata(m, p),
 		"joined_at":   m.JoinedAt,
+	}
+	if name := memberName(m, p); name != "" {
+		out["name"] = name
 	}
 	participantID(out, m.ExternalUserID, m.InternalActorID)
 	return out
 }
 
-// memberMetadata joins the profile for an end user and synthesizes one for an
-// agent, so the inbox reads one field whoever the participant is.
-func memberMetadata(m *models.ConversationMember, p Profiles) any {
+// memberName reads the narrow name for an end user and the actor's name for an
+// agent, so a client renders one field whoever the participant is.
+func memberName(m *models.ConversationMember, p Profiles) string {
 	if m.ExternalUserID != nil {
-		return rawJSON(p.Contacts[*m.ExternalUserID])
+		return p.Names[*m.ExternalUserID]
 	}
 	if m.InternalActorID == nil {
-		return nil
+		return ""
 	}
-	name := p.Agents[*m.InternalActorID]
-	if name == "" {
-		return nil
-	}
-	out := map[string]any{"name": name}
-	if m.ConvRole != "" {
-		out["role"] = string(m.ConvRole)
-	}
-	return out
+	return p.Agents[*m.InternalActorID]
 }
 
 // Assignment renders an assignment (§5.3 assignment.updated data is a subset).

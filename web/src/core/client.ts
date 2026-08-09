@@ -61,7 +61,7 @@ interface ApiConvMember {
   conv_role: string;
   external_user_id?: string;
   internal_actor_id?: string;
-  metadata?: Record<string, unknown> | null;
+  name?: string;
 }
 
 interface Envelope {
@@ -212,7 +212,7 @@ const RECENT_CONVERSATIONS = 20;
 export class SildClient implements WidgetClient {
   private base: string;
   private tokenProvider: () => Promise<string> | string;
-  private metadata: Record<string, unknown>;
+  private metadata?: Record<string, unknown>;
   private selfId?: string;
   private activeNames: Record<string, string> = {};
   private token: string | null = null;
@@ -238,7 +238,7 @@ export class SildClient implements WidgetClient {
   constructor(cfg: SildConfig) {
     this.base = (cfg.baseUrl || "").replace(/\/$/, "");
     this.tokenProvider = cfg.tokenProvider;
-    this.metadata = cfg.metadata || {};
+    this.metadata = cfg.metadata;
     this.selfId = cfg.userId;
     installAudioUnlock(); // prime reply-notification audio on the first gesture
   }
@@ -332,7 +332,12 @@ export class SildClient implements WidgetClient {
   // writeProfile upserts the configured profile, so Sild knows who this is before
   // they ever write a message. A missing profile costs a display name; a blocked
   // start costs the whole support channel.
+  //
+  // No configured profile means nothing to assert: the write replaces the profile
+  // whole, so sending one would erase what the host's backend holds. A
+  // configured-empty profile is an assertion and still writes.
   private async writeProfile() {
+    if (!this.metadata) return;
     try {
       await this.api("PUT", "/contacts/me", { metadata: this.metadata });
     } catch (e) {
@@ -437,11 +442,11 @@ export class SildClient implements WidgetClient {
       const peer = !assignment && !agentName && !members.some((m) => m.member_kind === "agent");
       const names: Record<string, string> = {};
       for (const m of members) {
-        if (m.external_user_id) names[m.external_user_id] = String(m.metadata?.name || m.external_user_id);
+        if (m.external_user_id) names[m.external_user_id] = m.name || m.external_user_id;
       }
       // The other party in a peer chat = the (non-agent) member that isn't me.
       const other = members.find((m) => m.member_kind !== "agent" && m.external_user_id && m.external_user_id !== this.selfId);
-      const otherName = other ? String(other.metadata?.name || other.external_user_id) : undefined;
+      const otherName = other ? other.name || other.external_user_id : undefined;
       const reference = (c.reference as string) || "";
       return {
         id: String(c.id),

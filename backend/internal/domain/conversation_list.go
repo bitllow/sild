@@ -27,14 +27,19 @@ type ListConversationsInput struct {
 	UnreadFor string
 	// IncludeInternal permits internal notes to match a search (§5.6).
 	IncludeInternal bool
+	// WithProfiles reads the profile blobs too, for `expand=contacts.metadata`.
+	// Left false the page never touches the blob table.
+	WithProfiles bool
 }
 
-// ConversationPage is a rendered page plus the paging position. Participants and
-// Profiles are the distinct external people on the page and what was already
-// loaded for their inline member views, so an expansion re-reads nothing.
+// ConversationPage is a rendered page plus the paging position. Participants,
+// Names and Profiles are the distinct external people on the page and what was
+// loaded for them, so an expansion re-reads nothing. Profiles is nil unless the
+// request asked for the blob.
 type ConversationPage struct {
 	Items        []map[string]any
 	Participants []string
+	Names        map[string]string
 	Profiles     map[string][]byte
 	NextCursor   *store.Cursor
 	HasMore      bool
@@ -96,11 +101,16 @@ func (s *Service) renderPage(ctx context.Context, tenantID string, items []store
 
 	// Assignees resolve in the same pass as agent members: an operator who is both
 	// would otherwise be read twice.
-	profiles, err := s.MemberProfiles(ctx, tenantID, members, actors...)
+	load := s.MemberNames
+	if in.WithProfiles {
+		load = s.MemberProfiles
+	}
+	profiles, err := load(ctx, tenantID, members, actors...)
 	if err != nil {
 		return ConversationPage{}, err
 	}
 	out.Participants = ExternalParticipants(members)
+	out.Names = profiles.Names
 	out.Profiles = profiles.Contacts
 
 	x := rowExtras{snippets: snippets, profiles: profiles, agentNames: profiles.Agents}
