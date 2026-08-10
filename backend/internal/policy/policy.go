@@ -63,8 +63,8 @@ func holds(p *principal.Principal, a Action) bool {
 		return g.signed
 	case principal.KindAdmin:
 		// Union across the member's roles: a second role only ever widens.
-		for _, r := range p.Roles() {
-			if roleHolds(g, r) {
+		for _, a := range p.Assignments {
+			if roleHolds(g, a.Role) {
 				return true
 			}
 		}

@@ -202,7 +202,7 @@ export class RootStore {
   webhooks: Webhook[] = [];
   team: TeamMember[] = [];
   /** The role catalogue the backend serves: the Team screen renders whatever it
-   *  is told, so a new role or dimension needs no change here. */
+   *  is told. */
   roleDefs: RoleDefinition[] = [];
   /** What a refused team write said, shown above the roster. */
   teamError: string | null = null;
@@ -1194,8 +1194,6 @@ export class RootStore {
         // the rest of the page is theirs and must still load.
         adminApi.getPushChannel().catch(() => null),
       ]);
-      // Translator scopes are chosen from the tenant's projects and languages.
-      void this.translations.load();
       runInAction(() => {
         this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
         this.webhooks = webhooks.map(mapWebhook);
@@ -1560,6 +1558,9 @@ export class RootStore {
     return [];
   };
 
+  memberName = (memberId: string): string =>
+    this.team.find((t) => t.id === memberId)?.name ?? "this member";
+
   roleDef = (role: PlatformRole): RoleDefinition | undefined =>
     this.roleDefs.find((d) => d.role === role);
 
@@ -1625,6 +1626,7 @@ export class RootStore {
       });
     this.scopeWrites.set(key, write);
     await write;
+    if (this.scopeWrites.get(key) === write) this.scopeWrites.delete(key);
   };
 
   removeRole = async (memberId: string, role: PlatformRole) => {

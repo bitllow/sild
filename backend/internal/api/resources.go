@@ -14,5 +14,4 @@ const (
 	resourceTranslationProjects = "translation_projects"
 	resourceTranslationKeys     = "translation_keys"
 	resourceTranslationReleases = "translation_releases"
-	resourceTranslatorGrants    = "translator_grants"
 )

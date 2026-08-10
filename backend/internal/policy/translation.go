@@ -24,17 +24,16 @@ func AuthorizeTranslation(p *principal.Principal, a Action, project, locale stri
 	if locale != "" && !models.Allows(scope.Locales, locale) {
 		return denied("translation_scope", "not granted this language")
 	}
-	if a == TranslationsPublish {
-		if !scope.Publish {
-			return denied("translation_scope", "not granted publishing")
-		}
-		// A release is project-wide, so cutting one takes every language of the
-		// project — a translator narrowed to some of them cannot publish the rest.
-		if !slices.Contains(scope.Locales, models.ScopeAll) {
-			return denied("translation_scope", "publishing takes every language of the project")
-		}
+	if a == TranslationsPublish && !publishable(scope) {
+		return denied("translation_scope", "publishing takes every language of the project")
 	}
 	return nil
+}
+
+// publishable reports whether a translator scope may cut a release at all. A
+// release is project-wide, so publishing part of one is not a thing to grant.
+func publishable(scope models.RoleScope) bool {
+	return scope.Publish && slices.Contains(scope.Locales, models.ScopeAll)
 }
 
 // MayPublish reports whether this caller could cut a release of the project. It
@@ -63,8 +62,8 @@ func holdsWithoutTranslator(p *principal.Principal, a Action) bool {
 	if !ok {
 		return false
 	}
-	for _, r := range p.Roles() {
-		if r != models.PlatformTranslator && roleHolds(g, r) {
+	for _, a := range p.Assignments {
+		if a.Role != models.PlatformTranslator && roleHolds(g, a.Role) {
 			return true
 		}
 	}

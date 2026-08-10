@@ -200,8 +200,8 @@ func agentPeerAccess(ctx context.Context, svc *domain.Service, args []string) er
 	if err != nil {
 		return err
 	}
-	// Peer access is the agent role's own dimension, so this rescopes that role.
-	if err := svc.AssignRole(ctx, *tenant, admin.ID, models.PlatformAgent, models.RoleScope{Peer: *on}); err != nil {
+	// Peer access is the agent role's own dimension, so this sets that role.
+	if err := svc.SetRole(ctx, *tenant, admin.ID, models.PlatformAgent, models.RoleScope{Peer: *on}); err != nil {
 		return err
 	}
 	fmt.Printf("peer access %v for %s\n", *on, *email)

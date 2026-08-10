@@ -2,6 +2,7 @@ package gormstore
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/config"
@@ -28,8 +29,7 @@ func (r *roleAssignmentRepo) ListByTenant(ctx context.Context, tenantID string) 
 	return as, err
 }
 
-// Create adds an assignment. The unique index is what refuses a second one, so
-// two concurrent grants cannot both believe they were first.
+// Create adds an assignment, leaving the unique index to refuse a second one.
 func (r *roleAssignmentRepo) Create(ctx context.Context, a *models.RoleAssignment) error {
 	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(a)
 	if res.Error != nil {
@@ -41,9 +41,8 @@ func (r *roleAssignmentRepo) Create(ctx context.Context, a *models.RoleAssignmen
 	return nil
 }
 
-// Rescope replaces the scope of the assignment the member holds. Read-then-save
-// rather than an UPDATE map: the scope column is serialized by the model, and a
-// raw map would write the struct's Go rendering.
+// Rescope replaces the scope of the assignment the member holds. Read-then-save,
+// because the scope column is serialized by the model.
 func (r *roleAssignmentRepo) Rescope(ctx context.Context, tenantID, adminUserID string, role models.PlatformRole, scope models.RoleScope) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row models.RoleAssignment
@@ -73,7 +72,7 @@ func (r *roleAssignmentRepo) Delete(ctx context.Context, tenantID, adminUserID s
 			if err := q.Pluck("admin_user_id", &owners).Error; err != nil {
 				return err
 			}
-			if !anyOther(owners, adminUserID) {
+			if !slices.ContainsFunc(owners, func(id string) bool { return id != adminUserID }) {
 				return store.ErrLastOwner
 			}
 		}
@@ -87,15 +86,6 @@ func (r *roleAssignmentRepo) Delete(ctx context.Context, tenantID, adminUserID s
 		}
 		return nil
 	})
-}
-
-func anyOther(ids []string, except string) bool {
-	for _, id := range ids {
-		if id != except {
-			return true
-		}
-	}
-	return false
 }
 
 var _ store.RoleAssignmentRepo = (*roleAssignmentRepo)(nil)

@@ -1,5 +1,11 @@
 import type { MessageAttachment, Presence } from "@/components/ds";
-import type { ApiBrandConfig } from "@/api/admin";
+import type {
+  ApiBrandConfig,
+  ApiPlatformRole,
+  ApiRoleAssignment,
+  ApiRoleDefinition,
+  ApiRoleScope,
+} from "@/api/admin";
 
 export type UiStatus = "queued" | "assigned" | "closed";
 export type Channel = "app" | "email";
@@ -77,46 +83,20 @@ export interface Webhook {
   active: boolean;
 }
 
-export type PlatformRole = "owner" | "admin" | "agent" | "translator";
+export type PlatformRole = ApiPlatformRole;
 
-/** The limits one assignment carries. Which of them a role has is the role's
- *  own declaration, served by the backend. */
-export interface RoleScope {
-  peer?: boolean;
-  projects?: string[];
-  locales?: string[];
-  publish?: boolean;
-}
-
-/** One role a member holds, with that role's scope. */
-export interface RoleAssignment {
-  role: PlatformRole;
-  scope: RoleScope;
-}
+/** The limits one assignment carries, and the role catalogue that describes
+ *  them. Identical on the wire, so the API types are these types. */
+export type RoleScope = ApiRoleScope;
+export type RoleAssignment = ApiRoleAssignment;
+export type RoleDefinition = ApiRoleDefinition;
+export type RoleDimension = ApiRoleDefinition["dimensions"][number];
 
 export interface TeamMember {
   id: string;
   name: string;
   email: string;
   assignments: RoleAssignment[];
-}
-
-/** One limit a role's scope may carry, as the backend describes it. */
-export interface RoleDimension {
-  key: keyof RoleScope;
-  kind: "set" | "toggle";
-  label: string;
-  help: string;
-  /** Where the options of a set come from — the screen fetches them itself. */
-  source?: string;
-}
-
-/** A role as the Team screen renders it: what it is for, and what it scopes. */
-export interface RoleDefinition {
-  role: PlatformRole;
-  label: string;
-  description: string;
-  dimensions: RoleDimension[];
 }
 
 /** The email support channel as the Channels settings render it (§6.2). */

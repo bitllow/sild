@@ -86,7 +86,7 @@ func TestOnlyOwnerMayGrantPeerAccess(t *testing.T) {
 	}
 	// Nothing was persisted by the rejected attempts.
 	for _, id := range []string{admin.ID, agent.ID} {
-		if peerAccess(t, h, tenant.ID, id) {
+		if h.PeerAccess(tenant.ID, id) {
 			t.Fatalf("peer access must still be off for %s", id)
 		}
 	}
@@ -105,24 +105,9 @@ func TestOnlyOwnerMayGrantPeerAccess(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("owner granting peer access = %d %s, want 204", w.Code, w.Body)
 	}
-	if !peerAccess(t, h, tenant.ID, agent.ID) {
+	if !h.PeerAccess(tenant.ID, agent.ID) {
 		t.Fatal("peer access should be on after the owner's grant")
 	}
-}
-
-// peerAccess reports whether a member's agent assignment reaches peer conversations.
-func peerAccess(t *testing.T, h *testutil.Harness, tenantID, adminID string) bool {
-	t.Helper()
-	held, err := h.Svc.RoleAssignments(context.Background(), tenantID, adminID)
-	if err != nil {
-		t.Fatalf("assignments for %s: %v", adminID, err)
-	}
-	for _, a := range held {
-		if a.Role == models.PlatformAgent && a.Scope.Peer {
-			return true
-		}
-	}
-	return false
 }
 
 // The owner-only grant is worthless unless the owner ROLE is equally protected. This

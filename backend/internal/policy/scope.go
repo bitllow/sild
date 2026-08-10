@@ -103,8 +103,10 @@ func Grants(p *principal.Principal) []Grant {
 		}
 		// A translator's scope is part of what they hold: advertising a publish
 		// their grant withholds puts a button on screen that only 403s.
-		if scope, narrows := TranslationNarrowing(p, a); narrows && a == TranslationsPublish && !scope.Publish {
-			continue
+		if a == TranslationsPublish {
+			if scope, narrows := TranslationNarrowing(p, a); narrows && !publishable(scope) {
+				continue
+			}
 		}
 		g := Grant{Action: a}
 		if a == ConversationsList || a == ContactsList {

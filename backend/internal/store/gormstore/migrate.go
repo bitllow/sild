@@ -139,12 +139,6 @@ func backfillContactNames(db *gorm.DB) error {
 	return nil
 }
 
-// dropRetiredObjects removes what the profile move replaced. AutoMigrate never
-// drops, so a database upgraded in place would keep them forever.
-//
-// Raw DDL by table NAME: the fields are gone from the models, so gorm's
-// model-driven migrator has no schema to resolve them against. Dropping a column
-// takes its indexes with it on every dialect.
 // backfillRoleAssignments turns the retired per-member role and peer flag into
 // the assignment rows that replaced them. Without it an existing member
 // authenticates holding nothing and cannot even repair themselves.
@@ -166,23 +160,28 @@ func backfillRoleAssignments(db *gorm.DB) error {
 		return err
 	}
 	for _, r := range rows {
-		held := []models.RoleAssignment{{
+		theirs := models.RoleAssignment{
 			TenantID: r.TenantID, AdminUserID: r.ID, Role: models.PlatformRole(r.Role),
-		}}
+		}
 		// A translator's grant used to be the rows in translator_scopes, and none of
 		// them meant every project and language. The narrowed ones are read back below.
-		if held[0].Role == models.PlatformTranslator {
-			held[0].Scope.Projects = []string{models.ScopeAll}
-			held[0].Scope.Locales = []string{models.ScopeAll}
+		if theirs.Role == models.PlatformTranslator {
+			theirs.Scope.Projects = []string{models.ScopeAll}
+			theirs.Scope.Locales = []string{models.ScopeAll}
 		}
+		held := []models.RoleAssignment{theirs}
 		// Peer access was the person's, whatever their role; it becomes the agent
 		// assignment's dimension, so a non-agent who held it keeps reaching peers.
-		if r.PeerAccess && held[0].Role != models.PlatformAgent {
-			held = append(held, models.RoleAssignment{
-				TenantID: r.TenantID, AdminUserID: r.ID, Role: models.PlatformAgent,
-			})
+		if r.PeerAccess {
+			if theirs.Role == models.PlatformAgent {
+				held[0].Scope.Peer = true
+			} else {
+				held = append(held, models.RoleAssignment{
+					TenantID: r.TenantID, AdminUserID: r.ID, Role: models.PlatformAgent,
+					Scope: models.RoleScope{Peer: true},
+				})
+			}
 		}
-		held[len(held)-1].Scope.Peer = r.PeerAccess
 		if err := db.Create(&held).Error; err != nil {
 			return err
 		}
@@ -236,6 +235,12 @@ func backfillTranslatorScopes(db *gorm.DB) error {
 	return nil
 }
 
+// dropRetiredObjects removes what a replacement left behind. AutoMigrate never
+// drops, so a database upgraded in place would keep them forever.
+//
+// Raw DDL by table NAME: the fields are gone from the models, so gorm's
+// model-driven migrator has no schema to resolve them against. Dropping a column
+// takes its indexes with it on every dialect.
 func dropRetiredObjects(db *gorm.DB) error {
 	const members = "conversation_members"
 	m := db.Migrator()

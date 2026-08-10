@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +22,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/jobs"
 	"github.com/bitllow/sild/backend/internal/mail"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/push"
 	"github.com/bitllow/sild/backend/internal/realtime"
 	"github.com/bitllow/sild/backend/internal/search"
@@ -304,15 +304,21 @@ func (h *Harness) GrantPeer(tenantID, adminID string) {
 // adding the role if they do not hold it yet.
 func (h *Harness) SetPeerScope(tenantID, adminID string, peer bool) {
 	h.T.Helper()
-	ctx := context.Background()
-	scope := models.RoleScope{Peer: peer}
-	err := h.Svc.RescopeRole(ctx, tenantID, adminID, models.PlatformAgent, scope)
-	if errors.Is(err, domain.ErrNotFound) {
-		err = h.Svc.AssignRole(ctx, tenantID, adminID, models.PlatformAgent, scope)
-	}
+	err := h.Svc.SetRole(context.Background(), tenantID, adminID, models.PlatformAgent, models.RoleScope{Peer: peer})
 	if err != nil {
 		h.T.Fatalf("set peer scope: %v", err)
 	}
+}
+
+// PeerAccess reports whether the member's agent assignment reaches peer
+// conversations — the read side of GrantPeer.
+func (h *Harness) PeerAccess(tenantID, adminID string) bool {
+	h.T.Helper()
+	held, err := h.Svc.RoleAssignments(context.Background(), tenantID, adminID)
+	if err != nil {
+		h.T.Fatalf("assignments: %v", err)
+	}
+	return principal.ForAdmin(&models.AdminUser{ID: adminID, TenantID: tenantID}, held).PeerAccess()
 }
 
 // MintToken issues a user JWT for a host user id in a tenant.

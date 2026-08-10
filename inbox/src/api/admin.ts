@@ -161,6 +161,8 @@ export interface ApiWebhook {
 }
 
 
+/** The limits one assignment carries. Which of them a role has is the role's
+ *  own declaration, served by /v1/roles. */
 export interface ApiRoleScope {
   peer?: boolean;
   projects?: string[];
@@ -184,6 +186,7 @@ export interface ApiTeamMember {
   created_at: string;
 }
 
+/** A role as the Team screen renders it: what it is for, and what it scopes. */
 export interface ApiRoleDefinition {
   role: ApiPlatformRole;
   label: string;
@@ -245,7 +248,7 @@ export interface ApiPrincipal {
   tenant_id: string;
   subject?: {
     id: string;
-    role?: ApiPlatformRole;
+    roles?: ApiPlatformRole[];
     email?: string;
     first_name?: string;
     last_name?: string;
@@ -496,8 +499,6 @@ export const adminApi = {
     collectAll<ApiTeamMember>((cursor) =>
       api.get<ApiPage<ApiTeamMember>>(`/team${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
     ),
-  // The role catalogue drives the screen: a dimension added server-side shows up
-  // here without a client change.
   listRoles: () => api.get<{ roles: ApiRoleDefinition[] }>("/roles"),
   inviteMember: (member: {
     email: string;

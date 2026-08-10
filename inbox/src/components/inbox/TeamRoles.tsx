@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { Avatar, Button, Dialog, Input, Switch } from "@/components/ds";
-import type { PlatformRole, RoleDefinition, RoleDimension, RoleScope, TeamMember } from "@/store/types";
+import type { PlatformRole, RoleDefinition, RoleDimension, RoleScope } from "@/store/types";
 import { rowBorder } from "./styles";
 
 const SCOPE_ALL = "all";
@@ -24,6 +24,19 @@ function dimensionLabel(d: RoleDimension, scope: RoleScope): string {
   if (set.length === 0) return `no ${d.label.toLowerCase()}`;
   return set.join(", ");
 }
+
+// A selectable pill: role picker in the invite, option chips in a scope.
+const pill = (selected: boolean) => ({
+  border: `1px solid ${selected ? "var(--brand)" : "var(--border-default)"}`,
+  background: selected ? "var(--brand-subtle)" : "var(--white)",
+  color: selected ? "var(--brand)" : "var(--text-secondary)",
+  borderRadius: 999,
+  padding: "5px 11px",
+  cursor: "pointer",
+  fontFamily: "var(--font-sans)",
+  fontSize: 13,
+  fontWeight: 600,
+});
 
 const chip = (dashed: boolean) => ({
   display: "flex",
@@ -45,9 +58,6 @@ export const TeamRoles = observer(function TeamRoles() {
   const [editing, setEditing] = useState<{ memberId: string; role: PlatformRole } | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
-
-  const member = (id: string | null | undefined): TeamMember | undefined =>
-    store.team.find((t) => t.id === id);
 
   return (
     <>
@@ -133,7 +143,7 @@ export const TeamRoles = observer(function TeamRoles() {
       {adding && (
         <Dialog
           title="Add role"
-          subtitle={`A second role adds capabilities to ${member(adding)?.name ?? "this member"}; it never takes any away.`}
+          subtitle={`A second role adds capabilities to ${store.memberName(adding)}; it never takes any away.`}
           onClose={() => setAdding(null)}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -211,17 +221,7 @@ const InviteDialog = observer(function InviteDialog({
               key={d.role}
               data-testid={`invite-role-${d.role}`}
               onClick={() => setRole(d.role)}
-              style={{
-                border: `1px solid ${role === d.role ? "var(--brand)" : "var(--border-default)"}`,
-                background: role === d.role ? "var(--brand-subtle)" : "var(--white)",
-                color: role === d.role ? "var(--brand)" : "var(--text-secondary)",
-                borderRadius: 999,
-                padding: "5px 11px",
-                cursor: "pointer",
-                fontFamily: "var(--font-sans)",
-                fontSize: 13,
-                fontWeight: 600,
-              }}
+              style={pill(role === d.role)}
             >
               {d.label}
             </button>
@@ -242,7 +242,7 @@ const InviteDialog = observer(function InviteDialog({
 });
 
 // ScopeDialog renders the dimensions the role declares — a switch for a toggle,
-// chips for a set — so a dimension added server-side appears here on its own.
+// chips for a set.
 const ScopeDialog = observer(function ScopeDialog({
   memberId,
   role,
@@ -254,10 +254,15 @@ const ScopeDialog = observer(function ScopeDialog({
 }) {
   const store = useStore();
   const def = store.roleDef(role);
+  // Only a set dimension needs the tenant's projects and languages, so the
+  // fetch waits until one is about to render. Idempotent.
+  useEffect(() => {
+    if ((def?.dimensions ?? []).some((d) => d.kind === "set")) void store.translations.load();
+  }, [store, def]);
   const assignment = store.assignmentOf(memberId, role);
   if (!assignment) return null;
   const scope = assignment.scope;
-  const name = store.team.find((t) => t.id === memberId)?.name ?? "";
+  const name = store.memberName(memberId);
 
   const write = (next: RoleScope) => void store.setRoleScope(memberId, role, next);
 
@@ -294,17 +299,7 @@ const ScopeDialog = observer(function ScopeDialog({
                     key={option}
                     data-testid={`scope-${d.key}-${option}`}
                     onClick={() => toggleMember(d, option)}
-                    style={{
-                      border: `1px solid ${on ? "var(--brand)" : "var(--border-default)"}`,
-                      background: on ? "var(--brand-subtle)" : "var(--white)",
-                      color: on ? "var(--brand)" : "var(--text-secondary)",
-                      borderRadius: 999,
-                      padding: "5px 11px",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 13,
-                      fontWeight: 600,
-                    }}
+                    style={pill(on)}
                   >
                     {option}
                   </button>

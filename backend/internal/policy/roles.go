@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/bitllow/sild/backend/internal/store/models"
@@ -87,23 +88,25 @@ func RoleDefinition(r models.PlatformRole) (RoleDef, bool) {
 }
 
 // ValidateScope refuses a scope carrying a dimension its role does not define,
-// so a client cannot store a limit no decision will ever read.
+// so a client cannot store a limit no decision will ever read. The scope's own
+// JSON is the dimension list, so a field added to RoleScope is covered here
+// without being named twice.
 func ValidateScope(r models.PlatformRole, s models.RoleScope) error {
 	def, ok := RoleDefinition(r)
 	if !ok {
 		return fmt.Errorf("unknown role %q", r)
 	}
-	for _, set := range []struct {
-		key  string
-		used bool
-	}{
-		{DimPeer, s.Peer},
-		{DimProjects, len(s.Projects) > 0},
-		{DimLocales, len(s.Locales) > 0},
-		{DimPublish, s.Publish},
-	} {
-		if set.used && !def.defines(set.key) {
-			return fmt.Errorf("the %s role has no %s", r, set.key)
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	var used map[string]any
+	if err := json.Unmarshal(raw, &used); err != nil {
+		return err
+	}
+	for key := range used {
+		if !def.defines(key) {
+			return fmt.Errorf("the %s role has no %s", r, key)
 		}
 	}
 	return nil

@@ -90,12 +90,18 @@ func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, passw
 // AssignRole gives a member a role they do not hold. Holding a role twice is
 // refused: widening someone is an edit to the assignment they already have.
 func (s *Service) AssignRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope) error {
-	return s.putAssignment(ctx, tenantID, adminID, role, scope, false)
+	return s.putAssignment(ctx, tenantID, adminID, role, scope, writeAdd)
 }
 
 // RescopeRole replaces the scope of a role the member already holds.
 func (s *Service) RescopeRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope) error {
-	return s.putAssignment(ctx, tenantID, adminID, role, scope, true)
+	return s.putAssignment(ctx, tenantID, adminID, role, scope, writeRescope)
+}
+
+// SetRole leaves the member holding the role at this scope, whether or not they
+// held it already — what a caller stating an end state wants (the CLI, seeds).
+func (s *Service) SetRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope) error {
+	return s.putAssignment(ctx, tenantID, adminID, role, scope, writeSet)
 }
 
 // validateTranslatorScope holds a grant to projects the tenant actually has and
@@ -125,11 +131,11 @@ func (s *Service) validateTranslatorScope(ctx context.Context, tenantID string, 
 	if !named {
 		return nil
 	}
-	projects, err := s.ListTranslationProjects(ctx, tenantID)
+	projects, err := s.store.Translations().ListProjects(ctx, tenantID)
 	if err != nil {
 		return err
 	}
-	have := map[string]bool{}
+	have := map[string]bool{i18n.PlatformProject: true}
 	for _, p := range projects {
 		have[p.Slug] = true
 	}
@@ -141,7 +147,16 @@ func (s *Service) validateTranslatorScope(ctx context.Context, tenantID string, 
 	return nil
 }
 
-func (s *Service) putAssignment(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope, rescope bool) error {
+// How an assignment write treats one that is already there.
+type assignmentWrite int
+
+const (
+	writeAdd     assignmentWrite = iota // refuse a role the member already holds
+	writeRescope                        // require the role to be held
+	writeSet                            // either
+)
+
+func (s *Service) putAssignment(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope, how assignmentWrite) error {
 	if err := validPlatformRole(role); err != nil {
 		return err
 	}
@@ -160,28 +175,28 @@ func (s *Service) putAssignment(ctx context.Context, tenantID, adminID string, r
 		TenantID: tenantID, AdminUserID: adminID, Role: role, Scope: scope,
 		CreatedAt: s.now(), UpdatedAt: s.now(),
 	}
-	was := s.peerAccess(ctx, tenantID, adminID)
-	if err := s.writeAssignment(ctx, a, rescope); err != nil {
+	// Peer visibility can only move on the role that carries it.
+	was := role == models.PlatformAgent && s.peerAccess(ctx, tenantID, adminID)
+	if err := s.writeAssignment(ctx, a, how); err != nil {
 		return err
 	}
-	// Only when peer visibility actually moves: a write that changes nothing must
-	// not publish a subscription change.
-	if role == models.PlatformAgent && scope.Peer != was {
-		s.reconcilePeerSubscriptions(ctx, tenantID, adminID, scope.Peer)
+	if role == models.PlatformAgent {
+		s.reconcileSubscriptions(ctx, tenantID, adminID, was)
 	}
 	return nil
 }
 
-// writeAssignment adds the assignment or rescopes the one there. The unique
-// index decides which succeeds, so a second grant of the same role is refused
-// even when two of them arrive at once.
-func (s *Service) writeAssignment(ctx context.Context, a *models.RoleAssignment, rescope bool) error {
+// writeAssignment adds the assignment or rescopes the one there, per how.
+func (s *Service) writeAssignment(ctx context.Context, a *models.RoleAssignment, how assignmentWrite) error {
 	repo := s.store.RoleAssignments()
-	if rescope {
+	if how == writeRescope {
 		return mapStoreErr(repo.Rescope(ctx, a.TenantID, a.AdminUserID, a.Role, a.Scope))
 	}
 	err := repo.Create(ctx, a)
 	if errors.Is(err, store.ErrDuplicate) {
+		if how == writeSet {
+			return mapStoreErr(repo.Rescope(ctx, a.TenantID, a.AdminUserID, a.Role, a.Scope))
+		}
 		return invalid("that member already holds the " + string(a.Role) + " role")
 	}
 	return mapStoreErr(err)
@@ -205,21 +220,23 @@ func (s *Service) peerAccess(ctx context.Context, tenantID, adminID string) bool
 // RemoveRole takes a role away. A tenant's last owner cannot be removed: only an
 // owner appoints another, so losing the last one locks the tenant out for good.
 func (s *Service) RemoveRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole) error {
+	was := s.peerAccess(ctx, tenantID, adminID)
 	if err := s.store.RoleAssignments().Delete(ctx, tenantID, adminID, role); err != nil {
 		if errors.Is(err, store.ErrLastOwner) {
 			return invalid("the tenant must keep at least one owner")
 		}
 		return mapStoreErr(err)
 	}
-	s.reconcileSubscriptions(ctx, tenantID, adminID)
+	s.reconcileSubscriptions(ctx, tenantID, adminID, was)
 	return nil
 }
 
 // reconcileSubscriptions matches an open socket to what the member now holds:
 // peer conversations follow the agent assignment, and losing every role that
 // reaches a conversation stops the tenant's support events at once rather than
-// at the next reconnect.
-func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID string) {
+// at the next reconnect. wasPeer is what they reached before the write, so a
+// write that moves nothing publishes nothing.
+func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID string, wasPeer bool) {
 	sub, ok := s.pub.(realtime.Subscriber)
 	if !ok {
 		return
@@ -229,10 +246,12 @@ func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID 
 		return
 	}
 	p := principal.ForAdmin(&models.AdminUser{ID: adminID, TenantID: tenantID}, held)
-	if p.PeerAccess() {
-		_ = sub.Subscribe(adminID, realtime.PeerChannel(tenantID))
-	} else {
-		_ = sub.Unsubscribe(adminID, realtime.PeerChannel(tenantID))
+	if now := p.PeerAccess(); now != wasPeer {
+		if now {
+			_ = sub.Subscribe(adminID, realtime.PeerChannel(tenantID))
+		} else {
+			_ = sub.Unsubscribe(adminID, realtime.PeerChannel(tenantID))
+		}
 	}
 	if policy.Scope(p, policy.ConversationsList).DenyAll() {
 		_ = sub.Unsubscribe(adminID, realtime.AgentsChannel(tenantID))
@@ -258,25 +277,6 @@ func validPlatformRole(role models.PlatformRole) error {
 		return nil
 	}
 	return invalid("invalid platform role")
-}
-
-// reconcilePeerSubscriptions adds or removes the operator's server-side
-// subscription to the tenant peer channel, matching a peer_access change on a
-// still-connected inbox socket. One channel carries the whole peer surface, so
-// this is a single broker call regardless of how many peer conversations exist.
-// Best-effort (the realtime layer may not support live subscription changes —
-// tests/workers — and reconnect re-derives anyway).
-func (s *Service) reconcilePeerSubscriptions(ctx context.Context, tenantID, adminID string, grant bool) {
-	sub, ok := s.pub.(realtime.Subscriber)
-	if !ok {
-		return
-	}
-	ch := realtime.PeerChannel(tenantID)
-	if grant {
-		_ = sub.Subscribe(adminID, ch)
-	} else {
-		_ = sub.Unsubscribe(adminID, ch)
-	}
 }
 
 // GetAdmin loads a single admin user (Settings → Team, /admin/me).

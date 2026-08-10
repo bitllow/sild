@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/policy"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/gin-gonic/gin"
@@ -105,11 +105,10 @@ func (h *Handler) guardOwnerMutation(c *gin.Context, targetID string, newRole *m
 		apiutil.Fail(c, err)
 		return false
 	}
-	for _, a := range held {
-		if a.Role == models.PlatformOwner {
-			httpx.Forbidden(c, "only the owner may change the owner's record")
-			return false
-		}
+	target := principal.ForAdmin(&models.AdminUser{ID: targetID}, held)
+	if target.HasRole(models.PlatformOwner) {
+		httpx.Forbidden(c, "only the owner may change the owner's record")
+		return false
 	}
 	return true
 }
@@ -352,7 +351,7 @@ func (h *Handler) assignRole(c *gin.Context) {
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	h.writeAssignment(c, c.Param("id"), req.Role, req.Scope, h.svc.AssignRole)
+	h.writeAssignment(c, c.Param("id"), req.Role, req.Scope, false)
 }
 
 // updateRoleScope: PUT /v1/team/:id/roles/:role — rescope one assignment.
@@ -363,26 +362,32 @@ func (h *Handler) updateRoleScope(c *gin.Context) {
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	h.writeAssignment(c, c.Param("id"), models.PlatformRole(c.Param("role")), req.Scope, h.svc.RescopeRole)
+	h.writeAssignment(c, c.Param("id"), models.PlatformRole(c.Param("role")), req.Scope, true)
 }
 
-type assignmentWrite func(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope) error
-
-func (h *Handler) writeAssignment(c *gin.Context, targetID string, role models.PlatformRole, scope models.RoleScope, write assignmentWrite) {
-	if !h.guardOwnerMutation(c, targetID, &role) {
+func (h *Handler) writeAssignment(c *gin.Context, targetID string, role models.PlatformRole, scope models.RoleScope, rescope bool) {
+	if !h.guardOwnerMutation(c, targetID, &role) || !h.guardScopeGrant(c, scope) {
 		return
 	}
-	// Peer conversations stay the owner's grant to give: they are private chats
-	// no support role reaches by default.
-	if scope.Peer && !middleware.Get(c).HasRole(models.PlatformOwner) {
-		httpx.Forbidden(c, "only the owner may grant peer access")
-		return
+	write := h.svc.AssignRole
+	if rescope {
+		write = h.svc.RescopeRole
 	}
 	if err := write(c.Request.Context(), apiutil.Tenant(c), targetID, role, scope); err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// guardScopeGrant keeps peer conversations the owner's to give: they are private
+// chats no support role reaches by default.
+func (h *Handler) guardScopeGrant(c *gin.Context, scope models.RoleScope) bool {
+	if scope.Peer && !middleware.Get(c).HasRole(models.PlatformOwner) {
+		httpx.Forbidden(c, "only the owner may grant peer access")
+		return false
+	}
+	return true
 }
 
 // removeRole: DELETE /v1/team/:id/roles/:role.
@@ -412,8 +417,7 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 	if !h.guardOwnerMutation(c, "", &req.Role) {
 		return
 	}
-	if req.Scope.Peer && !middleware.Get(c).HasRole(models.PlatformOwner) {
-		httpx.Forbidden(c, "only the owner may grant peer access")
+	if !h.guardScopeGrant(c, req.Scope) {
 		return
 	}
 	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.FirstName, req.LastName, req.Role, req.Scope)
@@ -421,7 +425,9 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "first_name": a.FirstName, "last_name": a.LastName, "assignments": []map[string]any{{"role": req.Role, "scope": req.Scope}}})
+	held := roleAssignmentView(models.RoleAssignment{Role: req.Role, Scope: req.Scope})
+	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "first_name": a.FirstName,
+		"last_name": a.LastName, "assignments": []map[string]any{held}})
 }
 
 // settingsPageDefaults is the paging contract for tenant-settings collections.
