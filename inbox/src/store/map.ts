@@ -209,7 +209,12 @@ export function mapWebhook(w: ApiWebhook): Webhook {
 export function mapTeamMember(t: ApiTeamMember): TeamMember {
   const local = t.email.split("@")[0].replace(/[._-]+/g, " ");
   const name = local.replace(/\b\w/g, (c) => c.toUpperCase());
-  return { id: t.id, name: name || t.email, email: t.email, role: t.platform_role, peerAccess: !!t.peer_access };
+  return {
+    id: t.id,
+    name: name || t.email,
+    email: t.email,
+    assignments: (t.assignments || []).map((a) => ({ role: a.role, scope: a.scope || {} })),
+  };
 }
 
 export function mapEmailChannel(c: ApiEmailChannel): EmailChannel {

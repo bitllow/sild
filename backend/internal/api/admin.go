@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
@@ -89,7 +90,7 @@ func (h *Handler) adminPasswordLogin(c *gin.Context) {
 // Every team route calls it — invite mints owners, PATCH promotes, password resets
 // take over. targetID is "" on create; newRole is nil when no role is being set.
 func (h *Handler) guardOwnerMutation(c *gin.Context, targetID string, newRole *models.PlatformRole) bool {
-	if p := middleware.Get(c); p != nil && p.Role == models.PlatformOwner {
+	if p := middleware.Get(c); p.HasRole(models.PlatformOwner) {
 		return true
 	}
 	if newRole != nil && *newRole == models.PlatformOwner {
@@ -99,14 +100,16 @@ func (h *Handler) guardOwnerMutation(c *gin.Context, targetID string, newRole *m
 	if targetID == "" {
 		return true
 	}
-	target, err := h.svc.GetAdmin(c.Request.Context(), apiutil.Tenant(c), targetID)
+	held, err := h.svc.RoleAssignments(c.Request.Context(), apiutil.Tenant(c), targetID)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return false
 	}
-	if target.PlatformRole == models.PlatformOwner {
-		httpx.Forbidden(c, "only the owner may change the owner's record")
-		return false
+	for _, a := range held {
+		if a.Role == models.PlatformOwner {
+			httpx.Forbidden(c, "only the owner may change the owner's record")
+			return false
+		}
 	}
 	return true
 }
@@ -278,18 +281,32 @@ func (h *Handler) listTeam(c *gin.Context) {
 	if !ok {
 		return
 	}
-	admins, err := h.svc.ListAdmins(c.Request.Context(), apiutil.Tenant(c))
+	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
+	admins, err := h.svc.ListAdmins(ctx, tenant)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
+	// One read for the whole roster: a member's chips are their rows, grouped.
+	assignments, err := h.svc.TenantRoleAssignments(ctx, tenant)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	byMember := map[string][]map[string]any{}
+	for _, a := range assignments {
+		byMember[a.AdminUserID] = append(byMember[a.AdminUserID], roleAssignmentView(a))
+	}
 	out := make([]map[string]any, 0, len(admins))
 	for i := range admins {
 		a := &admins[i]
+		held := byMember[a.ID]
+		if held == nil {
+			held = []map[string]any{}
+		}
 		out = append(out, map[string]any{
-			"id": a.ID, "email": a.Email, "platform_role": a.PlatformRole,
+			"id": a.ID, "email": a.Email, "assignments": held,
 			"first_name": a.FirstName, "last_name": a.LastName,
-			"peer_access":  a.PeerAccess,
 			"has_password": a.PasswordHash != nil, "created_at": a.CreatedAt,
 		})
 	}
@@ -314,63 +331,97 @@ func (h *Handler) updateWebhook(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (h *Handler) updateAgent(c *gin.Context) {
+// roleAssignmentView is the wire shape of one chip: the role and its scope.
+func roleAssignmentView(a models.RoleAssignment) map[string]any {
+	return map[string]any{"role": a.Role, "scope": a.Scope}
+}
+
+// listRoles: GET /v1/roles — the catalogue the Team screen renders from, so a
+// dimension added here reaches the UI without a client release.
+func (h *Handler) listRoles(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"roles": policy.Roles()})
+}
+
+// assignRole: POST /v1/team/:id/roles — give a member a role, or replace the
+// scope of the one they hold.
+func (h *Handler) assignRole(c *gin.Context) {
 	var req struct {
-		PlatformRole *models.PlatformRole `json:"platform_role"`
-		PeerAccess   *bool                `json:"peer_access"`
+		Role  models.PlatformRole `json:"role"`
+		Scope models.RoleScope    `json:"scope"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	if req.PlatformRole == nil && req.PeerAccess == nil {
-		httpx.BadRequest(c, "nothing to update")
+	h.writeAssignment(c, c.Param("id"), req.Role, req.Scope, h.svc.AssignRole)
+}
+
+// updateRoleScope: PUT /v1/team/:id/roles/:role — rescope one assignment.
+func (h *Handler) updateRoleScope(c *gin.Context) {
+	var req struct {
+		Scope models.RoleScope `json:"scope"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	ctx, tenant, id := c.Request.Context(), apiutil.Tenant(c), c.Param("id")
-	if !h.guardOwnerMutation(c, id, req.PlatformRole) {
+	h.writeAssignment(c, c.Param("id"), models.PlatformRole(c.Param("role")), req.Scope, h.svc.RescopeRole)
+}
+
+type assignmentWrite func(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope) error
+
+func (h *Handler) writeAssignment(c *gin.Context, targetID string, role models.PlatformRole, scope models.RoleScope, write assignmentWrite) {
+	if !h.guardOwnerMutation(c, targetID, &role) {
 		return
 	}
-	// Peer access is the owner's grant to give.
-	if req.PeerAccess != nil {
-		if p := middleware.Get(c); p == nil || p.Role != models.PlatformOwner {
-			httpx.Forbidden(c, "only the owner may change peer access")
-			return
-		}
+	// Peer conversations stay the owner's grant to give: they are private chats
+	// no support role reaches by default.
+	if scope.Peer && !middleware.Get(c).HasRole(models.PlatformOwner) {
+		httpx.Forbidden(c, "only the owner may grant peer access")
+		return
 	}
-	if req.PlatformRole != nil {
-		if err := h.svc.SetAdminRole(ctx, tenant, id, *req.PlatformRole); err != nil {
-			apiutil.Fail(c, err)
-			return
-		}
+	if err := write(c.Request.Context(), apiutil.Tenant(c), targetID, role, scope); err != nil {
+		apiutil.Fail(c, err)
+		return
 	}
-	if req.PeerAccess != nil {
-		if err := h.svc.SetPeerAccess(ctx, tenant, id, *req.PeerAccess); err != nil {
-			apiutil.Fail(c, err)
-			return
-		}
+	c.Status(http.StatusNoContent)
+}
+
+// removeRole: DELETE /v1/team/:id/roles/:role.
+func (h *Handler) removeRole(c *gin.Context) {
+	role := models.PlatformRole(c.Param("role"))
+	if !h.guardOwnerMutation(c, c.Param("id"), &role) {
+		return
+	}
+	if err := h.svc.RemoveRole(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), role); err != nil {
+		apiutil.Fail(c, err)
+		return
 	}
 	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) inviteAgent(c *gin.Context) {
 	var req struct {
-		Email        string              `json:"email"`
-		FirstName    string              `json:"first_name"`
-		LastName     string              `json:"last_name"`
-		PlatformRole models.PlatformRole `json:"platform_role"`
+		Email     string              `json:"email"`
+		FirstName string              `json:"first_name"`
+		LastName  string              `json:"last_name"`
+		Role      models.PlatformRole `json:"role"`
+		Scope     models.RoleScope    `json:"scope"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	if !h.guardOwnerMutation(c, "", &req.PlatformRole) {
+	if !h.guardOwnerMutation(c, "", &req.Role) {
 		return
 	}
-	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.FirstName, req.LastName, req.PlatformRole)
+	if req.Scope.Peer && !middleware.Get(c).HasRole(models.PlatformOwner) {
+		httpx.Forbidden(c, "only the owner may grant peer access")
+		return
+	}
+	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.FirstName, req.LastName, req.Role, req.Scope)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "first_name": a.FirstName, "last_name": a.LastName, "platform_role": a.PlatformRole})
+	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "first_name": a.FirstName, "last_name": a.LastName, "assignments": []map[string]any{{"role": req.Role, "scope": req.Scope}}})
 }
 
 // settingsPageDefaults is the paging contract for tenant-settings collections.

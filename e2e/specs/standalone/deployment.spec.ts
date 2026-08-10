@@ -68,12 +68,12 @@ test.describe("bootstrap", () => {
     const body = (await me.json()) as {
       kind?: string;
       tenant_id?: string;
-      subject?: { email?: string; role?: string };
+      subject?: { email?: string; roles?: string[] };
     };
     expect(body.kind).toBe("admin");
     expect(body.tenant_id, "the session is scoped to a tenant").toBeTruthy();
     expect(body.subject?.email).toBe(BOOTSTRAP.email);
-    expect(body.subject?.role, "the bootstrapped operator owns the tenant").toBe("owner");
+    expect(body.subject?.roles, "the bootstrapped operator owns the tenant").toContain("owner");
   });
 });
 

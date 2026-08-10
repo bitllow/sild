@@ -43,9 +43,4 @@ type TranslationRepo interface {
 	// ReleaseLocales names a version's locales without reading their strings —
 	// the manifest reports versions, and every client polls it.
 	ReleaseLocales(ctx context.Context, tenantID, project string, version int) ([]string, error)
-
-	Scopes(ctx context.Context, tenantID, adminUserID string) ([]models.TranslatorScope, error)
-	AllScopes(ctx context.Context, tenantID string) ([]models.TranslatorScope, error)
-	// SetScopes replaces one translator's scope rows whole.
-	SetScopes(ctx context.Context, tenantID, adminUserID string, scopes []models.TranslatorScope) error
 }

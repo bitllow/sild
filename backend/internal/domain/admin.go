@@ -2,11 +2,16 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/auth"
+	"github.com/bitllow/sild/backend/internal/i18n"
+	"github.com/bitllow/sild/backend/internal/policy"
+	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/realtime"
+	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
@@ -82,24 +87,168 @@ func (s *Service) SetAdminPassword(ctx context.Context, tenantID, adminID, passw
 	return mapStoreErr(s.store.Admins().SetPassword(ctx, tenantID, adminID, hash))
 }
 
-// SetAdminRole updates an admin's platform role (Settings → Team, §7). Caller rules
-// live in api.guardOwnerMutation; the last-owner invariant below holds for all paths.
-func (s *Service) SetAdminRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole) error {
+// AssignRole gives a member a role they do not hold. Holding a role twice is
+// refused: widening someone is an edit to the assignment they already have.
+func (s *Service) AssignRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope) error {
+	return s.putAssignment(ctx, tenantID, adminID, role, scope, false)
+}
+
+// RescopeRole replaces the scope of a role the member already holds.
+func (s *Service) RescopeRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope) error {
+	return s.putAssignment(ctx, tenantID, adminID, role, scope, true)
+}
+
+// validateTranslatorScope holds a grant to projects the tenant actually has and
+// to language tags that mean something. A scope naming neither is a limit the
+// screen shows and no decision ever matches.
+func (s *Service) validateTranslatorScope(ctx context.Context, tenantID string, scope *models.RoleScope) error {
+	locales := make([]string, 0, len(scope.Locales))
+	for _, l := range scope.Locales {
+		if l == models.ScopeAll {
+			locales = append(locales, l)
+			continue
+		}
+		n := i18n.Normalize(l)
+		if !i18n.ValidLanguage(n) {
+			return invalid("not a language tag: " + l)
+		}
+		locales = append(locales, n)
+	}
+	scope.Locales = locales
+
+	named := false
+	for _, p := range scope.Projects {
+		if p != models.ScopeAll {
+			named = true
+		}
+	}
+	if !named {
+		return nil
+	}
+	projects, err := s.ListTranslationProjects(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, p := range projects {
+		have[p.Slug] = true
+	}
+	for _, p := range scope.Projects {
+		if p != models.ScopeAll && !have[p] {
+			return invalid("no such project: " + p)
+		}
+	}
+	return nil
+}
+
+func (s *Service) putAssignment(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope, rescope bool) error {
 	if err := validPlatformRole(role); err != nil {
 		return err
 	}
-	// A tenant must keep an owner: only owners can grant peer access or appoint
-	// another owner, so demoting the last one locks the tenant out irreversibly.
-	if role != models.PlatformOwner {
-		current, err := s.store.Admins().Get(ctx, tenantID, adminID)
-		if err != nil {
-			return mapStoreErr(err)
-		}
-		if current.PlatformRole == models.PlatformOwner && !s.hasOtherOwner(ctx, tenantID, adminID) {
-			return invalid("the tenant must keep at least one owner")
+	if err := policy.ValidateScope(role, scope); err != nil {
+		return invalid(err.Error())
+	}
+	if role == models.PlatformTranslator {
+		if err := s.validateTranslatorScope(ctx, tenantID, &scope); err != nil {
+			return err
 		}
 	}
-	return mapStoreErr(s.store.Admins().SetRole(ctx, tenantID, adminID, role))
+	if _, err := s.store.Admins().Get(ctx, tenantID, adminID); err != nil {
+		return mapStoreErr(err)
+	}
+	a := &models.RoleAssignment{
+		TenantID: tenantID, AdminUserID: adminID, Role: role, Scope: scope,
+		CreatedAt: s.now(), UpdatedAt: s.now(),
+	}
+	was := s.peerAccess(ctx, tenantID, adminID)
+	if err := s.writeAssignment(ctx, a, rescope); err != nil {
+		return err
+	}
+	// Only when peer visibility actually moves: a write that changes nothing must
+	// not publish a subscription change.
+	if role == models.PlatformAgent && scope.Peer != was {
+		s.reconcilePeerSubscriptions(ctx, tenantID, adminID, scope.Peer)
+	}
+	return nil
+}
+
+// writeAssignment adds the assignment or rescopes the one there. The unique
+// index decides which succeeds, so a second grant of the same role is refused
+// even when two of them arrive at once.
+func (s *Service) writeAssignment(ctx context.Context, a *models.RoleAssignment, rescope bool) error {
+	repo := s.store.RoleAssignments()
+	if rescope {
+		return mapStoreErr(repo.Rescope(ctx, a.TenantID, a.AdminUserID, a.Role, a.Scope))
+	}
+	err := repo.Create(ctx, a)
+	if errors.Is(err, store.ErrDuplicate) {
+		return invalid("that member already holds the " + string(a.Role) + " role")
+	}
+	return mapStoreErr(err)
+}
+
+// peerAccess reports whether the member's agent assignment reaches peer
+// conversations right now.
+func (s *Service) peerAccess(ctx context.Context, tenantID, adminID string) bool {
+	held, err := s.store.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)
+	if err != nil {
+		return false
+	}
+	for _, a := range held {
+		if a.Role == models.PlatformAgent && a.Scope.Peer {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveRole takes a role away. A tenant's last owner cannot be removed: only an
+// owner appoints another, so losing the last one locks the tenant out for good.
+func (s *Service) RemoveRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole) error {
+	if err := s.store.RoleAssignments().Delete(ctx, tenantID, adminID, role); err != nil {
+		if errors.Is(err, store.ErrLastOwner) {
+			return invalid("the tenant must keep at least one owner")
+		}
+		return mapStoreErr(err)
+	}
+	s.reconcileSubscriptions(ctx, tenantID, adminID)
+	return nil
+}
+
+// reconcileSubscriptions matches an open socket to what the member now holds:
+// peer conversations follow the agent assignment, and losing every role that
+// reaches a conversation stops the tenant's support events at once rather than
+// at the next reconnect.
+func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID string) {
+	sub, ok := s.pub.(realtime.Subscriber)
+	if !ok {
+		return
+	}
+	held, err := s.store.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)
+	if err != nil {
+		return
+	}
+	p := principal.ForAdmin(&models.AdminUser{ID: adminID, TenantID: tenantID}, held)
+	if p.PeerAccess() {
+		_ = sub.Subscribe(adminID, realtime.PeerChannel(tenantID))
+	} else {
+		_ = sub.Unsubscribe(adminID, realtime.PeerChannel(tenantID))
+	}
+	if policy.Scope(p, policy.ConversationsList).DenyAll() {
+		_ = sub.Unsubscribe(adminID, realtime.AgentsChannel(tenantID))
+	}
+}
+
+// RoleAssignments lists what one member holds.
+func (s *Service) RoleAssignments(ctx context.Context, tenantID, adminID string) ([]models.RoleAssignment, error) {
+	as, err := s.store.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)
+	return as, mapStoreErr(err)
+}
+
+// TenantRoleAssignments lists every assignment in the tenant, for the Team screen.
+func (s *Service) TenantRoleAssignments(ctx context.Context, tenantID string) ([]models.RoleAssignment, error) {
+	as, err := s.store.RoleAssignments().ListByTenant(ctx, tenantID)
+	return as, mapStoreErr(err)
 }
 
 // validPlatformRole rejects a role outside the §7 set: one no permission check
@@ -109,35 +258,6 @@ func validPlatformRole(role models.PlatformRole) error {
 		return nil
 	}
 	return invalid("invalid platform role")
-}
-
-// hasOtherOwner reports whether another owner exists. Rosters are small, so this
-// lists rather than adding a counting query.
-func (s *Service) hasOtherOwner(ctx context.Context, tenantID, exceptID string) bool {
-	admins, err := s.store.Admins().List(ctx, tenantID)
-	if err != nil {
-		return false // can't prove another owner exists — refuse the demotion
-	}
-	for i := range admins {
-		if admins[i].ID != exceptID && admins[i].PlatformRole == models.PlatformOwner {
-			return true
-		}
-	}
-	return false
-}
-
-// SetPeerAccess toggles an operator's access to peer conversations (Settings →
-// Team). Per-user, independent of platform role.
-func (s *Service) SetPeerAccess(ctx context.Context, tenantID, adminID string, peerAccess bool) error {
-	if err := s.store.Admins().SetPeerAccess(ctx, tenantID, adminID, peerAccess); err != nil {
-		return mapStoreErr(err)
-	}
-	// Reconcile the operator's LIVE realtime subscriptions so the change takes
-	// effect at once: a revoke stops peer message delivery to an already-open
-	// connection immediately, and a grant starts it — otherwise the peer channel
-	// set is only re-derived at reconnect (agentSubscriptions).
-	s.reconcilePeerSubscriptions(ctx, tenantID, adminID, peerAccess)
-	return nil
 }
 
 // reconcilePeerSubscriptions adds or removes the operator's server-side
@@ -173,7 +293,7 @@ func (s *Service) Logout(ctx context.Context, raw string) error {
 // InviteAgent adds an admin_user to the tenant (Settings → Team, §8). first/last
 // are optional display-name parts; the first name is what end-users see as the
 // agent's reply name on the messenger surfaces.
-func (s *Service) InviteAgent(ctx context.Context, tenantID, email, first, last string, role models.PlatformRole) (*models.AdminUser, error) {
+func (s *Service) InviteAgent(ctx context.Context, tenantID, email, first, last string, role models.PlatformRole, scope models.RoleScope) (*models.AdminUser, error) {
 	if email == "" {
 		return nil, invalid("email is required")
 	}
@@ -183,8 +303,14 @@ func (s *Service) InviteAgent(ctx context.Context, tenantID, email, first, last 
 	if err := validPlatformRole(role); err != nil {
 		return nil, err
 	}
-	a := &models.AdminUser{TenantID: tenantID, Email: email, FirstName: first, LastName: last, PlatformRole: role, CreatedAt: s.now()}
+	if err := policy.ValidateScope(role, scope); err != nil {
+		return nil, invalid(err.Error())
+	}
+	a := &models.AdminUser{TenantID: tenantID, Email: email, FirstName: first, LastName: last, CreatedAt: s.now()}
 	if err := s.store.Admins().Create(ctx, a); err != nil {
+		return nil, err
+	}
+	if err := s.AssignRole(ctx, tenantID, a.ID, role, scope); err != nil {
 		return nil, err
 	}
 	return a, nil

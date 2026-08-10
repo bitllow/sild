@@ -41,6 +41,9 @@ import type {
   SessionState,
   SettingsTab,
   TeamMember,
+  RoleAssignment,
+  RoleDefinition,
+  RoleScope,
   UiStatus,
   Webhook,
 } from "./types";
@@ -189,6 +192,8 @@ export class RootStore {
   // but on its own cursor, since the queue's belongs to a different filter set.
   searchCursor: string | null = null;
   searchHasMore = false;
+  // One in-flight scope write per assignment, so whole-document PUTs queue.
+  private scopeWrites = new Map<string, Promise<unknown>>();
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private searchSeq = 0;
 
@@ -196,6 +201,11 @@ export class RootStore {
   keys: ApiKey[] = [];
   webhooks: Webhook[] = [];
   team: TeamMember[] = [];
+  /** The role catalogue the backend serves: the Team screen renders whatever it
+   *  is told, so a new role or dimension needs no change here. */
+  roleDefs: RoleDefinition[] = [];
+  /** What a refused team write said, shown above the roster. */
+  teamError: string | null = null;
   emailChannel: EmailChannel | null = null;
   pushChannel: ApiPushChannel | null = null;
   // Set while a credential upload or test send is in flight; pushMessage carries
@@ -251,7 +261,7 @@ export class RootStore {
   constructor() {
     // `can` stays unannotated: as an action it would read `held` untracked, and
     // observers would not re-render when the grants change.
-    makeAutoObservable(this, { peer: false, atts: false, translations: false, can: false });
+    makeAutoObservable<RootStore, "scopeWrites">(this, { peer: false, atts: false, translations: false, can: false, scopeWrites: false });
     if (typeof window !== "undefined") {
       this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
       installAudioUnlock(); // prime notification audio on the agent's first gesture
@@ -1173,20 +1183,24 @@ export class RootStore {
   // ─────────────────────────── settings ───────────────────────────
   loadSettings = async () => {
     try {
-      const [keys, webhooks, team, email, brands, pushCh] = await Promise.all([
+      const [keys, webhooks, team, roles, email, brands, pushCh] = await Promise.all([
         adminApi.listApiKeys(),
         adminApi.listWebhooks(),
         adminApi.listTeam(),
+        adminApi.listRoles(),
         adminApi.getEmailChannel(),
         adminApi.getBrands(),
         // The push credential is the owner's alone, so an admin is refused it —
         // the rest of the page is theirs and must still load.
         adminApi.getPushChannel().catch(() => null),
       ]);
+      // Translator scopes are chosen from the tenant's projects and languages.
+      void this.translations.load();
       runInAction(() => {
         this.keys = keys.filter((k) => !k.revoked_at).map(mapApiKey);
         this.webhooks = webhooks.map(mapWebhook);
         this.team = team.map(mapTeamMember);
+        this.roleDefs = roles.roles;
         this.emailChannel = mapEmailChannel(email.data);
         this.emailChannelVersion = email.etag;
         this.pushChannel = pushCh;
@@ -1531,43 +1545,117 @@ export class RootStore {
     }
   };
 
-  setRole = async (id: string, role: PlatformRole) => {
-    const prev = this.team.find((t) => t.id === id)?.role;
-    runInAction(() => {
-      const t = this.team.find((x) => x.id === id);
-      if (t) t.role = role;
-    });
+  // ── role assignments ──────────────────────────────────────────────
+  // A member's access is the set of roles they hold. Every write goes to the
+  // assignment it names, so two people editing different chips never collide.
+
+  /** The options of a set dimension, fetched from where the backend said they
+   *  live rather than baked into the roles endpoint. */
+  scopeOptions = (source?: string): string[] => {
+    const projects = this.translations.projects;
+    if (source === "translation_projects") return projects.map((p) => p.id);
+    if (source === "translation_locales") {
+      return [...new Set(projects.flatMap((p) => p.locales))].sort();
+    }
+    return [];
+  };
+
+  roleDef = (role: PlatformRole): RoleDefinition | undefined =>
+    this.roleDefs.find((d) => d.role === role);
+
+  assignmentOf = (memberId: string, role: PlatformRole): RoleAssignment | undefined =>
+    this.team.find((t) => t.id === memberId)?.assignments.find((a) => a.role === role);
+
+  /** Roles the member does not hold yet — what the add dialog offers. */
+  addableRoles = (memberId: string): RoleDefinition[] => {
+    const held = this.team.find((t) => t.id === memberId)?.assignments ?? [];
+    return this.roleDefs.filter((d) => !held.some((a) => a.role === d.role));
+  };
+
+  /** Add someone to the tenant in the role they were hired for. Returns their id,
+   *  so the caller can open the scope dialog on the assignment just created. */
+  inviteMember = async (email: string, first: string, last: string, role: PlatformRole) => {
+    runInAction(() => (this.teamError = null));
     try {
-      await adminApi.setTeamRole(id, role);
-    } catch {
-      runInAction(() => {
-        const t = this.team.find((x) => x.id === id);
-        if (t && prev) t.role = prev;
+      const created = await adminApi.inviteMember({
+        email: email.trim(),
+        first_name: first.trim(),
+        last_name: last.trim(),
+        role,
+        scope: {},
       });
+      await this.reloadTeam();
+      return created.id;
+    } catch (e) {
+      runInAction(() => (this.teamError = errorText(e)));
+      return null;
     }
   };
 
-  // setPeerAccess toggles an operator's peer-conversation access (Settings → Team,
-  // per-user). Flipping your own off live-hides the peer nav and bounces you back
-  // to the inbox if you're viewing it.
-  setPeerAccess = async (id: string, value: boolean) => {
-    const prev = this.team.find((t) => t.id === id)?.peerAccess;
-    runInAction(() => {
-      const t = this.team.find((x) => x.id === id);
-      if (t) t.peerAccess = value;
-      if (id === this.meId) {
-        this.peerAccess = value;
-        if (!value && this.inboxView === "peer") this.goView("inbox");
-      }
-    });
+  addRole = async (memberId: string, role: PlatformRole) => {
     try {
-      await adminApi.setTeamPeerAccess(id, value);
-    } catch {
-      runInAction(() => {
-        const t = this.team.find((x) => x.id === id);
-        if (t && prev !== undefined) t.peerAccess = prev;
-        if (id === this.meId && prev !== undefined) this.peerAccess = prev;
-      });
+      await adminApi.assignRole(memberId, role, {});
+    } catch (e) {
+      runInAction(() => (this.teamError = errorText(e)));
+      return false;
     }
+    await this.reloadTeam();
+    return true;
+  };
+
+  setRoleScope = async (memberId: string, role: PlatformRole, scope: RoleScope) => {
+    const prev = this.assignmentOf(memberId, role)?.scope;
+    runInAction(() => {
+      const a = this.assignmentOf(memberId, role);
+      if (a) a.scope = scope;
+      this.applyOwnPeerAccess(memberId);
+    });
+    // A scope is written whole, so two quick toggles must not race: the second
+    // waits for the first, or the slower one lands last and undoes it.
+    const key = `${memberId}\n${role}`;
+    const write = (this.scopeWrites.get(key) ?? Promise.resolve())
+      .then(() => adminApi.setRoleScope(memberId, role, scope))
+      .catch((e) => {
+        runInAction(() => {
+          const a = this.assignmentOf(memberId, role);
+          if (a && prev) a.scope = prev;
+          this.teamError = errorText(e);
+          this.applyOwnPeerAccess(memberId);
+        });
+      });
+    this.scopeWrites.set(key, write);
+    await write;
+  };
+
+  removeRole = async (memberId: string, role: PlatformRole) => {
+    try {
+      await adminApi.removeRole(memberId, role);
+    } catch (e) {
+      runInAction(() => (this.teamError = errorText(e)));
+      return false;
+    }
+    await this.reloadTeam();
+    runInAction(() => this.applyOwnPeerAccess(memberId));
+    return true;
+  };
+
+  private reloadTeam = async () => {
+    try {
+      const team = await adminApi.listTeam();
+      runInAction(() => {
+        this.team = team.map(mapTeamMember);
+        this.teamError = null;
+      });
+    } catch {
+      /* the next settings load re-reads it */
+    }
+  };
+
+  // Losing your own peer access live-hides the peer nav rather than leaving a
+  // surface the backend now refuses.
+  private applyOwnPeerAccess = (memberId: string) => {
+    if (memberId !== this.meId) return;
+    this.peerAccess = !!this.assignmentOf(memberId, "agent")?.scope.peer;
+    if (!this.peerAccess && this.inboxView === "peer") this.goView("inbox");
   };
 }

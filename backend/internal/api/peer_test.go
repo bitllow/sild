@@ -51,9 +51,7 @@ func TestPeerConversationsExcludedFromQueue(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
-	if err := h.Svc.SetPeerAccess(context.Background(), tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("peer access: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	owner := loginAs(t, h, "owner@test")
 
 	mkSupport(t, h, tenant.ID, "support")
@@ -100,7 +98,6 @@ func TestPeerAccessGating(t *testing.T) {
 	tenant := h.SeedTenant()
 	h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
-	ctx := context.Background()
 	peer := mkPeer(t, h, tenant.ID, "trip_1")
 
 	agentCookie := loginAs(t, h, "agent@test")
@@ -125,9 +122,7 @@ func TestPeerAccessGating(t *testing.T) {
 
 	// Grant it → list + peer conversation now allowed. (Re-login: peer_access is
 	// resolved onto the principal at session load.)
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, true); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
+	h.GrantPeer(tenant.ID, agent.ID)
 	agentCookie = loginAs(t, h, "agent@test")
 	if w := h.Request("GET", "/v1/conversations?kind=peer").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusOK {
 		t.Fatalf("agent with peer access: list = %d, want 200", w.Code)
@@ -144,10 +139,7 @@ func TestPeerImplicitJoin(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
-	ctx := context.Background()
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("peer access: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	owner := loginAs(t, h, "owner@test")
 	peer := mkPeer(t, h, tenant.ID, "trip_1")
 
@@ -276,31 +268,26 @@ func TestPeerAccessRevokeUnsubscribesRealtime(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
-	ctx := context.Background()
 	// Several peer conversations: the reconcile must still be exactly one call.
 	mkPeer(t, h, tenant.ID, "trip_1")
 	mkPeer(t, h, tenant.ID, "trip_2")
 	mkPeer(t, h, tenant.ID, "trip_3")
 
 	h.Pub.Reset()
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, true); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
+	h.GrantPeer(tenant.ID, agent.ID)
 	wantChan := agent.ID + "→" + "peer:" + tenant.ID
 	if len(h.Pub.Subscribed) != 1 || h.Pub.Subscribed[0] != wantChan {
 		t.Fatalf("grant should subscribe once to %s, got %v", wantChan, h.Pub.Subscribed)
 	}
 
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, false); err != nil {
-		t.Fatalf("revoke: %v", err)
-	}
+	h.SetPeerScope(tenant.ID, agent.ID, false)
 	if len(h.Pub.Unsubscribed) != 1 || h.Pub.Unsubscribed[0] != wantChan {
 		t.Fatalf("revoke should unsubscribe once from %s, got %v", wantChan, h.Pub.Unsubscribed)
 	}
 }
 
-// The per-user peer_access flag persists through the team PATCH and surfaces in
-// both the team list and /admin/me.
+// Peer access persists through the assignment route and surfaces in both the
+// team list and /admin/me.
 func TestPeerAccessTogglePersists(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
@@ -308,8 +295,8 @@ func TestPeerAccessTogglePersists(t *testing.T) {
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
 	owner := loginAs(t, h, "owner@test")
 
-	w := h.Request("PATCH", "/v1/team/"+agent.ID).
-		Cookie("sild_admin", owner).JSON(map[string]any{"peer_access": true}).Do()
+	w := h.Request("PUT", "/v1/team/"+agent.ID+"/roles/agent").Cookie("sild_admin", owner).
+		JSON(map[string]any{"scope": map[string]any{"peer": true}}).Do()
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("toggle: %d %s", w.Code, w.Body)
 	}
@@ -323,8 +310,8 @@ func TestPeerAccessTogglePersists(t *testing.T) {
 	for _, m := range teamPage.Items {
 		if m["id"] == agent.ID {
 			found = true
-			if m["peer_access"] != true {
-				t.Fatalf("team list peer_access = %v, want true", m["peer_access"])
+			if !listedPeerAccess(m) {
+				t.Fatalf("team list assignments = %v, want an agent role reaching peer", m["assignments"])
 			}
 		}
 	}
@@ -580,10 +567,26 @@ func TestAddAssignmentRejectedOnPeerConversation(t *testing.T) {
 	}
 }
 
-// searchAs builds the scope+kind pair for an operator with or without peer_access.
+// listedPeerAccess reads the team row's assignments the way the inbox does.
+func listedPeerAccess(member map[string]any) bool {
+	held, _ := member["assignments"].([]any)
+	for _, raw := range held {
+		a, _ := raw.(map[string]any)
+		scope, _ := a["scope"].(map[string]any)
+		if a["role"] == string(models.PlatformAgent) && scope["peer"] == true {
+			return true
+		}
+	}
+	return false
+}
+
+// searchAs builds the scope+kind pair for an operator with or without peer access.
 func searchAs(peerOnly bool) (policy.ResourceScope, domain.SearchInput) {
-	p := &principal.Principal{TenantID: "t", Kind: principal.KindAdmin, AdminID: "a",
-		Role: models.PlatformOwner, PeerAccess: peerOnly}
+	held := principal.Held(models.PlatformOwner)
+	if peerOnly {
+		held = append(held, principal.Assignment{Role: models.PlatformAgent, Scope: models.RoleScope{Peer: true}})
+	}
+	p := &principal.Principal{TenantID: "t", Kind: principal.KindAdmin, AdminID: "a", Assignments: held}
 	in := domain.SearchInput{Limit: 25}
 	if peerOnly {
 		k := models.KindPeer

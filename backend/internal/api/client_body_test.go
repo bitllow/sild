@@ -19,9 +19,7 @@ func TestSharedSendAcceptsTheClientBodyOnEveryBranch(t *testing.T) {
 	key := h.SeedAPIKey(tenant.ID)
 	jwt := h.MintToken(tenant.ID, "u_rider")
 	admin := h.SeedAdmin(tenant.ID, "op@body", models.PlatformOwner)
-	if err := h.Store.Admins().SetPeerAccess(t.Context(), tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("grant peer access: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	owner := loginAs(t, h, "op@body")
 
 	newConv := func(peer bool) string {
@@ -98,9 +96,7 @@ func TestUnknownVisibilityIsRefused(t *testing.T) {
 	key := h.SeedAPIKey(tenant.ID)
 	jwt := h.MintToken(tenant.ID, "u_rider")
 	admin := h.SeedAdmin(tenant.ID, "op@vis2", models.PlatformOwner)
-	if err := h.Store.Admins().SetPeerAccess(t.Context(), tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("grant peer access: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	owner := loginAs(t, h, "op@vis2")
 
 	var support, peer struct {
@@ -147,9 +143,7 @@ func TestPeerSendRefusesInternalVisibility(t *testing.T) {
 	tenant := h.SeedTenant()
 	key := h.SeedAPIKey(tenant.ID)
 	admin := h.SeedAdmin(tenant.ID, "op@vis", models.PlatformOwner)
-	if err := h.Store.Admins().SetPeerAccess(t.Context(), tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("grant peer access: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	owner := loginAs(t, h, "op@vis")
 
 	var conv struct {

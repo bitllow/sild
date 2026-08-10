@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -277,14 +278,41 @@ func (h *Harness) SeedAPIKey(tenantID string) string {
 	return full
 }
 
-// SeedAdmin creates an admin_user and returns it.
+// SeedAdmin creates an admin_user holding one role, tenant-wide.
 func (h *Harness) SeedAdmin(tenantID, email string, role models.PlatformRole) *models.AdminUser {
 	h.T.Helper()
-	a, err := h.Svc.InviteAgent(context.Background(), tenantID, email, "", "", role)
+	return h.SeedAdminScoped(tenantID, email, role, models.RoleScope{})
+}
+
+// SeedAdminScoped creates an admin_user holding one role with a scope.
+func (h *Harness) SeedAdminScoped(tenantID, email string, role models.PlatformRole, scope models.RoleScope) *models.AdminUser {
+	h.T.Helper()
+	a, err := h.Svc.InviteAgent(context.Background(), tenantID, email, "", "", role, scope)
 	if err != nil {
 		h.T.Fatalf("seed admin: %v", err)
 	}
 	return a
+}
+
+// GrantPeer gives a member the agent role that reaches peer conversations.
+func (h *Harness) GrantPeer(tenantID, adminID string) {
+	h.T.Helper()
+	h.SetPeerScope(tenantID, adminID, true)
+}
+
+// SetPeerScope moves the member's agent assignment on or off peer conversations,
+// adding the role if they do not hold it yet.
+func (h *Harness) SetPeerScope(tenantID, adminID string, peer bool) {
+	h.T.Helper()
+	ctx := context.Background()
+	scope := models.RoleScope{Peer: peer}
+	err := h.Svc.RescopeRole(ctx, tenantID, adminID, models.PlatformAgent, scope)
+	if errors.Is(err, domain.ErrNotFound) {
+		err = h.Svc.AssignRole(ctx, tenantID, adminID, models.PlatformAgent, scope)
+	}
+	if err != nil {
+		h.T.Fatalf("set peer scope: %v", err)
+	}
 }
 
 // MintToken issues a user JWT for a host user id in a tenant.

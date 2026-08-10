@@ -145,7 +145,7 @@ var capabilities = map[Action]grant{
 	TranslationsFetch:   {apiKey: true, user: true, admin: true},
 	TranslationsRead:    {admin: true, translator: true},
 	TranslationsWrite:   {adminPriv: true, translator: true},
-	TranslationsPublish: {adminPriv: true},
+	TranslationsPublish: {adminPriv: true, translator: true},
 	TranslationsManage:  {adminPriv: true},
 }
 

@@ -10,6 +10,7 @@ func All() []any {
 		&TenantPushConfig{},
 		&APIKey{},
 		&AdminUser{},
+		&RoleAssignment{},
 		&AdminSession{},
 		&SigningKey{},
 		&Contact{},
@@ -38,6 +39,5 @@ func All() []any {
 		&TranslationOverride{},
 		&TranslationRelease{},
 		&TranslationBundle{},
-		&TranslatorScope{},
 	}
 }

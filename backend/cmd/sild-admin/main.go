@@ -135,7 +135,7 @@ func agentInvite(ctx context.Context, svc *domain.Service, args []string) error 
 	tenant := fs.String("tenant", "", "tenant id")
 	email := fs.String("email", "", "operator email")
 	name := fs.String("name", "", `display name, e.g. "Eva Marleen"`)
-	role := fs.String("role", string(models.PlatformAgent), "owner|admin|agent")
+	role := fs.String("role", string(models.PlatformAgent), "owner|admin|agent|translator")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func agentInvite(ctx context.Context, svc *domain.Service, args []string) error 
 		return err
 	}
 	first, last := provision.SplitName(*name)
-	admin, err := svc.InviteAgent(ctx, *tenant, *email, first, last, models.PlatformRole(*role))
+	admin, err := svc.InviteAgent(ctx, *tenant, *email, first, last, models.PlatformRole(*role), models.RoleScope{})
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,8 @@ func agentPeerAccess(ctx context.Context, svc *domain.Service, args []string) er
 	if err != nil {
 		return err
 	}
-	if err := svc.SetPeerAccess(ctx, *tenant, admin.ID, *on); err != nil {
+	// Peer access is the agent role's own dimension, so this rescopes that role.
+	if err := svc.AssignRole(ctx, *tenant, admin.ID, models.PlatformAgent, models.RoleScope{Peer: *on}); err != nil {
 		return err
 	}
 	fmt.Printf("peer access %v for %s\n", *on, *email)

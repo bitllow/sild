@@ -31,9 +31,16 @@ func operatorChannels(p *principal.Principal) map[string]bool {
 }
 
 func operator(role models.PlatformRole, peer bool) *principal.Principal {
+	held := []principal.Assignment{{Role: role}}
+	if peer {
+		if role == models.PlatformAgent {
+			held[0].Scope.Peer = true
+		} else {
+			held = append(held, principal.Assignment{Role: models.PlatformAgent, Scope: models.RoleScope{Peer: true}})
+		}
+	}
 	return &principal.Principal{
-		TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a1",
-		Role: role, PeerAccess: peer,
+		TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a1", Assignments: held,
 	}
 }
 

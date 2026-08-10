@@ -26,7 +26,7 @@ func (h *Handler) getPrincipal(c *gin.Context) {
 	}
 	switch p.Kind {
 	case principal.KindAdmin:
-		subject := gin.H{"id": p.AdminID, "role": p.Role}
+		subject := gin.H{"id": p.AdminID, "roles": p.Roles(), "assignments": p.Assignments}
 		if a, err := h.svc.GetAdmin(c.Request.Context(), p.TenantID, p.AdminID); err == nil {
 			subject["email"] = a.Email
 			subject["first_name"] = a.FirstName

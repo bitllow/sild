@@ -62,7 +62,13 @@ func holds(p *principal.Principal, a Action) bool {
 	case principal.KindSigned:
 		return g.signed
 	case principal.KindAdmin:
-		return roleHolds(g, p.Role)
+		// Union across the member's roles: a second role only ever widens.
+		for _, r := range p.Roles() {
+			if roleHolds(g, r) {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }
@@ -83,9 +89,10 @@ func authorizeConversation(p *principal.Principal, r ResourceAttrs) error {
 		return nil
 
 	case principal.KindAdmin:
-		// Peer takes precedence over role: it is the operator's own opt-in.
+		// Peer takes precedence over every other role: it is the agent
+		// assignment's own grant, and no other role implies it.
 		if r.Kind == models.KindPeer {
-			if p.PeerAccess {
+			if p.PeerAccess() {
 				return nil
 			}
 			return denied("peer_access_required", "peer access is not enabled for this operator")

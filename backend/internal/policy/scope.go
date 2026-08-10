@@ -67,7 +67,7 @@ func Scope(p *principal.Principal, a Action) ResourceScope {
 
 	case principal.KindAdmin:
 		s := ResourceScope{}
-		if !p.PeerAccess {
+		if !p.PeerAccess() {
 			s.kinds = []models.ConversationKind{models.KindSupport}
 		}
 		// Agents need an assignment; owner/admin are tenant-wide.
@@ -99,6 +99,11 @@ func Grants(p *principal.Principal) []Grant {
 	out := make([]Grant, 0, len(capabilities))
 	for _, a := range sortedActions() {
 		if !holds(p, a) {
+			continue
+		}
+		// A translator's scope is part of what they hold: advertising a publish
+		// their grant withholds puts a button on screen that only 403s.
+		if scope, narrows := TranslationNarrowing(p, a); narrows && a == TranslationsPublish && !scope.Publish {
 			continue
 		}
 		g := Grant{Action: a}

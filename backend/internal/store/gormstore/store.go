@@ -29,9 +29,12 @@ func (s *Store) Tx(ctx context.Context, fn func(tx store.Store) error) error {
 	})
 }
 
-func (s *Store) Tenants() store.TenantRepo             { return &tenantRepo{s.db} }
-func (s *Store) APIKeys() store.APIKeyRepo             { return &apiKeyRepo{s.db} }
-func (s *Store) Admins() store.AdminRepo               { return &adminRepo{s.db} }
+func (s *Store) Tenants() store.TenantRepo { return &tenantRepo{s.db} }
+func (s *Store) APIKeys() store.APIKeyRepo { return &apiKeyRepo{s.db} }
+func (s *Store) Admins() store.AdminRepo   { return &adminRepo{s.db} }
+func (s *Store) RoleAssignments() store.RoleAssignmentRepo {
+	return &roleAssignmentRepo{s.db}
+}
 func (s *Store) SigningKeys() store.SigningKeyRepo     { return &signingKeyRepo{s.db} }
 func (s *Store) Conversations() store.ConversationRepo { return &conversationRepo{s.db} }
 func (s *Store) Contacts() store.ContactRepo           { return &contactRepo{s.db} }

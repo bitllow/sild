@@ -17,10 +17,21 @@ func RequireRole(roles ...models.PlatformRole) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		p := Get(c)
-		if p == nil || p.Kind != principal.KindAdmin || !allowed[p.Role] {
+		if p == nil || p.Kind != principal.KindAdmin || !holdsAny(allowed, p) {
 			httpx.Forbidden(c, "insufficient platform role")
 			return
 		}
 		c.Next()
 	}
+}
+
+// holdsAny reports whether any role the member holds is admitted: a second role
+// widens what they may reach, never narrows it.
+func holdsAny(allowed map[models.PlatformRole]bool, p *principal.Principal) bool {
+	for _, r := range p.Roles() {
+		if allowed[r] {
+			return true
+		}
+	}
+	return false
 }

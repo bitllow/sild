@@ -26,6 +26,9 @@ func Migrate(db *gorm.DB) error {
 		if err := backfillContactNames(db); err != nil {
 			return err
 		}
+		if err := backfillRoleAssignments(db); err != nil {
+			return err
+		}
 		if err := dropRetiredObjects(db); err != nil {
 			return err
 		}
@@ -142,6 +145,97 @@ func backfillContactNames(db *gorm.DB) error {
 // Raw DDL by table NAME: the fields are gone from the models, so gorm's
 // model-driven migrator has no schema to resolve them against. Dropping a column
 // takes its indexes with it on every dialect.
+// backfillRoleAssignments turns the retired per-member role and peer flag into
+// the assignment rows that replaced them. Without it an existing member
+// authenticates holding nothing and cannot even repair themselves.
+func backfillRoleAssignments(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasColumn("admin_users", "platform_role") {
+		return nil
+	}
+	var rows []struct {
+		ID         string
+		TenantID   string
+		Role       string
+		PeerAccess bool
+	}
+	err := db.Raw(`SELECT id, tenant_id, platform_role AS role, peer_access
+	               FROM admin_users
+	               WHERE id NOT IN (SELECT admin_user_id FROM role_assignments)`).Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		held := []models.RoleAssignment{{
+			TenantID: r.TenantID, AdminUserID: r.ID, Role: models.PlatformRole(r.Role),
+		}}
+		// A translator's grant used to be the rows in translator_scopes, and none of
+		// them meant every project and language. The narrowed ones are read back below.
+		if held[0].Role == models.PlatformTranslator {
+			held[0].Scope.Projects = []string{models.ScopeAll}
+			held[0].Scope.Locales = []string{models.ScopeAll}
+		}
+		// Peer access was the person's, whatever their role; it becomes the agent
+		// assignment's dimension, so a non-agent who held it keeps reaching peers.
+		if r.PeerAccess && held[0].Role != models.PlatformAgent {
+			held = append(held, models.RoleAssignment{
+				TenantID: r.TenantID, AdminUserID: r.ID, Role: models.PlatformAgent,
+			})
+		}
+		held[len(held)-1].Scope.Peer = r.PeerAccess
+		if err := db.Create(&held).Error; err != nil {
+			return err
+		}
+	}
+	return backfillTranslatorScopes(db)
+}
+
+// backfillTranslatorScopes folds the retired grant table into the translator
+// assignment. Its empty set meant "everything", which is now spelled "all".
+func backfillTranslatorScopes(db *gorm.DB) error {
+	if !db.Migrator().HasTable("translator_scopes") {
+		return nil
+	}
+	var rows []struct {
+		TenantID    string
+		AdminUserID string
+		Kind        string
+		Value       string
+	}
+	if err := db.Raw("SELECT tenant_id, admin_user_id, kind, value FROM translator_scopes").Scan(&rows).Error; err != nil {
+		return err
+	}
+
+	byMember := map[[2]string]*models.RoleScope{}
+	for _, r := range rows {
+		key := [2]string{r.TenantID, r.AdminUserID}
+		if byMember[key] == nil {
+			byMember[key] = &models.RoleScope{}
+		}
+		switch r.Kind {
+		case "project":
+			byMember[key].Projects = append(byMember[key].Projects, r.Value)
+		case "locale":
+			byMember[key].Locales = append(byMember[key].Locales, r.Value)
+		}
+	}
+	for key, scope := range byMember {
+		if len(scope.Projects) == 0 {
+			scope.Projects = []string{models.ScopeAll}
+		}
+		if len(scope.Locales) == 0 {
+			scope.Locales = []string{models.ScopeAll}
+		}
+		err := db.Model(&models.RoleAssignment{}).
+			Where("tenant_id = ? AND admin_user_id = ? AND role = ?", key[0], key[1], models.PlatformTranslator).
+			Update("scope", scope).Error
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func dropRetiredObjects(db *gorm.DB) error {
 	const members = "conversation_members"
 	m := db.Migrator()
@@ -154,7 +248,21 @@ func dropRetiredObjects(db *gorm.DB) error {
 		}
 	}
 	if m.HasTable("push_opt_outs") {
-		return db.Exec("DROP TABLE push_opt_outs").Error
+		if err := db.Exec("DROP TABLE push_opt_outs").Error; err != nil {
+			return err
+		}
+	}
+	// Retired by role assignments, and only after the backfill above has read them.
+	for _, col := range []string{"platform_role", "peer_access"} {
+		if !m.HasColumn("admin_users", col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE admin_users DROP COLUMN " + col).Error; err != nil {
+			return err
+		}
+	}
+	if m.HasTable("translator_scopes") {
+		return db.Exec("DROP TABLE translator_scopes").Error
 	}
 	return nil
 }

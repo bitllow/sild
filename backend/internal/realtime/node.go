@@ -137,13 +137,11 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 	if err != nil {
 		return nil, err
 	}
-	scope := policy.Scope(&principal.Principal{
-		TenantID:   tenantID,
-		Kind:       principal.KindAdmin,
-		AdminID:    admin.ID,
-		Role:       admin.PlatformRole,
-		PeerAccess: admin.PeerAccess,
-	}, policy.ConversationsList)
+	roles, err := st.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)
+	if err != nil {
+		return nil, err
+	}
+	scope := policy.Scope(principal.ForAdmin(admin, roles), policy.ConversationsList)
 	if scope.DenyAll() {
 		return nil, errNoScope
 	}
