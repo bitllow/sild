@@ -99,11 +99,13 @@ export class TranslationsStore {
   private keysSeq = 0;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private completionTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    makeAutoObservable<TranslationsStore, "saveTimers" | "searchTimer">(this, {
+    makeAutoObservable<TranslationsStore, "saveTimers" | "searchTimer" | "completionTimer">(this, {
       saveTimers: false,
       searchTimer: false,
+      completionTimer: false,
       keyList: false,
       releaseList: false,
     });
@@ -199,6 +201,7 @@ export class TranslationsStore {
   loadKeys = async () => {
     const project = this.project;
     if (!project || !this.locale) return;
+    this.flushPending();
     const seq = ++this.keysSeq;
     const stale = () => seq !== this.keysSeq;
     runInAction(() => (this.error = null));
@@ -299,6 +302,17 @@ export class TranslationsStore {
     void this.saveValue(project, locale, key);
   };
 
+  // Reloading the page clears the drafts, so a scheduled write has to go first or
+  // the text typed just before a filter changed is dropped without a trace.
+  private flushPending = () => {
+    for (const [id, timer] of [...this.saveTimers]) {
+      clearTimeout(timer);
+      this.saveTimers.delete(id);
+      const [project, locale, ...key] = id.split("\n");
+      void this.saveValue(project, locale, key.join("\n"));
+    }
+  };
+
   private saveValue = async (projectId: string, locale: string, key: string) => {
     const project = this.projects.find((p) => p.id === projectId);
     const id = draftId(projectId, locale, key);
@@ -310,7 +324,9 @@ export class TranslationsStore {
       await adminApi.setTranslationValue(project.id, key, locale, value);
       runInAction(() => {
         // Typing carried on while this was in flight; that write owns the outcome.
-        if (this.drafts.get(id) !== value) return;
+        // A draft the page reload dropped is gone, not superseded — this one settles it.
+        const current = this.drafts.get(id);
+        if (current !== undefined && current !== value) return;
         this.drafts.delete(id);
         this.saves.set(id, "saved");
         if (locale !== this.locale || projectId !== this.projectId) return;
@@ -320,6 +336,7 @@ export class TranslationsStore {
           row.state = "custom";
         }
       });
+      this.scheduleCompletionReload();
     } catch (e) {
       runInAction(() => {
         this.saves.set(id, "failed");
@@ -352,7 +369,18 @@ export class TranslationsStore {
       return;
     }
     runInAction(() => this.saves.set(id, "saved"));
+    this.scheduleCompletionReload();
     await this.refreshRow(project.id, locale, key);
+  };
+
+  // The server counts completion, so a translated value only shows up in the figure
+  // after a re-read. Coalesced: a burst of edits is one extra request, not one each.
+  private scheduleCompletionReload = () => {
+    if (this.completionTimer) clearTimeout(this.completionTimer);
+    this.completionTimer = setTimeout(() => {
+      this.completionTimer = null;
+      void this.reloadProject();
+    }, SAVE_DELAY);
   };
 
   // Only the server knows the shipped default, so re-read the one row rather
@@ -463,6 +491,8 @@ export class TranslationsStore {
       runInAction(() => (this.error = "A language is a two- or three-letter code, like fi."));
       return false;
     }
+    // Whether this add worked is read off `error`, so a previous attempt's must go.
+    runInAction(() => (this.error = null));
     if (project.locales.includes(locale)) return true;
     await this.saveSettings({ locales: [...project.locales, locale] });
     return !this.error;

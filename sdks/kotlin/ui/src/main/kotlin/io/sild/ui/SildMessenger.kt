@@ -122,8 +122,8 @@ class SildMessengerActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         SildHost.onScreen = session?.client
-        // Coming back to the front is when a held manifest is re-checked, and when
-        // anything a previous poll downloaded is applied.
+        // Coming back to the front re-checks a held manifest that has aged out. What
+        // it downloads is staged for the next start, never applied here.
         session?.client?.onForeground()
     }
 

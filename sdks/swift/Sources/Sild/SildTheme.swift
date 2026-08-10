@@ -121,9 +121,12 @@ public typealias SildStrings = (String, [String: Any]) -> String
 
 private struct SildStringsKey: EnvironmentKey {
     // The bundled text, so a screen shown outside the messenger still renders words
-    // rather than keys.
+    // rather than keys. Built once: every label on the screen goes through this on
+    // each body pass.
+    private static let bundled = I18nKt.bundledStrings(locale: nil)
+
     static let defaultValue: SildStrings = { key, vars in
-        I18nKt.bundledStrings(locale: nil).t(key: key, vars: vars.isEmpty ? nil : vars)
+        Self.bundled.t(key: key, vars: vars.isEmpty ? nil : vars)
     }
 }
 

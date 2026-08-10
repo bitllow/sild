@@ -182,21 +182,24 @@ func (s *Service) projectView(ctx context.Context, tenantID, project string, p *
 // Sild ships is complete by construction, so only what the tenant wrote is counted.
 func (s *Service) completion(ctx context.Context, tenantID, project string, cat *i18n.Catalog, locales []string) (map[string]int, error) {
 	total := len(cat.Keys())
+	shipped := cat.Locales()
 	out := make(map[string]int, len(locales))
-	if total == 0 {
-		for _, l := range locales {
-			out[l] = 100
-		}
-		return out, nil
-	}
-	counts, err := s.store.Translations().TranslatedCounts(ctx, tenantID, project)
-	if err != nil {
-		return nil, err
-	}
+	// Counted only when some locale actually needs the figure: the platform project
+	// as shipped never does, and every manifest poll resolves the project.
+	var counts map[string]int
 	for _, l := range locales {
-		if slices.Contains(cat.Locales(), l) {
+		if total == 0 || slices.Contains(shipped, l) {
 			out[l] = 100
 			continue
+		}
+		if counts == nil {
+			var err error
+			if counts, err = s.store.Translations().TranslatedCounts(ctx, tenantID, project); err != nil {
+				return nil, err
+			}
+			if counts == nil {
+				counts = map[string]int{}
+			}
 		}
 		out[l] = min(100, counts[l]*100/total)
 	}
@@ -262,6 +265,23 @@ func (s *Service) DeleteTranslationProject(ctx context.Context, tenantID, projec
 		return err
 	}
 	return s.store.Translations().DeleteProject(ctx, tenantID, project)
+}
+
+// validKey keeps a key addressable as a URL path segment — undeclaring one is a
+// DELETE on it, and a key holding a slash could never be reached again.
+func validKey(key string) bool {
+	if key == "" || len(key) > 255 {
+		return false
+	}
+	for _, r := range key {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // validProjectSlug keeps a project id usable in a URL path segment and in an
@@ -464,8 +484,8 @@ func (s *Service) DeclareTranslationKey(ctx context.Context, tenantID, project, 
 		return err
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || len(key) > 255 || strings.ContainsAny(key, " \t\r\n") {
-		return invalid("a key is up to 255 characters and contains no spaces")
+	if !validKey(key) {
+		return invalid("a key is up to 255 characters of letters, digits, dots, dashes and underscores")
 	}
 	source = strings.TrimSpace(source)
 	if source == "" {

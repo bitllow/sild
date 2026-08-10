@@ -98,8 +98,8 @@ public struct SildMessenger: View {
             // never called Sild.initialize, so its config is the SDK's config.
             if SildHost.shared.config == nil { SildHost.shared.config = model.pushConfig }
             SildHost.shared.onScreen = model.pushClient
-            // Re-appearing on screen re-checks a held manifest and applies anything
-            // a previous poll downloaded.
+            // Re-appearing on screen re-checks a held manifest that has aged out.
+            // What it downloads is staged for the next start, never applied here.
             model.onForeground()
         }
         .onDisappear {

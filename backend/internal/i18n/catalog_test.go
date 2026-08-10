@@ -44,8 +44,8 @@ func TestEstonianIsEtNotEe(t *testing.T) {
 	}
 }
 
-// A stale generated catalog would ship a client that renders a key Sild no
-// longer has, or misses one it just added.
+// A stale generated catalog would ship a client that renders a key Sild no longer
+// has, misses one it just added, or renders last week's wording of one it kept.
 func TestTheGeneratedClientCatalogsAreCurrent(t *testing.T) {
 	cat := i18n.Platform()
 	for _, path := range generatedCatalogs {
@@ -58,13 +58,27 @@ func TestTheGeneratedClientCatalogsAreCurrent(t *testing.T) {
 			if !strings.Contains(src, strconv.Quote(locale)) {
 				t.Errorf("%s is missing locale %s — run `make i18n`", path, locale)
 			}
-		}
-		for _, key := range cat.Keys() {
-			if !strings.Contains(src, strconv.Quote(key)) {
-				t.Errorf("%s is missing key %s — run `make i18n`", path, key)
+			for _, key := range cat.Keys() {
+				value, ok := cat.Default(locale, key)
+				if !ok {
+					continue
+				}
+				if !strings.Contains(src, generatedEntry(path, key, value)) {
+					t.Errorf("%s has stale or missing text for %s/%s — run `make i18n`", path, locale, key)
+				}
 			}
 		}
 	}
+}
+
+// How codegen writes one entry, so a value edited without regenerating fails here
+// rather than shipping. Kotlin escapes `$`, which starts a template otherwise.
+func generatedEntry(path, key, value string) string {
+	if strings.HasSuffix(path, ".kt") {
+		esc := func(s string) string { return strings.ReplaceAll(strconv.Quote(s), "$", "\\$") }
+		return esc(key) + " to " + esc(value)
+	}
+	return strconv.Quote(key) + ": " + strconv.Quote(value)
 }
 
 func TestResolveFallsThroughToTheSourceLanguage(t *testing.T) {

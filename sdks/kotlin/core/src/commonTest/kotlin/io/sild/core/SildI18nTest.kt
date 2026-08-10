@@ -216,11 +216,35 @@ class SildI18nTest {
         assertEquals("Runā ar mums", i.t(TITLE))
     }
 
+    // The background poll is not the moment to change the words on screen, and the
+    // language is part of the words: it moves when the bundle it belongs to does.
+    @Test fun aReNegotiatedLanguageWaitsForTheNextStartToo() = runBlockingTest {
+        val src = FakeTranslations(
+            manifest = TranslationManifest(fallback_locale = "lv", locales = mapOf("lv" to 2)),
+            bundles = mapOf(("lv" to 2) to mapOf(TITLE to "Runā ar mums")),
+        )
+        val i = i18n(src, prefs = listOf("ru"))
+        i.refreshStaged()
+        assertEquals("ru", i.locale, "a background poll must not move the language mid-task")
+        assertEquals("Напишите нам", i.t(TITLE))
+        assertTrue(i.activateStaged())
+        assertEquals("lv", i.locale)
+        assertEquals("Runā ar mums", i.t(TITLE))
+    }
+
     @Test fun anExplicitLocaleSurvivesTheTenantsOffering() = runBlockingTest {
         val src = FakeTranslations(manifest = TranslationManifest(fallback_locale = "lv", locales = mapOf("lv" to 2)))
         val i = i18n(src, explicit = "ru")
         i.refresh()
         assertEquals("ru", i.locale, "a host that named the language must be obeyed")
+    }
+
+    @Test fun aLanguageSetAfterInitAlsoSurvivesTheTenantsOffering() = runBlockingTest {
+        val src = FakeTranslations(manifest = TranslationManifest(fallback_locale = "en", locales = mapOf("en" to 2)))
+        val i = i18n(src)
+        i.setLocale("ru")
+        i.refresh()
+        assertEquals("ru", i.locale, "setLocale is the host's instruction, same as naming it at init")
     }
 
     @Test fun regionalTagsCollapseToTheirLanguage() {

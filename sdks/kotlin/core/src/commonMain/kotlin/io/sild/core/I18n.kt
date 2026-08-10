@@ -34,13 +34,16 @@ internal class ManifestRead(val manifest: TranslationManifest?, val etag: String
 // reopened builds a new client, and without this its predecessor's download would
 // be thrown away — "activates at next start" would never activate anything.
 internal class I18nDownloads {
-    private val byLocale = mutableMapOf<String, Pair<Int, Map<String, String>>>()
+    // Replaced whole rather than mutated: this is read on the main thread and
+    // written from whichever dispatcher the fetch ran on.
+    @Volatile
+    private var byLocale: Map<String, Pair<Int, Map<String, String>>> = emptyMap()
 
     fun get(project: String, locale: String): Pair<Int, Map<String, String>>? =
         byLocale["$project\n$locale"]
 
     fun put(project: String, locale: String, ready: Pair<Int, Map<String, String>>) {
-        byLocale["$project\n$locale"] = ready
+        byLocale = byLocale + ("$project\n$locale" to ready)
     }
 
     /** The process-wide one, which every client built from a config shares. */
@@ -48,6 +51,9 @@ internal class I18nDownloads {
         val shared = I18nDownloads()
     }
 }
+
+/** A downloaded bundle and the language it belongs to. */
+internal class ReadyBundle(val locale: String, val version: Int, val strings: Map<String, String>)
 
 /** The calls the i18n runtime needs — implemented by SildApi. */
 internal interface TranslationSource {
@@ -106,8 +112,9 @@ class SildI18n internal constructor(
         private set
 
     // True when the host named the locale: an instruction, not a guess, so what the
-    // tenant offers never overrides it.
-    private val explicit: Boolean
+    // tenant offers never overrides it. setLocale is that same instruction, later.
+    @Volatile
+    private var explicit: Boolean
 
     @Volatile
     private var strings: Map<String, String> = emptyMap()
@@ -116,7 +123,7 @@ class SildI18n internal constructor(
     private var version: Int = 0
 
     @Volatile
-    private var staged: Pair<Int, Map<String, String>>? = null
+    private var staged: ReadyBundle? = null
 
     @Volatile
     private var heldEtag: String? = null
@@ -159,7 +166,9 @@ class SildI18n internal constructor(
      *  ignored, so a host may pass the device's setting through unchecked. */
     fun setLocale(tag: String) {
         val next = normalizeLocale(tag)
-        if (next.isEmpty() || next == locale) return
+        if (next.isEmpty()) return
+        explicit = true
+        if (next == locale) return
         locale = next
         // The staged bundle was another language's; the bundled defaults are this one's.
         staged = null
@@ -172,8 +181,9 @@ class SildI18n internal constructor(
      *  failed fetch leaves the text already on screen. */
     suspend fun refresh() {
         val ready = download() ?: return
-        version = ready.first
-        strings = ready.second
+        locale = ready.locale
+        version = ready.version
+        strings = ready.strings
         staged = null
     }
 
@@ -193,44 +203,46 @@ class SildI18n internal constructor(
     fun activateStaged(): Boolean {
         val ready = staged ?: return false
         staged = null
-        if (ready.first == version) return false
-        version = ready.first
-        strings = ready.second
+        if (ready.locale == locale && ready.version == version) return false
+        locale = ready.locale
+        version = ready.version
+        strings = ready.strings
         return true
     }
 
-    // download returns the published bundle for the active locale, or null when
-    // there is nothing new, nothing published, or the network is gone.
-    private suspend fun download(): Pair<Int, Map<String, String>>? = runCatching {
+    // download returns the published bundle to render next, or null when there is
+    // nothing new, nothing published, or the network is gone. The language it carries
+    // may not be the active one: a re-negotiation lands with the text, not before it.
+    private suspend fun download(): ReadyBundle? = runCatching {
         val src = source ?: return null
+        val at = locale
         val read = src.fetchTranslationManifest(project, heldEtag)
         val manifest = read.manifest ?: heldManifest ?: return null
         heldEtag = read.etag.ifEmpty { heldEtag }
         heldAt = now()
         heldManifest = manifest
-        adopt(manifest)
-        val v = manifest.locales[locale] ?: return null
-        if (v == version) return null
-        val ready = v to src.fetchTranslationBundle(project, locale, v).strings
-        downloads.put(project, locale, ready)
-        ready
+        val want = negotiate(manifest)
+        val v = manifest.locales[want] ?: return null
+        if (want == locale && v == version) return null
+        val strings = src.fetchTranslationBundle(project, want, v).strings
+        downloads.put(project, want, v to strings)
+        // setLocale may have moved on while the bundle was in flight; it is held for
+        // whoever asks for that language next, but it is not this language's text.
+        if (at != locale) return null
+        ReadyBundle(want, v, strings)
     }.getOrNull()
 
     // Which locales the tenant offers is unknowable until the manifest arrives, so a
     // guess negotiated against the bundled catalog is re-negotiated against the offering.
-    private fun adopt(manifest: TranslationManifest) {
-        if (explicit) return
+    private fun negotiate(manifest: TranslationManifest): String {
+        if (explicit) return locale
         // Whatever the tenant publishes is on offer, including a language Sild
         // ships no bundled text for — its bundle carries every key.
         val offered = manifest.locales.keys.toList()
-        if (offered.isEmpty() || locale in offered) return
+        if (offered.isEmpty() || locale in offered) return locale
         val next = negotiateLocale(devicePrefs, offered)
             .ifEmpty { normalizeLocale(manifest.fallback_locale) }
-        if (next !in offered) return
-        locale = next
-        strings = emptyMap()
-        version = 0
-        adoptDownloaded()
+        return if (next in offered) next else locale
     }
 }
 

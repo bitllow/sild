@@ -38,8 +38,11 @@ val LocalSildColors = staticCompositionLocalOf<SildColors> { error("SildColors n
 typealias SildStrings = (String, Map<String, Any>?) -> String
 
 // Defaults to the bundled English so a preview or a host embedding a screen
-// directly still renders words rather than keys.
-val LocalSildStrings = staticCompositionLocalOf<SildStrings> { { key, vars -> bundledStrings().t(key, vars) } }
+// directly still renders words rather than keys. Built once: every label on the
+// screen goes through this on each recomposition.
+private val bundled by lazy { bundledStrings() }
+
+val LocalSildStrings = staticCompositionLocalOf<SildStrings> { { key, vars -> bundled.t(key, vars) } }
 
 /** The text for [key] in the language the messenger is rendering. */
 @Composable

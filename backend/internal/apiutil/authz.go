@@ -141,8 +141,6 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, a policy.Action,
 	return true
 }
 
-// AuthorizeTranslation checks a translation action against a project and, when
-// the action names one, a locale. Only a translator carries a grant to load.
 // TranslationScope is the caller's own grant, for a collection that has to narrow
 // what it returns rather than answer yes or no about one project. Empty for
 // everyone but a translator — nobody else carries a scope.
@@ -159,6 +157,8 @@ func TranslationScope(c *gin.Context, svc *domain.Service) (policy.TranslationAt
 	return attrs, true
 }
 
+// AuthorizeTranslation checks a translation action against a project and, when
+// the action names one, a locale. Only a translator carries a grant to load.
 func AuthorizeTranslation(c *gin.Context, svc *domain.Service, a policy.Action, project, locale string) bool {
 	if !declared(c, a) {
 		failUndeclared(c, a)

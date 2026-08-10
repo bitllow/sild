@@ -221,6 +221,18 @@ func TestTheSildProjectDeclaresNoKeysAndCannotBeRemoved(t *testing.T) {
 	}
 }
 
+// Undeclaring addresses the key as a path segment, so one holding a slash could
+// be declared and never removed again.
+func TestAKeyThatWouldNotSurviveAURLPathIsRefused(t *testing.T) {
+	f := newI18nFixture(t)
+	f.createProject(t, "shop", "Shop")
+	for _, key := range []string{"checkout/pay", "checkout pay", "checkout?pay", ""} {
+		if res := f.declare(t, "shop", key, "Pay now"); res.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("declaring %q: %d, want 422", key, res.StatusCode)
+		}
+	}
+}
+
 func TestDeletingAProjectTakesItsStringsWithIt(t *testing.T) {
 	f := newI18nFixture(t)
 	f.createProject(t, "shop", "Shop")
