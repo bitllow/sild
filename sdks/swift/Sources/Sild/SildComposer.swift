@@ -9,6 +9,9 @@ import SildCore
 /// keeps the draft — the same contract as the Android composer.
 struct SildComposer: View {
     @Environment(\.sildStyle) private var style
+    @Environment(\.sildStrings) private var strings
+
+    private func t(_ key: String, _ vars: [String: Any] = [:]) -> String { strings(key, vars) }
 
     let pending: [PendingAttachment]
     let uploading: Int
@@ -45,7 +48,7 @@ struct SildComposer: View {
             HStack(spacing: 6) {
                 ForEach(Array(pending.enumerated()), id: \.offset) { i, att in
                     HStack(spacing: 4) {
-                        Text(att.filename.isEmpty ? "attachment" : att.filename)
+                        Text(att.filename.isEmpty ? t("widget.composer.unnamedFile") : att.filename)
                             .font(style.font(12))
                             .foregroundStyle(style.colors.sub)
                             .lineLimit(1)
@@ -53,7 +56,7 @@ struct SildComposer: View {
                         Button { onRemove(i) } label: {
                             SildIconView(.close, size: 13).foregroundStyle(style.colors.tertiary)
                         }
-                        .accessibilityLabel("Remove attachment")
+                        .accessibilityLabel(t("widget.composer.remove"))
                     }
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
@@ -66,7 +69,7 @@ struct SildComposer: View {
                     .clipShape(RoundedRectangle(cornerRadius: style.radii.btn))
                 }
                 if uploading > 0 {
-                    Text("Uploading…")
+                    Text(t("widget.composer.uploading"))
                         .font(style.font(12))
                         .foregroundStyle(style.colors.tertiary)
                 }
@@ -83,9 +86,9 @@ struct SildComposer: View {
                     .frame(width: 34, height: 34)
             }
             .disabled(!enabled)
-            .accessibilityLabel("Attach a file")
+            .accessibilityLabel(t("widget.composer.attach"))
 
-            TextField("Message…", text: $text, axis: .vertical)
+            TextField(t("widget.composer.placeholder"), text: $text, axis: .vertical)
                 .font(style.font(14))
                 .foregroundStyle(style.colors.text)
                 .tint(style.colors.brand)
@@ -114,7 +117,7 @@ struct SildComposer: View {
             .buttonStyle(SildBrandButtonStyle(colors: style.colors, radius: style.radii.btn))
             .disabled(!canSend)
             .accessibilityIdentifier("sild.composer.send")
-            .accessibilityLabel("Send")
+            .accessibilityLabel(t("widget.composer.send"))
         }
         .padding(.leading, 8)
         .padding(.trailing, 6)

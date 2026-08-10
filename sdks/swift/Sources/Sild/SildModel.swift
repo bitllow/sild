@@ -59,6 +59,24 @@ public final class SildModel {
         bridge.closeAll()
     }
 
+    /// One of Sild's own strings in the active language, with `{name}` placeholders
+    /// filled. Before `start()` — and whenever a fetch has not landed — this is the
+    /// text bundled in the app, so a screen never waits on the network to draw.
+    ///
+    /// Views re-render on it because `state` carries the revision behind it.
+    public func t(_ key: String, _ vars: [String: Any] = [:]) -> String {
+        let strings = session?.client.i18n ?? bundled
+        return strings.t(key: key, vars: vars.isEmpty ? nil : vars)
+    }
+
+    /// Re-poll for published strings when the messenger comes back to the front.
+    public func onForeground() { session?.client.onForeground() }
+
+    /// Render [tag] from now on, for a host with its own language picker.
+    public func setLocale(_ tag: String) { session?.client.setLocale(tag: tag) }
+
+    @ObservationIgnored private lazy var bundled: SildI18n = I18nKt.bundledStrings(locale: config.locale)
+
     /// The theme for the loaded brand, rebuilt only when the config or the scheme
     /// changes — resolving it crosses a dozen bridge calls, and the view body runs on
     /// every state change.

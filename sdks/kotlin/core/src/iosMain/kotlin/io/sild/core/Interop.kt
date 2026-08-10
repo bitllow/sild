@@ -21,7 +21,13 @@ fun sildConfig(
     baseUrl: String,
     tokenProvider: TokenProvider,
     userId: String?,
-): SildConfig = SildConfig(baseUrl = baseUrl, tokenProvider = tokenProvider, userId = userId)
+    locale: String? = null,
+): SildConfig = SildConfig(
+    baseUrl = baseUrl,
+    tokenProvider = tokenProvider,
+    userId = userId,
+    locale = locale,
+)
 
 /** Copy [data] in one pass. Swift has no bridge to ByteArray, and filling one through
  *  the generated setter costs a bridged call per byte. */

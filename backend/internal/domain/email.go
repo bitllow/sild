@@ -45,10 +45,11 @@ func normalizeSubject(s string) string {
 
 // replySubject renders an outbound subject as "Re: <original>" (no token —
 // threading rides the Reply-To +subaddress, not the visible subject).
-func replySubject(subject string) string {
+// whenBlank is the localized subject for a thread that never had one.
+func replySubject(subject, whenBlank string) string {
 	s := strings.TrimSpace(subject)
 	if s == "" {
-		return "Re: your message"
+		return whenBlank
 	}
 	if strings.HasPrefix(strings.ToLower(s), "re:") {
 		return s
@@ -257,17 +258,21 @@ func (s *Service) ingest(ctx context.Context, tenantID string, in mail.InboundEm
 // sendAutoReply emails the sender an acknowledgement. The reply keeps the
 // original subject ("Re: …") so the sender's response threads back by
 // sender + subject — no token needed (§6.2).
+//
+// An inbound sender is an address and nothing else, so no locale is recorded for
+// them; the text resolves at the tenant's fallback language.
 func (s *Service) sendAutoReply(ctx context.Context, cfg *models.TenantEmailConfig, convID, to string) {
 	if to == "" {
 		return
 	}
+	blank := s.ResolveText(ctx, cfg.TenantID, "", "email.autoReply.subject")
 	out := mail.OutboundEmail{
 		To: to, FromName: cfg.FromName, FromAddress: cfg.FromAddress,
-		Subject: "Re: your message",
-		Body:    "Thanks — we received your message and a member of our team will reply shortly.",
+		Subject: blank,
+		Body:    s.ResolveText(ctx, cfg.TenantID, "", "email.autoReply.body"),
 	}
 	if t, err := s.store.Email().Get(ctx, cfg.TenantID, convID); err == nil {
-		out.Subject = replySubject(t.Subject)
+		out.Subject = replySubject(t.Subject, blank)
 		out.ReplyTo = replyToWithToken(cfg.FromAddress, t.ThreadToken)
 	}
 	_ = s.mailer.Send(ctx, out)
@@ -373,9 +378,10 @@ func (s *Service) maybeSendOutboundEmail(ctx context.Context, tenantID, convID s
 	}
 	cfg, _ := s.store.Tenants().GetEmailConfig(ctx, tenantID)
 	thread, _ := s.store.Email().Get(ctx, tenantID, convID)
-	subject, replyTo := "Re: your message", ""
+	blank := s.ResolveText(ctx, tenantID, "", "email.autoReply.subject")
+	subject, replyTo := blank, ""
 	if thread != nil {
-		subject = replySubject(thread.Subject)
+		subject = replySubject(thread.Subject, blank)
 		if cfg != nil {
 			replyTo = replyToWithToken(cfg.FromAddress, thread.ThreadToken)
 		}

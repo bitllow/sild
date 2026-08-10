@@ -1,9 +1,17 @@
 {
+  "email.autoReply.body": "Спасибо — мы получили ваше сообщение, и сотрудник нашей команды скоро ответит.",
+  "email.autoReply.subject": "Re: ваше сообщение",
   "push.newMessage": "Новое сообщение",
+  "widget.common.cancel": "Отмена",
   "widget.composer.attach": "Прикрепить файл",
+  "widget.composer.attachFailed": "Не удалось прикрепить файл. Попробуйте ещё раз.",
+  "widget.composer.file": "Файл",
+  "widget.composer.photoOrVideo": "Фото или видео",
   "widget.composer.placeholder": "Напишите сообщение…",
   "widget.composer.remove": "Удалить",
   "widget.composer.send": "Отправить",
+  "widget.composer.tooLarge": "Файл слишком большой (максимум {mb} МБ).",
+  "widget.composer.unnamedFile": "вложение",
   "widget.composer.uploading": "Загрузка файла…",
   "widget.home.cta": "Отправить сообщение",
   "widget.home.directChat": "Личный чат",
@@ -21,11 +29,14 @@
   "widget.notifications.enable": "Включить уведомления об ответах",
   "widget.status.connecting": "Подключение…",
   "widget.status.loading": "Загрузка…",
+  "widget.status.reconnecting": "Переподключение…",
   "widget.thread.back": "Назад",
   "widget.thread.closed": "Этот разговор закрыт.",
+  "widget.thread.closedShort": "Закрыт",
   "widget.thread.directRef": "Личный чат · {ref}",
   "widget.thread.empty": "Отправьте сообщение, чтобы начать разговор.",
   "widget.thread.loadingOlder": "Загрузка предыдущих сообщений…",
   "widget.thread.scrollUp": "Прокрутите вверх, чтобы увидеть предыдущие сообщения",
-  "widget.thread.support": "Чат с поддержкой"
+  "widget.thread.support": "Чат с поддержкой",
+  "widget.thread.you": "Вы"
 }

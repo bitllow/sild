@@ -12,10 +12,13 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_DIR = join(ROOT, "backend/internal/i18n/locales");
 const OUT = join(ROOT, "web/src/i18n/catalog.generated.ts");
+const KOTLIN_OUT = join(ROOT, "sdks/kotlin/core/src/commonMain/kotlin/io/sild/core/I18nCatalog.generated.kt");
 const SOURCE_LOCALE = "en";
 const COMMAND = "make i18n";
 
 const q = (s) => JSON.stringify(s);
+// Kotlin reads `$` in a string literal as a template start, so it has to be escaped.
+const k = (s) => JSON.stringify(s).replaceAll("$", "\\$");
 
 async function main() {
   const files = (await readdir(SRC_DIR)).filter((f) => f.endsWith(".json")).sort();
@@ -47,6 +50,28 @@ async function main() {
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, lines.join("\n"), "utf8");
   console.log(`wrote ${OUT} (${locales.length} locales)`);
+
+  const kt = [
+    `// Generated from backend/internal/i18n/locales by scripts/gen-i18n.mjs — run \`${COMMAND}\`. Do not edit.`,
+    "package io.sild.core",
+    "",
+    `internal const val I18N_SOURCE_LOCALE: String = ${k(SOURCE_LOCALE)}`,
+    "",
+    `internal val I18N_LOCALES: List<String> = listOf(${locales.map(k).join(", ")})`,
+    "",
+    "internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(",
+  ];
+  for (const locale of locales) {
+    const strings = byLocale.get(locale);
+    kt.push(`    ${k(locale)} to mapOf(`);
+    for (const key of Object.keys(strings).sort()) kt.push(`        ${k(key)} to ${k(strings[key])},`);
+    kt.push("    ),");
+  }
+  kt.push(")", "");
+
+  await mkdir(dirname(KOTLIN_OUT), { recursive: true });
+  await writeFile(KOTLIN_OUT, kt.join("\n"), "utf8");
+  console.log(`wrote ${KOTLIN_OUT} (${locales.length} locales)`);
 }
 
 main().catch((e) => {

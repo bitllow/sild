@@ -68,13 +68,16 @@ test.describe("translations · editor", () => {
       await page.getByTestId("translations-filter").selectOption("");
       await expect(translationRows(page)).toHaveCount(all);
 
-      // Search matches on the key as well as the text.
+      // Search matches on the key as well as the text. The count is whatever the
+      // catalog holds — pinning it would fail on the next key Sild adds.
       await page.getByTestId("translations-search").fill("widget.composer");
-      await expect(translationRows(page)).toHaveCount(5);
+      await expect(translationRow(page, "widget.composer.send")).toBeVisible();
       await expect(translationRow(page, KEY)).toHaveCount(0);
-      for (const key of await translationRows(page).evaluateAll((rows) =>
+      const matched = await translationRows(page).evaluateAll((rows) =>
         rows.map((r) => r.getAttribute("data-key"))
-      )) {
+      );
+      expect(matched.length).toBeLessThan(all);
+      for (const key of matched) {
         expect(key).toContain("widget.composer");
       }
 

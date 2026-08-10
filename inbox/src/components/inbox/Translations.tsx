@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { Badge, Button, Input, SearchIcon, Select, Switch } from "@/components/ds";
@@ -41,7 +42,7 @@ export const Translations = observer(function Translations() {
           <div>
             <h1 style={{ fontSize: 22 }}>Translations</h1>
             <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
-              {project ? project.name : "Loading…"} — edits are drafts until you publish.
+              {project ? `${project.keys} strings` : "Loading…"} — edits are drafts until you publish.
             </div>
           </div>
           <Release />
@@ -54,7 +55,10 @@ export const Translations = observer(function Translations() {
       )}
 
       <div style={{ flex: 1, minWidth: 0, display: "flex", overflow: "hidden" }}>
-        <KeyList />
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <DeclareKey />
+          <KeyList />
+        </div>
         <aside
           style={{
             width: 320,
@@ -64,6 +68,7 @@ export const Translations = observer(function Translations() {
             borderLeft: "1px solid var(--border-default)",
           }}
         >
+          <Projects />
           <Languages />
           <Releases />
         </aside>
@@ -95,7 +100,19 @@ const Toolbar = observer(function Toolbar() {
   const t = useStore().translations;
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
+      {t.projects.length > 1 && (
+        <div style={{ width: 200, flex: "none" }}>
+          <Select
+            data-testid="translations-project"
+            aria-label="Project"
+            size="sm"
+            value={t.project?.id ?? ""}
+            options={t.projects.map((p) => ({ value: p.id, label: p.name }))}
+            onChange={(e) => t.setProject(e.target.value)}
+          />
+        </div>
+      )}
       <div style={{ width: 220, flex: "none" }}>
         <Select
           data-testid="translations-locale"
@@ -116,6 +133,21 @@ const Toolbar = observer(function Toolbar() {
           onChange={(e) => t.setStateFilter(e.target.value as TranslationStateFilter)}
         />
       </div>
+      {t.namespaces.length > 1 && (
+        <div style={{ width: 170, flex: "none" }}>
+          <Select
+            data-testid="translations-namespace"
+            aria-label="Group"
+            size="sm"
+            value={t.namespace}
+            options={[
+              { value: "", label: "All groups" },
+              ...t.namespaces.map((ns) => ({ value: ns, label: ns })),
+            ]}
+            onChange={(e) => t.setNamespace(e.target.value)}
+          />
+        </div>
+      )}
       <div style={{ flex: 1, minWidth: 0, maxWidth: 360 }}>
         <Input
           data-testid="translations-search"
@@ -165,7 +197,9 @@ const KeyList = observer(function KeyList() {
 });
 
 const KeyRow = observer(function KeyRow({ row, t }: { row: ApiTranslationKey; t: TranslationsStore }) {
-  const canWrite = useStore().can("translations.write");
+  const store = useStore();
+  const canWrite = store.can("translations.write");
+  const canManage = store.can("translations.manage");
   const save = t.saveStateOf(row.key);
 
   return (
@@ -208,7 +242,165 @@ const KeyRow = observer(function KeyRow({ row, t }: { row: ApiTranslationKey; t:
             Reset
           </Button>
         )}
+        {t.ownProject && canManage && (
+          <Button
+            data-testid="translations-undeclare"
+            size="sm"
+            variant="ghost"
+            onClick={() => void t.undeclareKey(row.key)}
+          >
+            Remove
+          </Button>
+        )}
       </div>
+    </div>
+  );
+});
+
+// DeclareKey adds a string to a project the tenant owns. Sild's own keys come from
+// the repo, so the bar is not offered there at all.
+const DeclareKey = observer(function DeclareKey() {
+  const store = useStore();
+  const t = store.translations;
+  const [key, setKey] = useState("");
+  const [source, setSource] = useState("");
+
+  if (!t.ownProject || !store.can("translations.manage")) return null;
+
+  const add = async () => {
+    if (!key.trim() || !source.trim()) return;
+    if (await t.declareKey(key, source)) {
+      setKey("");
+      setSource("");
+    }
+  };
+
+  return (
+    <div style={{ padding: "14px 24px 0", flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ width: 260, flex: "none" }}>
+        <Input
+          data-testid="translations-new-key"
+          aria-label="New key"
+          size="sm"
+          placeholder="checkout.pay"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+        />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <Input
+          data-testid="translations-new-source"
+          aria-label="English source"
+          size="sm"
+          placeholder="Pay now"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void add()}
+        />
+      </div>
+      <Button data-testid="translations-declare" size="sm" onClick={() => void add()} disabled={!key.trim() || !source.trim()}>
+        Add string
+      </Button>
+    </div>
+  );
+});
+
+// Projects lists what the tenant translates: Sild's own strings, plus a project per
+// app of theirs. Creating one is how their own copy gets managed in the same place.
+const Projects = observer(function Projects() {
+  const store = useStore();
+  const t = store.translations;
+  const [adding, setAdding] = useState(false);
+  const [id, setId] = useState("");
+  const [name, setName] = useState("");
+  const canManage = store.can("translations.manage");
+
+  const create = async () => {
+    if (await t.createProject(id, name)) {
+      setAdding(false);
+      setId("");
+      setName("");
+    }
+  };
+
+  return (
+    <div style={{ ...card, marginBottom: 20 }} data-testid="translations-projects">
+      <div style={{ padding: "14px 16px", borderBottom: rowBorder }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>Projects</div>
+        <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
+          Sild&apos;s own strings, and one project per app of yours.
+        </div>
+      </div>
+      {t.projects.map((p) => (
+        <div key={p.id} data-project={p.id} style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: rowBorder }}>
+          <button
+            onClick={() => t.setProject(p.id)}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              textAlign: "left",
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: p.id === t.project?.id ? 700 : 400,
+              color: "var(--text-primary)",
+            }}
+          >
+            {p.name}
+            <span style={{ color: "var(--text-tertiary)", fontWeight: 400 }}> · {p.keys}</span>
+          </button>
+          {!p.platform && canManage && (
+            <Button
+              data-testid="translations-delete-project"
+              size="sm"
+              variant="secondary"
+              disabled={t.savingProject}
+              onClick={() => void t.deleteProject(p.id)}
+            >
+              Delete
+            </Button>
+          )}
+        </div>
+      ))}
+      {canManage && (
+        <div style={{ padding: "14px 16px" }}>
+          {adding ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <Input
+                data-testid="translations-project-id"
+                aria-label="Project id"
+                size="sm"
+                placeholder="shop"
+                value={id}
+                onChange={(e) => setId(e.target.value)}
+              />
+              <Input
+                data-testid="translations-project-name"
+                aria-label="Project name"
+                size="sm"
+                placeholder="Shop"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void create()}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button data-testid="translations-create-project" size="sm" loading={t.savingProject} onClick={() => void create()}>
+                  Create
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button data-testid="translations-new-project" size="sm" variant="secondary" onClick={() => setAdding(true)}>
+              New project
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 });
@@ -216,10 +408,17 @@ const KeyRow = observer(function KeyRow({ row, t }: { row: ApiTranslationKey; t:
 const Languages = observer(function Languages() {
   const store = useStore();
   const t = store.translations;
+  const [adding, setAdding] = useState("");
   const project = t.project;
   if (!project) return null;
   // Which languages a tenant offers is the project's settings, not a string edit.
   const canManage = store.can("translations.manage");
+  // A language the tenant added is not one Sild ships, so it is listed too.
+  const offered = [...new Set([...t.availableLocales, ...project.locales])].sort();
+
+  const add = async () => {
+    if (await t.addLocale(adding)) setAdding("");
+  };
 
   return (
     <div style={card}>
@@ -229,9 +428,23 @@ const Languages = observer(function Languages() {
           Turn on the languages your customers read. Each one is published as its own bundle.
         </div>
       </div>
-      {t.availableLocales.map((locale) => (
-        <div key={locale} style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: rowBorder }}>
+      {offered.map((locale) => (
+        <div
+          key={locale}
+          data-testid="translations-language"
+          data-locale={locale}
+          style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: rowBorder }}
+        >
           <span style={{ flex: 1, minWidth: 0, fontSize: 13 }}>{localeLabel(locale)}</span>
+          {project.locales.includes(locale) && (
+            <span
+              data-testid="translations-completion"
+              data-locale={locale}
+              style={{ fontSize: 12, color: "var(--text-tertiary)", flex: "none" }}
+            >
+              {t.completionOf(locale)}%
+            </span>
+          )}
           <Switch
             checked={project.locales.includes(locale)}
             disabled={!canManage || locale === project.fallback_locale}
@@ -239,6 +452,22 @@ const Languages = observer(function Languages() {
           />
         </div>
       ))}
+      {canManage && (
+        <div style={{ padding: "12px 16px", display: "flex", gap: 8, borderBottom: rowBorder }}>
+          <Input
+            data-testid="translations-add-language"
+            aria-label="Add a language"
+            size="sm"
+            placeholder="fi"
+            value={adding}
+            onChange={(e) => setAdding(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void add()}
+          />
+          <Button size="sm" variant="secondary" disabled={!adding.trim()} onClick={() => void add()}>
+            Add
+          </Button>
+        </div>
+      )}
       <div style={{ padding: "14px 16px" }}>
         <div style={fieldLabel}>Fallback language</div>
         <div style={{ fontSize: 13, color: "var(--text-tertiary)", margin: "4px 0 8px" }}>

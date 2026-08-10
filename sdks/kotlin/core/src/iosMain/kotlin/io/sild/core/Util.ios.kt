@@ -2,6 +2,8 @@ package io.sild.core
 
 import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
+import platform.Foundation.NSLocale
+import platform.Foundation.preferredLanguages
 import kotlinx.datetime.toLocalDateTime
 
 internal actual fun clock(iso: String?, zoneId: String?): String {
@@ -19,3 +21,6 @@ private fun parseIso(iso: String?): Instant? {
     if (iso.isNullOrBlank()) return null
     return runCatching { Instant.parse(iso.trim()) }.getOrNull()
 }
+
+internal actual fun deviceLocales(): List<String> =
+    NSLocale.preferredLanguages.mapNotNull { it as? String }

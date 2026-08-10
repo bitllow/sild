@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
@@ -16,17 +17,16 @@ import (
 )
 
 // translationProject is the addressed project, defaulting to the platform one.
-// Validated here, so the use cases can take it on trust.
-func translationProject(c *gin.Context) (string, bool) {
+// Whether it exists is the service's answer, not this function's.
+func translationProject(c *gin.Context) string {
 	project := c.Param("project")
 	if project == "" {
 		project = c.Query("project")
 	}
-	if project == "" || project == i18n.PlatformProject {
-		return i18n.PlatformProject, true
+	if project == "" {
+		return i18n.PlatformProject
 	}
-	httpx.NotFound(c, "no such project")
-	return "", false
+	return project
 }
 
 // requireLocale reads the locale a write or a scoped read is addressed to.
@@ -42,20 +42,31 @@ func requireLocale(c *gin.Context, raw string) (string, bool) {
 }
 
 func (h *Handler) listTranslationProjects(c *gin.Context) {
-	project := i18n.PlatformProject
-	if !apiutil.AuthorizeTranslation(c, h.svc, policy.TranslationsRead, project, "") {
+	if !apiutil.Authorize(c, policy.TranslationsRead) {
+		return
+	}
+	// A collection narrows rather than refusing: a translator granted one project
+	// must land on it, and must not learn that the others exist.
+	scope, ok := apiutil.TranslationScope(c, h.svc)
+	if !ok {
 		return
 	}
 	page, ok := apiutil.PageParams(c, settingsPageDefaults(resourceTranslationProjects))
 	if !ok {
 		return
 	}
-	v, err := h.svc.TranslationProject(c.Request.Context(), apiutil.Tenant(c), project)
+	vs, err := h.svc.ListTranslationProjects(c.Request.Context(), apiutil.Tenant(c))
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	rows := []map[string]any{translationProjectView(v)}
+	rows := make([]map[string]any, 0, len(vs))
+	for _, v := range vs {
+		if len(scope.Projects) > 0 && !slices.Contains(scope.Projects, v.Slug) {
+			continue
+		}
+		rows = append(rows, translationProjectView(v))
+	}
 	apiutil.RespondPage(c, resourceTranslationProjects, store.SlicePage(rows, page, mapID))
 }
 
@@ -64,19 +75,54 @@ func translationProjectView(v domain.TranslationProjectView) map[string]any {
 		"id": v.Slug, "slug": v.Slug, "name": v.Name, "platform": v.Platform,
 		"fallback_locale": v.FallbackLocale, "auto_publish": v.AutoPublish,
 		"locales": v.Locales, "available_locales": v.AvailableLocales,
-		"current_version": v.CurrentVersion,
+		"current_version": v.CurrentVersion, "keys": v.Keys,
+		"completion": v.Completion, "namespaces": v.Namespaces,
 	}
 }
 
-func (h *Handler) saveTranslationProject(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
+func (h *Handler) createTranslationProject(c *gin.Context) {
+	if !apiutil.Authorize(c, policy.TranslationsManage) {
 		return
 	}
+	var req struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	slug := req.Slug
+	if slug == "" {
+		slug = req.ID
+	}
+	v, err := h.svc.CreateTranslationProject(c.Request.Context(), apiutil.Tenant(c), slug, req.Name)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, translationProjectView(v))
+}
+
+func (h *Handler) deleteTranslationProject(c *gin.Context) {
+	if !apiutil.Authorize(c, policy.TranslationsManage) {
+		return
+	}
+	err := h.svc.DeleteTranslationProject(c.Request.Context(), apiutil.Tenant(c), translationProject(c))
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) saveTranslationProject(c *gin.Context) {
+	project := translationProject(c)
 	if !apiutil.AuthorizeTranslation(c, h.svc, policy.TranslationsManage, project, "") {
 		return
 	}
 	var req struct {
+		Name           string   `json:"name"`
 		FallbackLocale string   `json:"fallback_locale"`
 		AutoPublish    bool     `json:"auto_publish"`
 		Locales        []string `json:"locales"`
@@ -85,7 +131,40 @@ func (h *Handler) saveTranslationProject(c *gin.Context) {
 		return
 	}
 	err := h.svc.SaveTranslationProject(c.Request.Context(), apiutil.Tenant(c),
-		project, req.FallbackLocale, req.AutoPublish, req.Locales)
+		project, req.Name, req.FallbackLocale, req.AutoPublish, req.Locales)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) declareTranslationKey(c *gin.Context) {
+	project := translationProject(c)
+	if !apiutil.AuthorizeTranslation(c, h.svc, policy.TranslationsManage, project, "") {
+		return
+	}
+	var req struct {
+		Key    string `json:"key"`
+		Source string `json:"source"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	err := h.svc.DeclareTranslationKey(c.Request.Context(), apiutil.Tenant(c), project, req.Key, req.Source)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) undeclareTranslationKey(c *gin.Context) {
+	project := translationProject(c)
+	if !apiutil.AuthorizeTranslation(c, h.svc, policy.TranslationsManage, project, "") {
+		return
+	}
+	err := h.svc.UndeclareTranslationKey(c.Request.Context(), apiutil.Tenant(c), project, c.Param("key"))
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
@@ -94,10 +173,7 @@ func (h *Handler) saveTranslationProject(c *gin.Context) {
 }
 
 func (h *Handler) listTranslationKeys(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	locale, ok := requireLocale(c, c.Query("locale"))
 	if !ok {
 		return
@@ -110,7 +186,7 @@ func (h *Handler) listTranslationKeys(c *gin.Context) {
 		return
 	}
 	res, err := h.svc.TranslationKeys(c.Request.Context(), apiutil.Tenant(c),
-		project, locale, c.Query("state"), c.Query("q"), page)
+		project, locale, c.Query("state"), c.Query("namespace"), c.Query("q"), page)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
@@ -118,7 +194,8 @@ func (h *Handler) listTranslationKeys(c *gin.Context) {
 	rows := make([]map[string]any, 0, len(res.Items))
 	for _, k := range res.Items {
 		rows = append(rows, map[string]any{
-			"key": k.Key, "source": k.Source, "value": k.Value, "state": k.State,
+			"key": k.Key, "namespace": k.Namespace,
+			"source": k.Source, "value": k.Value, "state": k.State,
 		})
 	}
 	apiutil.RespondPage(c, resourceTranslationKeys, store.Page[map[string]any]{
@@ -127,10 +204,7 @@ func (h *Handler) listTranslationKeys(c *gin.Context) {
 }
 
 func (h *Handler) putTranslationKey(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	var req struct {
 		Locale string `json:"locale"`
 		Value  string `json:"value"`
@@ -155,10 +229,7 @@ func (h *Handler) putTranslationKey(c *gin.Context) {
 }
 
 func (h *Handler) deleteTranslationKey(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	locale, ok := requireLocale(c, c.Query("locale"))
 	if !ok {
 		return
@@ -176,10 +247,7 @@ func (h *Handler) deleteTranslationKey(c *gin.Context) {
 }
 
 func (h *Handler) publishTranslations(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	if !apiutil.AuthorizeTranslation(c, h.svc, policy.TranslationsPublish, project, "") {
 		return
 	}
@@ -192,10 +260,7 @@ func (h *Handler) publishTranslations(c *gin.Context) {
 }
 
 func (h *Handler) rollbackTranslations(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	if !apiutil.AuthorizeTranslation(c, h.svc, policy.TranslationsPublish, project, "") {
 		return
 	}
@@ -219,10 +284,7 @@ func respondRelease(c *gin.Context, rel domain.TranslationReleaseView) {
 }
 
 func (h *Handler) listTranslationReleases(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	if !apiutil.AuthorizeTranslation(c, h.svc, policy.TranslationsRead, project, "") {
 		return
 	}
@@ -247,10 +309,7 @@ func (h *Handler) listTranslationReleases(c *gin.Context) {
 }
 
 func (h *Handler) translationManifest(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	if !apiutil.Authorize(c, policy.TranslationsFetch) {
 		return
 	}
@@ -259,8 +318,9 @@ func (h *Handler) translationManifest(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	// The version set is the whole answer, so it is also the whole validator.
-	etag := fmt.Sprintf(`W/"%s-%v"`, project, m.Locales)
+	// Everything the body carries is in the validator, so a fallback changed on its
+	// own still reaches a client holding the previous one.
+	etag := fmt.Sprintf(`W/"%s-%s-%v"`, project, m.FallbackLocale, m.Locales)
 	if c.GetHeader("If-None-Match") == etag {
 		c.Status(http.StatusNotModified)
 		return
@@ -272,10 +332,7 @@ func (h *Handler) translationManifest(c *gin.Context) {
 }
 
 func (h *Handler) translationBundle(c *gin.Context) {
-	project, ok := translationProject(c)
-	if !ok {
-		return
-	}
+	project := translationProject(c)
 	locale := c.Query("locale")
 	if !apiutil.Authorize(c, policy.TranslationsFetch) {
 		return

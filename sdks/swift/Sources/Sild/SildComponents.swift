@@ -23,6 +23,9 @@ struct SildAvatar: View {
 /// shift position.
 struct SildHeaderControls: View {
     @Environment(\.sildStyle) private var style
+    @Environment(\.sildStrings) private var strings
+
+    private func t(_ key: String, _ vars: [String: Any] = [:]) -> String { strings(key, vars) }
     let soundOn: Bool
     let onToggleSound: () -> Void
     let onClose: () -> Void
@@ -33,11 +36,11 @@ struct SildHeaderControls: View {
                 SildIconView(soundOn ? .speaker : .speakerOff)
                     .foregroundStyle(style.colors.onBrand)
             }
-            .accessibilityLabel(soundOn ? "Turn off reply notifications" : "Turn on reply notifications")
+            .accessibilityLabel(t(soundOn ? "widget.notifications.disable" : "widget.notifications.enable"))
             Button(action: onClose) {
                 SildIconView(.close).foregroundStyle(style.colors.onBrand)
             }
-            .accessibilityLabel("Close")
+            .accessibilityLabel(t("widget.launcher.close"))
         }
     }
 }
@@ -46,6 +49,9 @@ struct SildHeaderControls: View {
 /// trailing control cluster.
 struct SildHeader: View {
     @Environment(\.sildStyle) private var style
+    @Environment(\.sildStrings) private var strings
+
+    private func t(_ key: String, _ vars: [String: Any] = [:]) -> String { strings(key, vars) }
     let title: String
     let subtitle: String
     let onBack: () -> Void
@@ -58,7 +64,7 @@ struct SildHeader: View {
             Button(action: onBack) {
                 SildIconView(.back).foregroundStyle(style.colors.onBrand)
             }
-            .accessibilityLabel("Back")
+            .accessibilityLabel(t("widget.thread.back"))
             SildAvatar(name: title, size: 36)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -86,6 +92,9 @@ struct SildHeader: View {
 /// render above the bubble, other files as tappable chips below it.
 struct SildMessageBubble: View {
     @Environment(\.sildStyle) private var style
+    @Environment(\.sildStrings) private var strings
+
+    private func t(_ key: String, _ vars: [String: Any] = [:]) -> String { strings(key, vars) }
     let message: Message
     let onOpenURL: (String) -> Void
 
@@ -136,7 +145,7 @@ struct SildMessageBubble: View {
     // Author + time above the bubble (web parity); own messages are labelled "You".
     @ViewBuilder
     private func metaRow(out: Bool) -> some View {
-        let label = out ? "You" : message.author
+        let label = out ? t("widget.thread.you") : message.author
         if label != nil || !message.time.isEmpty {
             HStack(spacing: 7) {
                 if let label {
@@ -161,7 +170,7 @@ struct SildMessageBubble: View {
         } label: {
             HStack(spacing: 7) {
                 SildIconView(.clip, size: 16).foregroundStyle(style.colors.tertiary)
-                Text(att.filename.isEmpty ? "attachment" : att.filename)
+                Text(att.filename.isEmpty ? t("widget.composer.unnamedFile") : att.filename)
                     .font(style.font(13))
                     .foregroundStyle(style.colors.text)
                     .lineLimit(1)

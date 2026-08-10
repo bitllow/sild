@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,7 +28,10 @@ class SildClientProfileTest {
     private fun client(metadata: Map<String, String>?): SildClient {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
-            if (path == "/v1/contacts/me") writes += request.method.value
+            // Only a body carrying `metadata` is a profile write; start() also records
+            // the reader's language on the same route, which asserts nothing about it.
+            val sent = (request.body as? TextContent)?.text.orEmpty()
+            if (path == "/v1/contacts/me" && sent.contains("\"metadata\"")) writes += request.method.value
             val body = when (path) {
                 "/v1/conversations" -> """{"items":[],"next_cursor":null,"has_more":false}"""
                 "/v1/brands/active" -> """{"name":"Acme","config":{}}"""

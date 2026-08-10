@@ -1,9 +1,17 @@
 {
+  "email.autoReply.body": "Thanks — we received your message and a member of our team will reply shortly.",
+  "email.autoReply.subject": "Re: your message",
   "push.newMessage": "New message",
+  "widget.common.cancel": "Cancel",
   "widget.composer.attach": "Attach a file",
+  "widget.composer.attachFailed": "Couldn't attach that file. Please try again.",
+  "widget.composer.file": "File",
+  "widget.composer.photoOrVideo": "Photo or video",
   "widget.composer.placeholder": "Write a message…",
   "widget.composer.remove": "Remove",
   "widget.composer.send": "Send",
+  "widget.composer.tooLarge": "That file is too large (max {mb} MB).",
+  "widget.composer.unnamedFile": "attachment",
   "widget.composer.uploading": "Uploading…",
   "widget.home.cta": "Send us a message",
   "widget.home.directChat": "Direct chat",
@@ -21,11 +29,14 @@
   "widget.notifications.enable": "Turn on reply notifications",
   "widget.status.connecting": "Connecting…",
   "widget.status.loading": "Loading…",
+  "widget.status.reconnecting": "Reconnecting…",
   "widget.thread.back": "Back",
   "widget.thread.closed": "This conversation is closed.",
+  "widget.thread.closedShort": "Closed",
   "widget.thread.directRef": "Direct chat · {ref}",
   "widget.thread.empty": "Send a message to start the conversation.",
   "widget.thread.loadingOlder": "Loading earlier messages…",
   "widget.thread.scrollUp": "Scroll up for earlier messages",
-  "widget.thread.support": "Support chat"
+  "widget.thread.support": "Support chat",
+  "widget.thread.you": "You"
 }

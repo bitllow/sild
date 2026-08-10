@@ -53,6 +53,26 @@ class SildClient internal constructor(
     /** Configured client-side attachment size ceiling (bytes); see [SildConfig]. */
     val uploadSizeLimitBytes: Long get() = cfg.uploadSizeLimitBytes
 
+    /** The active language and its strings. Renders bundled defaults from the first
+     *  frame; a published update is fetched off the boot path. */
+    val i18n: SildI18n = SildI18n(api, cfg.locale)
+
+    /** Render [tag] from now on, without a reconnect — for an app whose own language
+     *  picker changed. The recipient locale Sild composes push in follows it. */
+    fun setLocale(tag: String) {
+        i18n.setLocale(tag)
+        publishLocale()
+        scope.launch {
+            runCatching { api.setOwnLocale(i18n.locale) }
+            i18n.refresh()
+            publishLocale()
+        }
+    }
+
+    private fun publishLocale() {
+        _state.update { it.copy(locale = i18n.locale, stringsRevision = it.stringsRevision + 1) }
+    }
+
     private val realtime = transport?.create(
         cfg,
         scope,
@@ -73,8 +93,13 @@ class SildClient internal constructor(
             // UI showing a connection that is permanently pending.
             val conn = if (realtime == null) ConnectionState.IDLE else ConnectionState.CONNECTING
             _state.update { it.copy(connection = conn, error = null) }
+            // What a previous session downloaded takes effect here, so text never
+            // changes under the user mid-task.
+            i18n.activateStaged()
+            publishLocale()
             // Fire-and-forget: never gate the support channel on the profile write.
             scope.launch { writeProfile() }
+            scope.launch { refreshTranslations() }
             runCatching {
                 loadBrand()
                 realtime?.connect()
@@ -139,6 +164,20 @@ class SildClient internal constructor(
      * profile whole, so writing one would erase what the host's backend holds.
      * A configured-empty profile is an assertion and still writes.
      */
+    /** Poll for published strings and tell Sild what language this person reads.
+     *  Both are off the boot path: neither may delay the support channel. */
+    private suspend fun refreshTranslations() {
+        runCatching { api.setOwnLocale(i18n.locale) }
+        i18n.refreshStaged()
+    }
+
+    /** Re-poll on foreground once the held manifest has aged out. What it downloads
+     *  is held for the next start, never applied here: coming back to a screen is
+     *  not the moment to change the words on it. */
+    fun onForeground() {
+        scope.launch { i18n.refreshStagedIfStale() }
+    }
+
     private suspend fun writeProfile() {
         if (cfg.metadata == null) return
         runCatching { api.upsertOwnProfile() }

@@ -1,9 +1,17 @@
 {
+  "email.autoReply.body": "Aitäh — saime teie sõnumi kätte ja meie meeskonna liige vastab peagi.",
+  "email.autoReply.subject": "Re: teie sõnum",
   "push.newMessage": "Uus sõnum",
+  "widget.common.cancel": "Tühista",
   "widget.composer.attach": "Lisa fail",
+  "widget.composer.attachFailed": "Faili lisamine ebaõnnestus. Palun proovi uuesti.",
+  "widget.composer.file": "Fail",
+  "widget.composer.photoOrVideo": "Foto või video",
   "widget.composer.placeholder": "Kirjuta sõnum…",
   "widget.composer.remove": "Eemalda",
   "widget.composer.send": "Saada",
+  "widget.composer.tooLarge": "Fail on liiga suur (kuni {mb} MB).",
+  "widget.composer.unnamedFile": "manus",
   "widget.composer.uploading": "Üleslaadimine…",
   "widget.home.cta": "Saada meile sõnum",
   "widget.home.directChat": "Otsevestlus",
@@ -21,11 +29,14 @@
   "widget.notifications.enable": "Lülita vastuste teavitused sisse",
   "widget.status.connecting": "Ühendamine…",
   "widget.status.loading": "Laadimine…",
+  "widget.status.reconnecting": "Taasühendamine…",
   "widget.thread.back": "Tagasi",
   "widget.thread.closed": "See vestlus on suletud.",
+  "widget.thread.closedShort": "Suletud",
   "widget.thread.directRef": "Otsevestlus · {ref}",
   "widget.thread.empty": "Saada sõnum, et vestlust alustada.",
   "widget.thread.loadingOlder": "Laadin varasemaid sõnumeid…",
   "widget.thread.scrollUp": "Kerige üles, et näha varasemaid sõnumeid",
-  "widget.thread.support": "Tugivestlus"
+  "widget.thread.support": "Tugivestlus",
+  "widget.thread.you": "Sina"
 }

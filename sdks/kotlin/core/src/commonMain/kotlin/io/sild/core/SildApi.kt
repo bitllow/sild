@@ -38,7 +38,7 @@ class SildApiException(val status: Int, message: String) : RuntimeException(mess
 internal class SildApi(
     private val cfg: SildConfig,
     private val http: HttpClient = SildHttp.client,
-) {
+) : TranslationSource {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Volatile
@@ -54,21 +54,34 @@ internal class SildApi(
     // with a forced token refresh (expired/rotated). Returns the raw body string
     // ("" on 204). Throws SildApiException on non-2xx.
     private suspend fun api(method: String, path: String, body: String? = null): String {
+        val res = exchange(method, path, body)
+        val text = res.bodyAsText()
+        if (res.status.value == 204) return ""
+        if (!res.status.isSuccess()) throw SildApiException(res.status.value, errorMessage(text) ?: res.status.description)
+        return text
+    }
+
+    // exchange is api() without the body handling, for the one caller that reads a
+    // response header and treats a non-2xx (304) as an answer rather than a failure.
+    private suspend fun exchange(
+        method: String,
+        path: String,
+        body: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): HttpResponse {
         suspend fun send(tok: String): HttpResponse = http.request(cfg.base + "/v1" + path) {
             this.method = HttpMethod.parse(method)
             header(HttpHeaders.Authorization, "Bearer $tok")
             // API surface only — an extra header can break a signed upload URL.
             header("X-Sild-SDK", "$SDK_PLATFORM/$SDK_VERSION")
+            headers.forEach { (k, v) -> header(k, v) }
             // Any method that was given one: DELETE /push-tokens carries the token.
             if (body != null) setBody(TextContent(body, ContentType.Application.Json))
         }
 
         var res = send(bearer())
         if (res.status.value == 401) res = send(bearer(force = true)) // expired/rotated — refresh once
-        val text = res.bodyAsText()
-        if (res.status.value == 204) return ""
-        if (!res.status.isSuccess()) throw SildApiException(res.status.value, errorMessage(text) ?: res.status.description)
-        return text
+        return res
     }
 
     private fun errorMessage(text: String): String? = runCatching {
@@ -157,6 +170,37 @@ internal class SildApi(
     /** DELETE /v1/push-tokens { token }, scoped to the signed-in user. */
     suspend fun deletePushToken(token: String) {
         api("DELETE", "/push-tokens", buildJsonObject { put("token", token) }.toString())
+    }
+
+    /** GET /v1/translations/manifest → the published version per locale. Conditional:
+     *  a held validator that still matches comes back 304 with no body. */
+    override suspend fun fetchTranslationManifest(project: String, etag: String?): ManifestRead {
+        val headers = if (etag.isNullOrEmpty()) emptyMap() else mapOf(HttpHeaders.IfNoneMatch to etag)
+        val res = exchange("GET", "/translations/manifest?project=${project.encodeURLParameter()}", null, headers)
+        val tag = res.headers[HttpHeaders.ETag] ?: etag.orEmpty()
+        if (res.status.value == 304) return ManifestRead(null, tag)
+        val text = res.bodyAsText()
+        if (!res.status.isSuccess()) {
+            throw SildApiException(res.status.value, errorMessage(text) ?: res.status.description)
+        }
+        return ManifestRead(json.decodeFromString(text), tag)
+    }
+
+    /** GET /v1/translations/bundle → one published locale. A version's content never
+     *  changes, so what comes back may be held for as long as it is wanted. */
+    override suspend fun fetchTranslationBundle(project: String, locale: String, version: Int): TranslationBundle =
+        json.decodeFromString(
+            api(
+                "GET",
+                "/translations/bundle?project=${project.encodeURLParameter()}" +
+                    "&locale=${locale.encodeURLParameter()}&version=$version",
+            ),
+        )
+
+    /** PUT /v1/contacts/me { locale } → 204. Records the language this person reads,
+     *  so server-composed text (a push nudge) reaches them in it. */
+    suspend fun setOwnLocale(locale: String) {
+        api("PUT", "/contacts/me", buildJsonObject { put("locale", locale) }.toString())
     }
 
     /** POST /v1/uploads then PUT the file to the signed URL (with the local-dev rewrite). */

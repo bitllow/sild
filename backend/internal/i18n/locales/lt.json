@@ -1,9 +1,17 @@
 {
+  "email.autoReply.body": "Ačiū — gavome jūsų žinutę, netrukus atsakys mūsų komandos narys.",
+  "email.autoReply.subject": "Re: jūsų žinutė",
   "push.newMessage": "Nauja žinutė",
+  "widget.common.cancel": "Atšaukti",
   "widget.composer.attach": "Pridėti failą",
+  "widget.composer.attachFailed": "Nepavyko pridėti failo. Bandykite dar kartą.",
+  "widget.composer.file": "Failas",
+  "widget.composer.photoOrVideo": "Nuotrauka arba vaizdo įrašas",
   "widget.composer.placeholder": "Rašykite žinutę…",
   "widget.composer.remove": "Pašalinti",
   "widget.composer.send": "Siųsti",
+  "widget.composer.tooLarge": "Failas per didelis (ne daugiau kaip {mb} MB).",
+  "widget.composer.unnamedFile": "priedas",
   "widget.composer.uploading": "Įkeliamas failas…",
   "widget.home.cta": "Parašykite mums žinutę",
   "widget.home.directChat": "Tiesioginis pokalbis",
@@ -21,11 +29,14 @@
   "widget.notifications.enable": "Įjungti pranešimus apie atsakymus",
   "widget.status.connecting": "Jungiamasi…",
   "widget.status.loading": "Įkeliama…",
+  "widget.status.reconnecting": "Jungiamasi iš naujo…",
   "widget.thread.back": "Atgal",
   "widget.thread.closed": "Šis pokalbis uždarytas.",
+  "widget.thread.closedShort": "Uždaryta",
   "widget.thread.directRef": "Tiesioginis pokalbis · {ref}",
   "widget.thread.empty": "Išsiųskite žinutę, kad pradėtumėte pokalbį.",
   "widget.thread.loadingOlder": "Įkeliamos ankstesnės žinutės…",
   "widget.thread.scrollUp": "Slinkite aukštyn, kad pamatytumėte ankstesnes žinutes",
-  "widget.thread.support": "Pagalbos pokalbis"
+  "widget.thread.support": "Pagalbos pokalbis",
+  "widget.thread.you": "Jūs"
 }

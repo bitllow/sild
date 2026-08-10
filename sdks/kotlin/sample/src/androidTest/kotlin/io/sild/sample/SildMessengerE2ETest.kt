@@ -14,6 +14,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.sild.core.Direction
 import io.sild.core.SildClient
 import io.sild.core.SildConfig
+import io.sild.core.bundledStrings
 import io.sild.ui.Sild
 import io.sild.ui.SildMessengerActivity
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +42,10 @@ import org.junit.runner.RunWith
 // createEmptyComposeRule (not the activity-bound rule) is used because the flow
 // spans two activities — MainActivity, then the SDK's SildMessengerActivity — so
 // assertions target whichever composition is in the foreground.
+// Read from the catalog rather than restated: the SDK renders whatever the locale
+// files say, and a copy change should not have to be chased into this file.
+private val COMPOSER_PLACEHOLDER = bundledStrings("en").t("widget.composer.placeholder")
+
 @RunWith(AndroidJUnit4::class)
 class SildMessengerE2ETest {
 
@@ -61,7 +66,7 @@ class SildMessengerE2ETest {
 
             // Start a draft conversation; the composer appears (thread screen rendered).
             compose.onNodeWithText("New conversation").performClick()
-            compose.awaitText("Message…")
+            compose.awaitText(COMPOSER_PLACEHOLDER)
 
             // Round-trip a message: type, send, and assert it lands in the thread.
             val body = "e2e-hello"
@@ -79,7 +84,7 @@ class SildMessengerE2ETest {
         ActivityScenario.launch(SildMessengerActivity::class.java).use { messenger ->
             compose.awaitText("New conversation")
             compose.onNodeWithText("New conversation").performClick()
-            compose.awaitText("Message…")
+            compose.awaitText(COMPOSER_PLACEHOLDER)
 
             val body = "survives-${System.nanoTime().toString(36)}"
             compose.onNodeWithContentDescription("Message input").performTextInput(body)
@@ -89,11 +94,11 @@ class SildMessengerE2ETest {
 
             // The placeholder would be back if the draft had been dropped.
             compose.onNodeWithContentDescription("Message input").assert(hasText(body))
-            compose.onNodeWithText("Message…").assertDoesNotExist()
+            compose.onNodeWithText(COMPOSER_PLACEHOLDER).assertDoesNotExist()
 
             // The surviving session still sends into the right conversation.
             compose.onNodeWithContentDescription("Send").performClick()
-            compose.awaitText("Message…")
+            compose.awaitText(COMPOSER_PLACEHOLDER)
             compose.awaitText(body, substring = true)
         }
     }
@@ -127,7 +132,7 @@ class SildMessengerE2ETest {
                 // Rider opens the driver chat from the trip card.
                 compose.awaitText("Message driver")
                 compose.onNodeWithText("Message driver").performClick()
-                compose.awaitText("Message…")
+                compose.awaitText(COMPOSER_PLACEHOLDER)
 
                 // (1) rider → driver: sent from the real composer, received by the driver.
                 val fromRider = "rider-$nonce"

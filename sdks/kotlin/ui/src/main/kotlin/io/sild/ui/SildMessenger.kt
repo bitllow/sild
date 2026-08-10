@@ -7,8 +7,10 @@ import android.media.ToneGenerator
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -120,6 +122,9 @@ class SildMessengerActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         SildHost.onScreen = session?.client
+        // Coming back to the front re-checks a held manifest that has aged out. What
+        // it downloads is staged for the next start, never applied here.
+        session?.client?.onForeground()
     }
 
     override fun onPause() {
@@ -147,6 +152,12 @@ class SildMessengerActivity : ComponentActivity() {
         setContent {
             val state by client.state.collectAsStateWithLifecycle()
             var draft by rememberSaveable { mutableStateOf(false) }
+            // Re-derived when the language or the strings behind it move, so a
+            // published update redraws the screens instead of sitting in memory.
+            val strings: SildStrings = remember(state.locale, state.stringsRevision) {
+                { key, vars -> client.i18n.t(key, vars) }
+            }
+            CompositionLocalProvider(LocalSildStrings provides strings) {
             SildTheme(state.brand) {
                 val close = { finish() }
                 when {
@@ -170,6 +181,7 @@ class SildMessengerActivity : ComponentActivity() {
                     )
                     else -> HomeScreen(state, onNew = { draft = true }, onOpen = { client.openConversation(it) }, onToggleSound = { client.toggleSound() }, onClose = close)
                 }
+            }
             }
         }
     }

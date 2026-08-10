@@ -22,6 +22,14 @@ func (r *translationRepo) GetProject(ctx context.Context, tenantID, project stri
 	return &p, nil
 }
 
+func (r *translationRepo) ListProjects(ctx context.Context, tenantID string) ([]models.TranslationProject, error) {
+	var ps []models.TranslationProject
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("slug asc").Find(&ps).Error
+	return ps, err
+}
+
 func (r *translationRepo) SaveProject(ctx context.Context, p *models.TranslationProject, locales []string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(p).Error; err != nil {
@@ -53,6 +61,72 @@ func (r *translationRepo) ProjectLocales(ctx context.Context, tenantID, project 
 	out := make([]string, 0, len(rows))
 	for _, l := range rows {
 		out = append(out, l.Locale)
+	}
+	return out, nil
+}
+
+// DeleteProject drops the project row and everything hanging off it, so a slug
+// can be reused without the previous project's strings coming back.
+func (r *translationRepo) DeleteProject(ctx context.Context, tenantID, project string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		where := func(m any) error {
+			return tx.Where("tenant_id = ? AND project = ?", tenantID, project).Delete(m).Error
+		}
+		for _, m := range []any{
+			&models.TranslationProjectLocale{}, &models.TranslationKey{},
+			&models.TranslationOverride{}, &models.TranslationBundle{}, &models.TranslationRelease{},
+		} {
+			if err := where(m); err != nil {
+				return err
+			}
+		}
+		// Grants naming this slug are deliberately left: an empty scope set means
+		// every project, so clearing a translator's only grant would widen it.
+		return tx.Where("tenant_id = ? AND slug = ?", tenantID, project).
+			Delete(&models.TranslationProject{}).Error
+	})
+}
+
+func (r *translationRepo) Keys(ctx context.Context, tenantID, project string) ([]models.TranslationKey, error) {
+	var ks []models.TranslationKey
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND project = ?", tenantID, project).
+		Find(&ks).Error
+	return ks, err
+}
+
+func (r *translationRepo) PutKey(ctx context.Context, k *models.TranslationKey) error {
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{UpdateAll: true}).
+		Create(k).Error
+}
+
+func (r *translationRepo) DeleteKey(ctx context.Context, tenantID, project, key string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("tenant_id = ? AND project = ? AND string_key = ?", tenantID, project, key).
+			Delete(&models.TranslationOverride{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND project = ? AND string_key = ?", tenantID, project, key).
+			Delete(&models.TranslationKey{}).Error
+	})
+}
+
+func (r *translationRepo) TranslatedCounts(ctx context.Context, tenantID, project string) (map[string]int, error) {
+	var rows []struct {
+		Locale string
+		N      int
+	}
+	err := r.db.WithContext(ctx).Model(&models.TranslationOverride{}).
+		Select("locale, COUNT(*) AS n").
+		Where("tenant_id = ? AND project = ? AND value <> ''", tenantID, project).
+		Group("locale").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int, len(rows))
+	for _, r := range rows {
+		out[r.Locale] = r.N
 	}
 	return out, nil
 }

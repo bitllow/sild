@@ -75,11 +75,48 @@ func load() (*Catalog, error) {
 	return c, nil
 }
 
+// NewCatalog builds a catalog whose only shipped locale is the source one — the
+// shape a tenant-owned project has, where the declared keys are the sources and
+// every other language arrives as an override.
+func NewCatalog(sources map[string]string) *Catalog {
+	c := &Catalog{
+		byLocale: map[string]map[string]string{SourceLocale: sources},
+		locales:  []string{SourceLocale},
+		keys:     make([]string, 0, len(sources)),
+	}
+	for k := range sources {
+		c.keys = append(c.keys, k)
+	}
+	slices.Sort(c.keys)
+	return c
+}
+
 // Locales returns every locale the platform ships, sorted.
 func (c *Catalog) Locales() []string { return slices.Clone(c.locales) }
 
 // Keys returns every declared key, sorted.
 func (c *Catalog) Keys() []string { return slices.Clone(c.keys) }
+
+// Namespaces returns every grouping prefix in use, sorted.
+func (c *Catalog) Namespaces() []string {
+	var out []string
+	for _, k := range c.keys {
+		if ns := Namespace(k); ns != "" && !slices.Contains(out, ns) {
+			out = append(out, ns)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Namespace groups a key by everything before its first dot, so a large project
+// stays navigable without a second field to keep in step with the key.
+func Namespace(key string) string {
+	if i := strings.Index(key, "."); i > 0 {
+		return key[:i]
+	}
+	return ""
+}
 
 // Source returns the English a key was authored with.
 func (c *Catalog) Source(key string) string { return c.byLocale[SourceLocale][key] }
