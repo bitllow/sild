@@ -92,24 +92,38 @@ func RoleDefinition(r models.PlatformRole) (RoleDef, bool) {
 // JSON is the dimension list, so a field added to RoleScope is covered here
 // without being named twice.
 func ValidateScope(r models.PlatformRole, s models.RoleScope) error {
-	def, ok := RoleDefinition(r)
-	if !ok {
-		return fmt.Errorf("unknown role %q", r)
-	}
 	raw, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	var used map[string]any
+	_, err = ValidateScopeDocument(r, raw)
+	return err
+}
+
+// ValidateScopeDocument is the same check against the document as it arrived, and
+// returns the scope it decodes to. A dimension set to false or to an empty list
+// survives here and not in the typed scope, which drops it — so this is the only
+// place that can refuse one the role does not define.
+func ValidateScopeDocument(r models.PlatformRole, raw []byte) (models.RoleScope, error) {
+	var scope models.RoleScope
+	def, ok := RoleDefinition(r)
+	if !ok {
+		return scope, fmt.Errorf("unknown role %q", r)
+	}
+	if len(raw) == 0 {
+		return scope, nil
+	}
+	var used map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &used); err != nil {
-		return err
+		return scope, err
 	}
 	for key := range used {
 		if !def.defines(key) {
-			return fmt.Errorf("the %s role has no %s", r, key)
+			return scope, fmt.Errorf("the %s role has no %s", r, key)
 		}
 	}
-	return nil
+	err := json.Unmarshal(raw, &scope)
+	return scope, err
 }
 
 func (d RoleDef) defines(key string) bool {

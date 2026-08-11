@@ -248,7 +248,9 @@ export interface ApiPrincipal {
   tenant_id: string;
   subject?: {
     id: string;
-    roles?: ApiPlatformRole[];
+    /** The caller's own assignments, scope included — a translator is refused
+     *  /v1/team and has no other way to see what they were granted. */
+    assignments?: ApiRoleAssignment[];
     email?: string;
     first_name?: string;
     last_name?: string;

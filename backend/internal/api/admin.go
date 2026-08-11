@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"time"
@@ -346,7 +347,7 @@ func (h *Handler) listRoles(c *gin.Context) {
 func (h *Handler) assignRole(c *gin.Context) {
 	var req struct {
 		Role  models.PlatformRole `json:"role"`
-		Scope models.RoleScope    `json:"scope"`
+		Scope json.RawMessage     `json:"scope"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
@@ -357,7 +358,7 @@ func (h *Handler) assignRole(c *gin.Context) {
 // updateRoleScope: PUT /v1/team/:id/roles/:role — rescope one assignment.
 func (h *Handler) updateRoleScope(c *gin.Context) {
 	var req struct {
-		Scope models.RoleScope `json:"scope"`
+		Scope json.RawMessage `json:"scope"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
@@ -365,7 +366,11 @@ func (h *Handler) updateRoleScope(c *gin.Context) {
 	h.writeAssignment(c, c.Param("id"), models.PlatformRole(c.Param("role")), req.Scope, true)
 }
 
-func (h *Handler) writeAssignment(c *gin.Context, targetID string, role models.PlatformRole, scope models.RoleScope, rescope bool) {
+func (h *Handler) writeAssignment(c *gin.Context, targetID string, role models.PlatformRole, raw json.RawMessage, rescope bool) {
+	scope, ok := scopeDocument(c, role, raw)
+	if !ok {
+		return
+	}
 	if !h.guardOwnerMutation(c, targetID, &role) || !h.guardScopeGrant(c, scope) {
 		return
 	}
@@ -378,6 +383,17 @@ func (h *Handler) writeAssignment(c *gin.Context, targetID string, role models.P
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// scopeDocument decodes a scope against the role that has to define it, refusing
+// dimensions the typed scope would silently drop.
+func scopeDocument(c *gin.Context, role models.PlatformRole, raw json.RawMessage) (models.RoleScope, bool) {
+	scope, err := policy.ValidateScopeDocument(role, raw)
+	if err != nil {
+		httpx.Unprocessable(c, err.Error())
+		return scope, false
+	}
+	return scope, true
 }
 
 // guardScopeGrant keeps peer conversations the owner's to give: they are private
@@ -409,23 +425,30 @@ func (h *Handler) inviteAgent(c *gin.Context) {
 		FirstName string              `json:"first_name"`
 		LastName  string              `json:"last_name"`
 		Role      models.PlatformRole `json:"role"`
-		Scope     models.RoleScope    `json:"scope"`
+		Scope     json.RawMessage     `json:"scope"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if req.Role == "" {
+		req.Role = models.PlatformAgent
+	}
+	scope, ok := scopeDocument(c, req.Role, req.Scope)
+	if !ok {
 		return
 	}
 	if !h.guardOwnerMutation(c, "", &req.Role) {
 		return
 	}
-	if !h.guardScopeGrant(c, req.Scope) {
+	if !h.guardScopeGrant(c, scope) {
 		return
 	}
-	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.FirstName, req.LastName, req.Role, req.Scope)
+	a, err := h.svc.InviteAgent(c.Request.Context(), apiutil.Tenant(c), req.Email, req.FirstName, req.LastName, req.Role, scope)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	held := roleAssignmentView(models.RoleAssignment{Role: req.Role, Scope: req.Scope})
+	held := roleAssignmentView(models.RoleAssignment{Role: req.Role, Scope: scope})
 	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "email": a.Email, "first_name": a.FirstName,
 		"last_name": a.LastName, "assignments": []map[string]any{held}})
 }

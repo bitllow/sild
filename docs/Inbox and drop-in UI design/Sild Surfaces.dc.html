@@ -316,16 +316,7 @@
                 <sc-if value="{{ peerSearchOpen }}">
                   <div onClick="{{ onClosePeerSearch }}" style="position:fixed;inset:0;z-index:40"></div>
                   <div style="position:absolute;left:0;right:0;top:38px;z-index:41;background:var(--surface-card);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-lg);padding:6px;max-height:320px;overflow-y:auto;animation:sild-rise .14s var(--ease-out, ease-out)">
-                    <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);padding:6px 10px 4px">Filter by role</div>
-                    <sc-for list="{{ peerRoleSuggestions }}" as="sg" hint-placeholder-count="2">
-                      <button onClick="{{ sg.onPick }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;cursor:pointer;font-family:var(--font-sans);font-size:13px;color:var(--text-primary);text-align:left" style-hover="background:var(--surface-hover)">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="flex:none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path></svg>
-                        <span style="flex:1;font-weight:600">{{ sg.label }}</span>
-                        <span style="font-size:12px;color:var(--text-tertiary)">{{ sg.count }}</span>
-                      </button>
-                    </sc-for>
                     <sc-if value="{{ peerHasConvSuggestions }}">
-                      <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);padding:8px 10px 4px;border-top:1px solid var(--border-subtle);margin-top:4px">Conversations</div>
                       <sc-for list="{{ peerConvSuggestions }}" as="sg" hint-placeholder-count="2">
                         <button onClick="{{ sg.onPick }}" style="display:flex;flex-direction:column;gap:2px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;cursor:pointer;text-align:left" style-hover="background:var(--surface-hover)">
                           <span style="font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-primary)">{{ sg.title }}</span>
@@ -893,29 +884,31 @@
               <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
                 <div style="padding:16px 18px;border-bottom:1px solid var(--border-subtle)">
                   <div style="font-size:15px;font-weight:700">Team</div>
-                  <div style="font-size:13px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">Platform roles guard the API and the inbox. Peer conversations are direct chats between parties with no assigned agent — grant that access per person.</div>
+                  <div style="font-size:13px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">Access is a set of role assignments per member. A member may hold several. Each assignment carries the scope its role defines — an agent's teams and peer access, a translator's projects and languages — and anything outside that scope is default-deny.</div>
                 </div>
                 <div style="padding:9px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border-subtle);background:var(--surface-sunken)">
                   <div style="width:36px;flex:none"></div>
-                  <div style="flex:1"></div>
-                  <div style="width:120px;flex:none;text-align:right;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Peer access</div>
-                  <div style="width:130px;flex:none;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Role</div>
+                  <div style="width:220px;flex:none;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Member</div>
+                  <div style="flex:1;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Role assignments</div>
                 </div>
                 <sc-for list="{{ team }}" as="t" hint-placeholder-count="3">
-                  <div style="padding:14px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border-subtle)">
+                  <div style="padding:13px 18px;display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--border-subtle)">
                     <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ t.name }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
-                    <div style="flex:1;min-width:0">
+                    <div style="width:220px;flex:none;min-width:0;padding-top:2px">
                       <div style="display:flex;align-items:center;gap:7px">
                         <span style="font-size:14px;font-weight:600">{{ t.name }}</span>
                         <sc-if value="{{ t.isMe }}"><span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:var(--brand-subtle);color:var(--brand);font-size:11px;font-weight:700">You</span></sc-if>
                       </div>
-                      <div style="font-size:12px;color:var(--text-tertiary)">{{ t.email }}</div>
+                      <div style="font-size:12px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.email }}</div>
                     </div>
-                    <div style="width:120px;flex:none;display:flex;justify-content:flex-end">
-                      <x-import component-from-global-scope="SildDesignSystem_a95234.Switch" checked="{{ t.peerAccessOn }}" onChange="{{ t.onPeerAccess }}" hint-size="46px,26px"></x-import>
-                    </div>
-                    <div style="width:130px;flex:none">
-                      <x-import component-from-global-scope="SildDesignSystem_a95234.Select" options="{{ roleOptions }}" value="{{ t.role }}" onChange="{{ t.onChangeRole }}" size="sm" hint-size="130px,34px"></x-import>
+                    <div style="flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px">
+                      <sc-for list="{{ t.assignments }}" as="a" hint-placeholder-count="2">
+                        <button onClick="{{ a.onEdit }}" style="display:flex;align-items:center;gap:8px;max-width:100%;border:1px solid var(--border-default);border-radius:999px;background:var(--white);padding:5px 12px;cursor:pointer;font-family:var(--font-sans);text-align:left">
+                          <span style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ a.role }}</span>
+                          <span style="font-size:12.5px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.scopeLabel }}</span>
+                        </button>
+                      </sc-for>
+                      <button onClick="{{ t.onAddRole }}" style="border:1px dashed var(--border-default);border-radius:999px;background:transparent;padding:5px 12px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--brand)">+ Add role</button>
                     </div>
                   </div>
                 </sc-for>
@@ -929,6 +922,59 @@
         </sc-if>
 
       </div>
+      </sc-if>
+
+      <!-- Role assignment dialog -->
+      <sc-if value="{{ scopeOpen }}">
+      <x-import component-from-global-scope="SildDesignSystem_a95234.Dialog" title="{{ scopeTitle }}" subtitle="{{ scopeSubtitle }}" onClose="{{ onCloseScope }}" hint-size="100%,100%">
+        <sc-for list="{{ scopeDims }}" as="d" hint-placeholder-count="2">
+          <div style="margin-bottom:18px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="min-width:0">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ d.label }}</div>
+                <div style="font-size:12.5px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">{{ d.help }}</div>
+              </div>
+              <div style="flex:1"></div>
+              <sc-if value="{{ d.isToggle }}">
+                <x-import component-from-global-scope="SildDesignSystem_a95234.Switch" checked="{{ d.on }}" onChange="{{ d.onToggle }}" hint-size="46px,26px"></x-import>
+              </sc-if>
+            </div>
+            <sc-if value="{{ d.isSet }}">
+              <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
+                <sc-for list="{{ d.chips }}" as="c" hint-placeholder-count="4">
+                  <button onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</button>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+        <sc-if value="{{ scopeNoDims }}">
+          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.55">This role is tenant-wide. It defines no scope of its own.</p>
+        </sc-if>
+        <p style="font-size:12.5px;color:var(--text-tertiary);margin-top:4px;line-height:1.55">Scopes come from the role's definition. A role that gains a scope later shows up here on its own.</p>
+        <div style="margin-top:18px;display:flex;align-items:center;gap:10px">
+          <button onClick="{{ onRemoveAssignment }}" style="border:1px solid var(--border-default);background:var(--white);border-radius:8px;padding:9px 13px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--danger, #C0341A)">Remove role</button>
+          <div style="flex:1"></div>
+          <x-import component-from-global-scope="SildDesignSystem_a95234.Button" onClick="{{ onCloseScope }}" hint-size="auto,40px">Done</x-import>
+        </div>
+      </x-import>
+      </sc-if>
+
+      <!-- Add role dialog -->
+      <sc-if value="{{ addRoleOpen }}">
+      <x-import component-from-global-scope="SildDesignSystem_a95234.Dialog" title="Add role" subtitle="{{ addRoleSubtitle }}" onClose="{{ onCloseAddRole }}" hint-size="100%,100%">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ addRoleOptions }}" as="r" hint-placeholder-count="3">
+            <button onClick="{{ r.onClick }}" style="{{ r.style }}">
+              <span style="font-size:14px;font-weight:600;color:var(--text-primary)">{{ r.label }}</span>
+              <span style="font-size:12.5px;color:var(--text-tertiary);line-height:1.5">{{ r.desc }}</span>
+            </button>
+          </sc-for>
+        </div>
+        <sc-if value="{{ addRoleNone }}">
+          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.55">This member already holds every role.</p>
+        </sc-if>
+      </x-import>
       </sc-if>
 
       <!-- Key created dialog -->
@@ -1183,6 +1229,40 @@
           </div>
           </sc-if>
 
+          <!-- App: support home (parity with web drop-in home) -->
+          <sc-if value="{{ aIsSupportHome }}">
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+            <div style="flex:none;background:var(--brand);color:#fff;padding:8px 20px 26px;position:relative">
+              <div style="position:absolute;top:12px;right:14px;z-index:6;display:flex;align-items:center;gap:2px">
+                <button onClick="{{ onWToggleSound }}" aria-label="{{ wSoundLabel }}" title="{{ wSoundLabel }}" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px;display:flex">
+                  <sc-if value="{{ wSoundOn }}" hint-placeholder-val="{{ true }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"></path></svg></sc-if>
+                  <sc-if value="{{ wSoundOff }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4.7 6 9H2v6h4l5 4.3z"></path><path d="m22 9-6 6M16 9l6 6"></path></svg></sc-if>
+                </button>
+                <button onClick="{{ onAHost }}" aria-label="Close support" style="border:0;background:transparent;color:#fff;cursor:pointer;padding:4px;border-radius:8px;display:flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+              </div>
+              <button onClick="{{ onAHost }}" aria-label="Back" style="border:0;background:transparent;color:#fff;cursor:pointer;display:flex;padding:4px;border-radius:8px;margin-left:-4px">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
+              </button>
+              <img src="assets/sild-mark-tile.svg" width="34" alt="Sild" style="border-radius:10px;box-shadow:0 0 0 2px rgba(255,255,255,.25);margin-top:12px" />
+              <div style="font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:14px">Hi there.</div>
+              <div style="font-size:15px;color:rgba(255,255,255,.85);margin-top:4px">How can we help? We typically reply in a few minutes.</div>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:var(--surface-page)">
+              <div style="background:var(--surface-card);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);padding:16px">
+                <div style="font-size:14px;font-weight:700">Send us a message</div>
+                <div style="font-size:13px;color:var(--text-secondary);margin-top:3px;margin-bottom:13px">We'll get back to you here. No queue numbers.</div>
+                <x-import component-from-global-scope="SildDesignSystem_a95234.Button" full-width="{{ true }}" onClick="{{ onAStartSupport }}" hint-size="100%,40px">New conversation<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="margin-left:5px"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></x-import>
+              </div>
+              <div style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary);padding:4px 4px 0">Recent</div>
+              <div style="background:var(--surface-card);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
+                <sc-for list="{{ aRows }}" as="row" hint-placeholder-count="2">
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.ConversationRow" dc-props="{{ row }}" hint-size="100%,64px"></x-import>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          </sc-if>
+
           <!-- App: conversation list -->
           <sc-if value="{{ aIsList }}">
           <div style="flex:1;min-height:0;display:flex;flex-direction:column">
@@ -1281,6 +1361,7 @@ class Component extends DCLogic {
       keys: this.seedKeys(),
       webhooks: this.seedWebhooks(),
       team: this.seedTeam(),
+      assignEdit: null, addRoleFor: null,
       // appearance / widget branding
       apProfiles: this.cloneProfiles(this.seedProfiles()),
       apProfileId: 'p1', apMenuOpen: false, apDirty: false, apPreview: 'home',
@@ -1361,13 +1442,20 @@ class Component extends DCLogic {
   }
   seedTeam(){
     return [
-      { id:'t1', name:'Liis Mägi', email:'liis@sild.io', role:'agent', peerAccess:true },
-      { id:'t2', name:'Karl Sepp', email:'karl@sild.io', role:'admin', peerAccess:true },
-      { id:'t3', name:'Anu Pärn', email:'anu@sild.io', role:'owner', peerAccess:true },
-      { id:'t4', name:'Mart Ojala', email:'mart@sild.io', role:'agent', peerAccess:false },
+      { id:'t1', name:'Liis Mägi', email:'liis@sild.io', assignments:[{ id:'ra1', role:'agent', scope:{ teams:['support'], peer:true } }] },
+      { id:'t2', name:'Karl Sepp', email:'karl@sild.io', assignments:[{ id:'ra2', role:'admin', scope:{} }, { id:'ra3', role:'agent', scope:{ teams:['all'], peer:true } }] },
+      { id:'t3', name:'Anu Pärn', email:'anu@sild.io', assignments:[{ id:'ra4', role:'owner', scope:{} }] },
+      { id:'t4', name:'Mart Ojala', email:'mart@sild.io', assignments:[{ id:'ra5', role:'agent', scope:{ teams:['dispatch'], peer:false } }] },
+      { id:'t5', name:'Marta Ruiz', email:'marta@lingua.es', assignments:[{ id:'ra6', role:'translator', scope:{ projects:['kuller'], locales:['es'] } }] },
+      { id:'t6', name:'Jānis Ozols', email:'janis@lingua.lv', assignments:[{ id:'ra7', role:'translator', scope:{ projects:['all'], locales:['lv'] } }, { id:'ra8', role:'agent', scope:{ teams:['support'], peer:false } }] },
     ];
   }
-  myPeerAccess(){ const me = this.state.team.find(t => t.id===this._meId); return me ? !!me.peerAccess : true; }
+  myPeerAccess(){
+    const me = this.state.team.find(t => t.id===this._meId);
+    if (!me) return true;
+    if (me.assignments.some(a => a.role==='owner' || a.role==='admin')) return true;
+    return me.assignments.some(a => a.role==='agent' && a.scope.peer === true);
+  }
   seedProfiles(){
     const base = { logo:null, brand:'#2563FD', theme:'light', font:'sild', radius:'default', launcherIcon:'chat', iconImg:null, launcherPos:'right', launcherSize:'md', heading:'Hi there.', sub:'How can we help? We typically reply in a few minutes.', topics:'Track my order\nChange pickup address\nBilling question', showTeam:true, poweredBy:true };
     return [
@@ -1468,10 +1556,8 @@ class Component extends DCLogic {
     }), peerComposer:'' }));
   };
   setPeerAccess = (id, v) => this.setState(s => {
-    const team = s.team.map(t => t.id===id ? { ...t, peerAccess:v } : t);
-    const me = team.find(t => t.id===this._meId);
-    const myAccess = me ? (me.role==='agent' ? !!me.peerAccess : true) : true;
-    return { team, inboxView: (!myAccess && s.inboxView==='peer') ? 'inbox' : s.inboxView };
+    const team = s.team.map(t => t.id!==id ? t : ({ ...t, assignments: t.assignments.map(a => a.role==='agent' ? { ...a, scope:{ ...a.scope, peer:v } } : a) }));
+    return { team };
   });
   // widget peer thread
   wOpenPeer = () => this.setState({ wOpen:true, wView:'peer' });
@@ -1532,7 +1618,63 @@ class Component extends DCLogic {
   revokeKey = (id) => this.setState(s => ({ keys: s.keys.filter(k => k.id!==id) }));
   toggleWebhook = (id, v) => this.setState(s => ({ webhooks: s.webhooks.map(w => w.id===id ? { ...w, active:v } : w) }));
   deleteWebhook = (id) => this.setState(s => ({ webhooks: s.webhooks.filter(w => w.id!==id) }));
-  setRole = (id, role) => this.setState(s => ({ team: s.team.map(t => t.id===id ? { ...t, role } : t) }));
+  // ---- IAM: role definitions drive the UI; a new role or a new scope needs no new column ----
+  ROLE_DEFS = {
+    owner: { label:'owner', desc:'Full control of the tenant, including billing and deletion.', dims:[] },
+    admin: { label:'admin', desc:'Manages settings, keys, webhooks and members.', dims:[] },
+    agent: { label:'agent', desc:'Works the assignment queue.', dims:[
+      { key:'teams', label:'Teams', type:'set', help:'Queues this assignment may work.', options:[{ id:'support', label:'Support' }, { id:'dispatch', label:'Dispatch' }, { id:'billing', label:'Billing' }] },
+      { key:'peer', label:'Peer conversations', type:'toggle', help:'Direct chats between parties with no assigned agent.' },
+    ] },
+    translator: { label:'translator', desc:'Edits strings only. Reaches no conversation, contact or message.', dims:[
+      { key:'projects', label:'Projects', type:'set', help:'Translation projects this assignment may write.', options:[{ id:'platform', label:'Sild platform' }, { id:'kuller', label:'Kuller app' }] },
+      { key:'locales', label:'Languages', type:'set', help:'Languages this assignment may write.', options:[{ id:'et', label:'Estonian' }, { id:'lv', label:'Latvian' }, { id:'lt', label:'Lithuanian' }, { id:'es', label:'Spanish' }] },
+    ] },
+  };
+  roleDims(role){ return (this.ROLE_DEFS[role] || {}).dims || []; }
+  dimLabel(dim, val){
+    if (dim.type === 'toggle') return val === true ? dim.label.toLowerCase() : '';
+    const arr = val || [];
+    if (arr.indexOf('all') >= 0) return 'all ' + dim.label.toLowerCase();
+    if (!arr.length) return 'no ' + dim.label.toLowerCase();
+    return arr.map(id => ((dim.options.find(o => o.id === id) || {}).label || id)).join(', ');
+  }
+  assignmentLabel(a){
+    const parts = this.roleDims(a.role).map(d => this.dimLabel(d, a.scope[d.key])).filter(Boolean);
+    return parts.length ? parts.join(' · ') : 'tenant-wide';
+  }
+  editing(){
+    const e = this.state.assignEdit; if (!e) return null;
+    const m = this.state.team.find(t => t.id === e.memberId); if (!m) return null;
+    const a = m.assignments.find(x => x.id === e.assignmentId); if (!a) return null;
+    return { member:m, assignment:a };
+  }
+  patchAssignment = (fn) => this.setState(s => ({ team: s.team.map(m => m.id !== s.assignEdit.memberId ? m : ({ ...m,
+    assignments: m.assignments.map(a => a.id !== s.assignEdit.assignmentId ? a : fn(a)) }) ) }));
+  toggleScopeValue = (key, id) => this.patchAssignment(a => {
+    const arr = (a.scope[key] || []).filter(x => x !== 'all');
+    const i = arr.indexOf(id); if (i >= 0) arr.splice(i, 1); else arr.push(id);
+    return { ...a, scope:{ ...a.scope, [key]: arr } };
+  });
+  setScopeAll = (key) => this.patchAssignment(a => ({ ...a, scope:{ ...a.scope, [key]: (a.scope[key] || []).indexOf('all') >= 0 ? [] : ['all'] } }));
+  setScopeToggle = (key, v) => this.patchAssignment(a => ({ ...a, scope:{ ...a.scope, [key]: v } }));
+  removeAssignment = () => this.setState(s => ({
+    team: s.team.map(m => m.id !== s.assignEdit.memberId ? m : ({ ...m, assignments: m.assignments.filter(a => a.id !== s.assignEdit.assignmentId) })),
+    assignEdit: null,
+  }));
+  addAssignment = (role) => this.setState(s => {
+    const id = 'ra' + Date.now();
+    const scope = {};
+    this.roleDims(role).forEach(d => { scope[d.key] = d.type === 'toggle' ? false : []; });
+    return {
+      team: s.team.map(m => m.id !== s.addRoleFor ? m : ({ ...m, assignments:[...m.assignments, { id, role, scope }] })),
+      addRoleFor: null,
+      assignEdit: this.roleDims(role).length ? { memberId:s.addRoleFor, assignmentId:id } : null,
+    };
+  });
+  scopeChipStyle(on){
+    return 'height:30px;padding:0 11px;border:1px solid '+(on?'var(--brand)':'var(--border-default)')+';border-radius:999px;background:'+(on?'var(--brand-subtle)':'var(--white)')+';color:'+(on?'var(--brand)':'var(--text-secondary)')+';font-family:var(--font-sans);font-size:13px;font-weight:600;cursor:pointer';
+  }
   // appearance
   apActive = () => this.state.apProfiles.find(p => p.id===this.state.apProfileId) || this.state.apProfiles[0];
   apSetCfg = (patch) => this.setState(s => ({ apProfiles: s.apProfiles.map(p => p.id===s.apProfileId ? { ...p, cfg:{ ...p.cfg, ...patch } } : p), apDirty:true }));
@@ -1572,10 +1714,11 @@ class Component extends DCLogic {
   aOpenThread = (id) => this.setState({ aActiveId:id, aView:'thread', aText:'' });
   aHost = () => this.setState({ aView:'host' });
   aMessages = () => this.setState({ aView:'list' });
-  aOpenSupport = () => {
+  aOpenSupport = () => this.setState({ aView:'supporthome' });
+  aStartSupport = () => {
     const id = 'a_' + Date.now();
-    const conv = { id, name:'Sild support', presence:'online', preview:'How can we help?', time:'now', unread:0,
-      messages:[ { id:1, dir:'in', author:'Sild support', time:'Now', body:'Hi — thanks for reaching out. How can we help with your trip?' } ] };
+    const conv = { id, name:'Sild support', presence:'online', context:'Online · replies in a few min', preview:'New conversation', time:'now', unread:0,
+      messages:[] };
     this.setState(s => ({ aConvs:[conv, ...s.aConvs], aActiveId:id, aView:'thread', aText:'' }));
   };
   aStart = () => this.setState({ aActiveId:'a1', aView:'thread', aText:'' });
@@ -1811,11 +1954,16 @@ class Component extends DCLogic {
     const keys = s.keys.map(k => ({ ...k, onRevoke: () => this.revokeKey(k.id) }));
     const webhooks = s.webhooks.map(w => ({ ...w, onToggle: (v) => this.toggleWebhook(w.id, v), onDelete: () => this.deleteWebhook(w.id) }));
     const team = s.team.map(t => ({ ...t,
-      onChangeRole: (e) => this.setRole(t.id, e && e.target ? e.target.value : e),
       isMe: t.id===this._meId,
-      peerAccessOn: !!t.peerAccess,
-      onPeerAccess: (v) => this.setPeerAccess(t.id, v),
+      assignments: t.assignments.map(a => ({
+        role: (this.ROLE_DEFS[a.role] || {}).label || a.role,
+        scopeLabel: this.assignmentLabel(a),
+        onEdit: () => this.setState({ assignEdit:{ memberId:t.id, assignmentId:a.id } }),
+      })),
+      onAddRole: () => this.setState({ addRoleFor:t.id }),
     }));
+    const ed = this.editing();
+    const addFor = s.addRoleFor ? s.team.find(m => m.id === s.addRoleFor) : null;
 
     // widget
     const wMsgs = s.wMsgs.map(m => ({ direction:m.dir, author:m.author, time:m.time, body:m.body, readReceipt:m.read }));
@@ -1899,7 +2047,31 @@ class Component extends DCLogic {
       emailAutoReply: s.emailAutoReply, onEmailAutoReply: this.toggleEmailAutoReply,
       emailSpamFilter: s.emailSpamFilter, onEmailSpam: this.toggleEmailSpam,
       keys, webhooks, team,
-      roleOptions: [{ value:'owner', label:'owner' }, { value:'admin', label:'admin' }, { value:'agent', label:'agent' }],
+      scopeOpen: !!ed,
+      scopeTitle: ed ? ed.assignment.role + ' — ' + ed.member.name : '',
+      scopeSubtitle: ed ? (this.ROLE_DEFS[ed.assignment.role] || {}).desc : '',
+      scopeNoDims: !!ed && this.roleDims(ed.assignment.role).length === 0,
+      scopeDims: ed ? this.roleDims(ed.assignment.role).map(d => {
+        const val = ed.assignment.scope[d.key];
+        const all = d.type === 'set' && (val || []).indexOf('all') >= 0;
+        return {
+          label:d.label, help:d.help, isSet:d.type === 'set', isToggle:d.type === 'toggle',
+          on: val === true, onToggle: (v) => this.setScopeToggle(d.key, v),
+          chips: d.type === 'set' ? [{ label:'All', style:this.scopeChipStyle(all), onClick:() => this.setScopeAll(d.key) }]
+            .concat(d.options.map(o => ({ label:o.label, style:this.scopeChipStyle(!all && (val || []).indexOf(o.id) >= 0), onClick:() => this.toggleScopeValue(d.key, o.id) }))) : [],
+        };
+      }) : [],
+      onCloseScope: () => this.setState({ assignEdit:null }),
+      onRemoveAssignment: this.removeAssignment,
+      addRoleOpen: !!addFor,
+      addRoleSubtitle: addFor ? 'A second role adds capabilities to ' + addFor.name + '; it never takes any away.' : '',
+      addRoleOptions: addFor ? Object.keys(this.ROLE_DEFS).filter(r => !addFor.assignments.some(a => a.role === r)).map(r => ({
+        label:this.ROLE_DEFS[r].label, desc:this.ROLE_DEFS[r].desc,
+        style:'display:flex;flex-direction:column;gap:3px;text-align:left;width:100%;padding:11px 13px;border:1px solid var(--border-default);border-radius:10px;background:var(--white);cursor:pointer;font-family:var(--font-sans)',
+        onClick:() => this.addAssignment(r),
+      })) : [],
+      addRoleNone: !!addFor && Object.keys(this.ROLE_DEFS).every(r => addFor.assignments.some(a => a.role === r)),
+      onCloseAddRole: () => this.setState({ addRoleFor:null }),
       onNewKey: this.openKeyDialog, keyDialog: s.keyDialog, revealedKey: s.revealedKey, onCloseKey: this.closeKeyDialog, onCopyKey: this.copyKey,
 
       // widget
@@ -1913,11 +2085,11 @@ class Component extends DCLogic {
       wText: s.wText, onWChange: this.wOnChange, onWSend: this.wSend,
 
       // app
-      aIsHost: s.aView==='host', aIsList: s.aView==='list', aIsThread: s.aView==='thread', aRows, aMessages,
+      aIsHost: s.aView==='host', aIsSupportHome: s.aView==='supporthome', aIsList: s.aView==='list', aIsThread: s.aView==='thread', aRows, aMessages,
       aActiveName: aActive.name, aActivePresence: aActive.presence,
       aActiveContext: aActive.context, aActiveIsPeer: aActive.kind==='peer',
       aActiveStatusText: aActive.presence==='online' ? 'Active now' : aActive.presence==='away' ? 'Away' : 'Offline',
-      onAHost: this.aHost, onAMessages: this.aMessages, onAOpenSupport: this.aOpenSupport, onAOpenDriver: () => this.aOpenThread('a2'),
+      onAHost: this.aHost, onAMessages: this.aMessages, onAOpenSupport: this.aOpenSupport, onAStartSupport: this.aStartSupport, onAOpenDriver: () => this.aOpenThread('a2'),
       onAList: this.aList, onAStart: this.aStart, aText: s.aText, onAChange: this.aOnChange, onASend: this.aSend,
     };
   }

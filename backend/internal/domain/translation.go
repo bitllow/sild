@@ -221,7 +221,9 @@ func (s *Service) CreateTranslationProject(ctx context.Context, tenantID, slug, 
 	if !validProjectSlug(slug) {
 		return TranslationProjectView{}, invalid("a project id is 2-64 characters of a-z, 0-9 and dashes")
 	}
-	if slug == i18n.PlatformProject {
+	// models.ScopeAll is reserved too: a project named "all" in a translator's
+	// scope would read as every project.
+	if slug == i18n.PlatformProject || slug == models.ScopeAll {
 		return TranslationProjectView{}, invalid("that project id is reserved")
 	}
 	name = strings.TrimSpace(name)
@@ -304,7 +306,7 @@ func (s *Service) SaveTranslationProject(ctx context.Context, tenantID, project,
 	clean := make([]string, 0, len(locales))
 	for _, l := range locales {
 		n := i18n.Normalize(l)
-		if !i18n.ValidLanguage(n) {
+		if !i18n.ValidLanguage(n) || n == models.ScopeAll {
 			return invalid("locale must be a language tag")
 		}
 		if !slices.Contains(clean, n) {

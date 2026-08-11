@@ -3,6 +3,8 @@ package api_test
 import (
 	"context"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -273,5 +275,105 @@ func TestConcurrentOwnerRemovalsLeaveOneStanding(t *testing.T) {
 	}
 	if owners == 0 {
 		t.Fatal("both removals succeeded and the tenant has no owner")
+	}
+}
+
+// The typed scope drops a dimension set to false, so only the document as it
+// arrived can refuse one the role does not define.
+func TestADimensionSetToFalseIsStillRefused(t *testing.T) {
+	f := newRBACFixture(t)
+	member := f.h.SeedAdmin(f.tenant.ID, "agent@test", models.PlatformAgent)
+
+	code := f.assign(t, member.ID, map[string]any{
+		"role": models.PlatformAdmin, "scope": map[string]any{"peer": false},
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("admin role with a peer toggle = %d, want 422", code)
+	}
+	code = f.assign(t, member.ID, map[string]any{
+		"role": models.PlatformAdmin, "scope": map[string]any{"projects": []string{}},
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("admin role with an empty project set = %d, want 422", code)
+	}
+	if _, ok := f.rolesOf(t, member.ID)[models.PlatformAdmin]; ok {
+		t.Fatal("the refused assignment was stored anyway")
+	}
+}
+
+// A refused invite must not leave an account behind: the member would hold
+// nothing, and the caller was told the invite failed.
+func TestARefusedInviteStoresNoMember(t *testing.T) {
+	f := newRBACFixture(t)
+	w := f.h.Request("POST", "/v1/team").Cookie("sild_admin", f.owner).JSON(map[string]any{
+		"email": "ghost@test", "role": models.PlatformTranslator,
+		"scope": map[string]any{"projects": []string{"no-such-project"}},
+	}).Do()
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invite naming an unknown project = %d %s, want 422", w.Code, w.Body)
+	}
+	roster := f.h.Request("GET", "/v1/team").Cookie("sild_admin", f.owner).Do()
+	if strings.Contains(roster.Body.String(), "ghost@test") {
+		t.Fatalf("the refused invite left a member behind: %s", roster.Body)
+	}
+}
+
+// Granting reaches an open socket, the way revoking always has.
+func TestARegrantedRoleReachesALiveSocket(t *testing.T) {
+	f := newRBACFixture(t)
+	member := f.h.SeedAdmin(f.tenant.ID, "agent@test", models.PlatformAgent)
+	agents := member.ID + "→agents:" + f.tenant.ID
+
+	if w := f.h.Request("DELETE", "/v1/team/"+member.ID+"/roles/agent").
+		Cookie("sild_admin", f.owner).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("removing their only role = %d %s", w.Code, w.Body)
+	}
+	if !slices.Contains(f.h.Pub.Unsubscribed, agents) {
+		t.Fatalf("losing every role left the socket subscribed: %v", f.h.Pub.Unsubscribed)
+	}
+
+	if code := f.assign(t, member.ID, map[string]any{"role": models.PlatformAgent}); code != http.StatusNoContent {
+		t.Fatalf("re-adding the role = %d", code)
+	}
+	if !slices.Contains(f.h.Pub.Subscribed, agents) {
+		t.Fatalf("the granted role never reached the socket: %v", f.h.Pub.Subscribed)
+	}
+
+	// And a write that moves nothing says nothing to the broker.
+	subs, unsubs := len(f.h.Pub.Subscribed), len(f.h.Pub.Unsubscribed)
+	if w := f.h.Request("PUT", "/v1/team/"+member.ID+"/roles/agent").Cookie("sild_admin", f.owner).
+		JSON(map[string]any{"scope": map[string]any{"peer": false}}).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("rescoping to what it already was = %d %s", w.Code, w.Body)
+	}
+	if len(f.h.Pub.Subscribed) != subs || len(f.h.Pub.Unsubscribed) != unsubs {
+		t.Fatalf("a no-op rescope churned subscriptions: %v %v", f.h.Pub.Subscribed, f.h.Pub.Unsubscribed)
+	}
+}
+
+// A project named "all" would read as the wildcard in every translator scope.
+func TestTheScopeWildcardIsNotAProjectId(t *testing.T) {
+	f := newRBACFixture(t)
+	w := f.h.Request("POST", "/v1/translations/projects").Cookie("sild_admin", f.owner).
+		JSON(map[string]any{"id": models.ScopeAll, "name": "All"}).Do()
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("creating a project named %q = %d %s, want 422", models.ScopeAll, w.Code, w.Body)
+	}
+}
+
+// A rescope that lost its race must not put the assignment back.
+func TestARescopeDoesNotResurrectARemovedRole(t *testing.T) {
+	f := newRBACFixture(t)
+	member := f.h.SeedAdmin(f.tenant.ID, "agent@test", models.PlatformAgent)
+	ctx := context.Background()
+
+	if err := f.h.Svc.RemoveRole(ctx, f.tenant.ID, member.ID, models.PlatformAgent); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	err := f.h.Svc.RescopeRole(ctx, f.tenant.ID, member.ID, models.PlatformAgent, models.RoleScope{Peer: true})
+	if err == nil {
+		t.Fatal("rescoping a removed role succeeded")
+	}
+	if len(f.rolesOf(t, member.ID)) != 0 {
+		t.Fatalf("the rescope recreated the role: %v", f.rolesOf(t, member.ID))
 	}
 }

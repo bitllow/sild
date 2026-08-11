@@ -396,15 +396,16 @@ separate consequences, and nothing asks for them.
 
 ### Authorization is attribute-based and lives in one package
 
-A decision depends on principal kind, platform role, `peer_access`, membership,
-assignment existence, conversation kind and status — not on a role alone.
-`internal/policy` owns all of it:
+A decision depends on principal kind, the member's role assignments and their
+scope, membership, assignment existence, conversation kind and status — not on a
+role alone. `internal/policy` owns all of it:
 
 - `policy.Authorize(principal, action, attrs)` decides a named action against a
   resource; `policy.Scope(principal, action)` produces the ceiling for a
   collection query.
-- Roles map to capabilities in **one** table. Handlers do not read `Role` or
-  `PeerAccess`.
+- Roles map to capabilities in **one** table, and a member's capabilities are the
+  union across their assignments — a second role only ever widens. Handlers do not
+  read an assignment or its scope; they name an action.
 - Repositories take a `policy.ResourceScope` that only `policy` can construct
   (unexported fields, no public constructor), so a query that skipped
   authorization does not compile. Inspection is exported and returns copies —
@@ -467,7 +468,7 @@ These came out of spec review; this records their resolution in the structure.
 | Archive read auth vs. deleted `conversation_members` | `archive` persists a **membership snapshot** in the tombstone; archived reads authorize against the snapshot, not hot membership |
 | Reconnect catch-up misses convos added while offline | SDK contract: re-fetch `/v1/conversations` **before** per-conv `since=` catch-up (doc-only; no backend change) |
 | Unsortable message ids break pagination & `GREATEST` | ULID ids (`internal/id`) — sortable strings |
-| Admin tenant resolution underspecified | admin session carries tenant + platform role; multi-tenant admins use an explicit tenant selector (open spec decision, surfaced in P2) |
+| Admin tenant resolution underspecified | admin session carries tenant + the member's role assignments; multi-tenant admins use an explicit tenant selector (open spec decision, surfaced in P2) |
 | Guests not distinguishable from users | explicit `guest:true` member metadata + token scope hint; widget gates the list-view affordance on it (open spec decision, surfaced in P3) |
 | Uploads have no ownership/validation record | new `uploads` model (tenant, uploader, mime/size, completion state); attach verifies the key is a completed upload in the caller's tenant |
 | Assignment-close vs. conversation-close ambiguous | closing the last assignment does **not** auto-close the conversation; conversation close is its own action; archival keys on `conversation.status` (open spec decision, surfaced in P2/P6) |

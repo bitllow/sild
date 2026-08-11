@@ -26,7 +26,13 @@ func (h *Handler) getPrincipal(c *gin.Context) {
 	}
 	switch p.Kind {
 	case principal.KindAdmin:
-		subject := gin.H{"id": p.AdminID, "roles": p.Roles()}
+		// Assignments, not role names: a translator refused /v1/team has no other
+		// way to see which projects and languages they were granted.
+		held := make([]map[string]any, 0, len(p.Assignments))
+		for _, a := range p.Assignments {
+			held = append(held, map[string]any{"role": a.Role, "scope": a.Scope})
+		}
+		subject := gin.H{"id": p.AdminID, "assignments": held}
 		if a, err := h.svc.GetAdmin(c.Request.Context(), p.TenantID, p.AdminID); err == nil {
 			subject["email"] = a.Email
 			subject["first_name"] = a.FirstName

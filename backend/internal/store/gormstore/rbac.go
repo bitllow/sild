@@ -41,20 +41,21 @@ func (r *roleAssignmentRepo) Create(ctx context.Context, a *models.RoleAssignmen
 	return nil
 }
 
-// Rescope replaces the scope of the assignment the member holds. Read-then-save,
-// because the scope column is serialized by the model.
+// Rescope replaces the scope of the assignment the member holds. One conditional
+// update, never a read-then-save: gorm's Save inserts when its update matches no
+// row, which would resurrect an assignment another admin removed mid-edit.
 func (r *roleAssignmentRepo) Rescope(ctx context.Context, tenantID, adminUserID string, role models.PlatformRole, scope models.RoleScope) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var row models.RoleAssignment
-		err := tx.Where("tenant_id = ? AND admin_user_id = ? AND role = ?", tenantID, adminUserID, role).
-			First(&row).Error
-		if err != nil {
-			return translateErr(err)
-		}
-		row.Scope = scope
-		row.UpdatedAt = time.Now()
-		return tx.Save(&row).Error
-	})
+	res := r.db.WithContext(ctx).Model(&models.RoleAssignment{}).
+		Where("tenant_id = ? AND admin_user_id = ? AND role = ?", tenantID, adminUserID, role).
+		Select("scope", "updated_at").
+		Updates(&models.RoleAssignment{Scope: scope, UpdatedAt: time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 // Delete removes one assignment. The last-owner invariant is checked against the

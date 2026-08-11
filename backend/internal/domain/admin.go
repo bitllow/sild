@@ -104,6 +104,21 @@ func (s *Service) SetRole(ctx context.Context, tenantID, adminID string, role mo
 	return s.putAssignment(ctx, tenantID, adminID, role, scope, writeSet)
 }
 
+// checkScope refuses a scope the role does not define, and normalises the one it
+// does. Every path that stores an assignment goes through it.
+func (s *Service) checkScope(ctx context.Context, tenantID string, role models.PlatformRole, scope *models.RoleScope) error {
+	if err := validPlatformRole(role); err != nil {
+		return err
+	}
+	if err := policy.ValidateScope(role, *scope); err != nil {
+		return invalid(err.Error())
+	}
+	if role == models.PlatformTranslator {
+		return s.validateTranslatorScope(ctx, tenantID, scope)
+	}
+	return nil
+}
+
 // validateTranslatorScope holds a grant to projects the tenant actually has and
 // to language tags that mean something. A scope naming neither is a limit the
 // screen shows and no decision ever matches.
@@ -157,16 +172,8 @@ const (
 )
 
 func (s *Service) putAssignment(ctx context.Context, tenantID, adminID string, role models.PlatformRole, scope models.RoleScope, how assignmentWrite) error {
-	if err := validPlatformRole(role); err != nil {
+	if err := s.checkScope(ctx, tenantID, role, &scope); err != nil {
 		return err
-	}
-	if err := policy.ValidateScope(role, scope); err != nil {
-		return invalid(err.Error())
-	}
-	if role == models.PlatformTranslator {
-		if err := s.validateTranslatorScope(ctx, tenantID, &scope); err != nil {
-			return err
-		}
 	}
 	if _, err := s.store.Admins().Get(ctx, tenantID, adminID); err != nil {
 		return mapStoreErr(err)
@@ -175,14 +182,11 @@ func (s *Service) putAssignment(ctx context.Context, tenantID, adminID string, r
 		TenantID: tenantID, AdminUserID: adminID, Role: role, Scope: scope,
 		CreatedAt: s.now(), UpdatedAt: s.now(),
 	}
-	// Peer visibility can only move on the role that carries it.
-	was := role == models.PlatformAgent && s.peerAccess(ctx, tenantID, adminID)
+	before := s.held(ctx, tenantID, adminID)
 	if err := s.writeAssignment(ctx, a, how); err != nil {
 		return err
 	}
-	if role == models.PlatformAgent {
-		s.reconcileSubscriptions(ctx, tenantID, adminID, was)
-	}
+	s.reconcileSubscriptions(ctx, tenantID, adminID, before)
 	return nil
 }
 
@@ -202,60 +206,60 @@ func (s *Service) writeAssignment(ctx context.Context, a *models.RoleAssignment,
 	return mapStoreErr(err)
 }
 
-// peerAccess reports whether the member's agent assignment reaches peer
-// conversations right now.
-func (s *Service) peerAccess(ctx context.Context, tenantID, adminID string) bool {
-	held, err := s.store.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)
+// held is the principal a member's assignments make, for the decisions that
+// follow a write to them. nil when the rows cannot be read, so a caller does not
+// mistake a failed read for an empty grant.
+func (s *Service) held(ctx context.Context, tenantID, adminID string) *principal.Principal {
+	rows, err := s.store.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)
 	if err != nil {
-		return false
+		return nil
 	}
-	for _, a := range held {
-		if a.Role == models.PlatformAgent && a.Scope.Peer {
-			return true
-		}
-	}
-	return false
+	return principal.ForAdmin(&models.AdminUser{ID: adminID, TenantID: tenantID}, rows)
 }
 
 // RemoveRole takes a role away. A tenant's last owner cannot be removed: only an
 // owner appoints another, so losing the last one locks the tenant out for good.
 func (s *Service) RemoveRole(ctx context.Context, tenantID, adminID string, role models.PlatformRole) error {
-	was := s.peerAccess(ctx, tenantID, adminID)
+	before := s.held(ctx, tenantID, adminID)
 	if err := s.store.RoleAssignments().Delete(ctx, tenantID, adminID, role); err != nil {
 		if errors.Is(err, store.ErrLastOwner) {
 			return invalid("the tenant must keep at least one owner")
 		}
 		return mapStoreErr(err)
 	}
-	s.reconcileSubscriptions(ctx, tenantID, adminID, was)
+	s.reconcileSubscriptions(ctx, tenantID, adminID, before)
 	return nil
 }
 
-// reconcileSubscriptions matches an open socket to what the member now holds:
-// peer conversations follow the agent assignment, and losing every role that
-// reaches a conversation stops the tenant's support events at once rather than
-// at the next reconnect. wasPeer is what they reached before the write, so a
-// write that moves nothing publishes nothing.
-func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID string, wasPeer bool) {
+// reconcileSubscriptions matches an open socket to what the member now holds, in
+// both directions: a grant reaches a connection that is already up, and a revoke
+// stops delivery to it, rather than either waiting for a reconnect. before is what
+// they held prior to the write, so a write that moves nothing publishes nothing.
+func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID string, before *principal.Principal) {
 	sub, ok := s.pub.(realtime.Subscriber)
-	if !ok {
+	if !ok || before == nil {
 		return
 	}
-	held, err := s.store.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)
-	if err != nil {
+	after := s.held(ctx, tenantID, adminID)
+	if after == nil {
 		return
 	}
-	p := principal.ForAdmin(&models.AdminUser{ID: adminID, TenantID: tenantID}, held)
-	if now := p.PeerAccess(); now != wasPeer {
-		if now {
-			_ = sub.Subscribe(adminID, realtime.PeerChannel(tenantID))
-		} else {
-			_ = sub.Unsubscribe(adminID, realtime.PeerChannel(tenantID))
-		}
+	if now := after.PeerAccess(); now != before.PeerAccess() {
+		moveSubscription(sub, adminID, realtime.PeerChannel(tenantID), now)
 	}
-	if policy.Scope(p, policy.ConversationsList).DenyAll() {
-		_ = sub.Unsubscribe(adminID, realtime.AgentsChannel(tenantID))
+	// The tenant support channel follows whether any role reaches a conversation.
+	was := !policy.Scope(before, policy.ConversationsList).DenyAll()
+	if now := !policy.Scope(after, policy.ConversationsList).DenyAll(); now != was {
+		moveSubscription(sub, adminID, realtime.AgentsChannel(tenantID), now)
 	}
+}
+
+func moveSubscription(sub realtime.Subscriber, adminID, channel string, on bool) {
+	if on {
+		_ = sub.Subscribe(adminID, channel)
+		return
+	}
+	_ = sub.Unsubscribe(adminID, channel)
 }
 
 // RoleAssignments lists what one member holds.
@@ -300,18 +304,23 @@ func (s *Service) InviteAgent(ctx context.Context, tenantID, email, first, last 
 	if role == "" {
 		role = models.PlatformAgent
 	}
-	if err := validPlatformRole(role); err != nil {
+	if err := s.checkScope(ctx, tenantID, role, &scope); err != nil {
 		return nil, err
-	}
-	if err := policy.ValidateScope(role, scope); err != nil {
-		return nil, invalid(err.Error())
 	}
 	a := &models.AdminUser{TenantID: tenantID, Email: email, FirstName: first, LastName: last, CreatedAt: s.now()}
-	if err := s.store.Admins().Create(ctx, a); err != nil {
-		return nil, err
-	}
-	if err := s.AssignRole(ctx, tenantID, a.ID, role, scope); err != nil {
-		return nil, err
+	// One transaction: a member stored without their assignment holds nothing, and
+	// the invite that was supposed to give them a role has already reported failure.
+	err := s.store.Tx(ctx, func(tx store.Store) error {
+		if err := tx.Admins().Create(ctx, a); err != nil {
+			return err
+		}
+		return tx.RoleAssignments().Create(ctx, &models.RoleAssignment{
+			TenantID: tenantID, AdminUserID: a.ID, Role: role, Scope: scope,
+			CreatedAt: s.now(), UpdatedAt: s.now(),
+		})
+	})
+	if err != nil {
+		return nil, mapStoreErr(err)
 	}
 	return a, nil
 }
