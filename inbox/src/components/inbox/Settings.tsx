@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
+import { adminApi } from "@/api/admin";
 import { Badge, Button, CopyIcon, Input, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
 import { cardStyle as card, fieldLabel, rowBorder, tabStyle } from "./styles";
 import { Appearance } from "./Appearance";
@@ -500,19 +501,22 @@ const TestPushRow = observer(function TestPushRow() {
 // automatically one that can put it live.
 const BuildToken = observer(function BuildToken() {
   const store = useStore();
-  const t = store.translations;
   const [open, setOpen] = useState(false);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [project, setProject] = useState("");
   const [publish, setPublish] = useState(false);
 
-  const start = () => {
+  const start = async () => {
     setOpen(true);
-    // The project list is the translations screen's; loading it is idempotent.
-    void t.load();
+    try {
+      setProjects(await adminApi.listTranslationProjects());
+    } catch {
+      /* the platform project is in every tenant, so the fallback below still works */
+    }
   };
 
   const create = async () => {
-    await store.openKeyDialog({ projects: [project || t.projects[0]?.id || "sild"], publish });
+    await store.openKeyDialog({ projects: [project || projects[0]?.id || "sild"], publish });
     setOpen(false);
     setPublish(false);
   };
@@ -520,7 +524,7 @@ const BuildToken = observer(function BuildToken() {
   if (!open) {
     return (
       <div style={{ padding: "12px 18px", borderBottom: rowBorder }}>
-        <Button size="sm" variant="secondary" data-testid="new-build-token" onClick={start}>
+        <Button size="sm" variant="secondary" data-testid="new-build-token" onClick={() => void start()}>
           New build token
         </Button>
         <span style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginLeft: 10 }}>
@@ -537,8 +541,8 @@ const BuildToken = observer(function BuildToken() {
         data-testid="build-token-project"
         aria-label="Project"
         size="sm"
-        value={project || t.projects[0]?.id || ""}
-        options={t.projects.map((p) => ({ value: p.id, label: p.name }))}
+        value={project || projects[0]?.id || ""}
+        options={projects.map((p) => ({ value: p.id, label: p.name }))}
         onChange={(e) => setProject(e.target.value)}
       />
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

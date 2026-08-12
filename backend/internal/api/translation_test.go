@@ -71,9 +71,11 @@ func (f *i18nFixture) manifestVersion(t *testing.T) int {
 	return m.Locales["lv"]
 }
 
-func (f *i18nFixture) publish(t *testing.T) int {
+func (f *i18nFixture) publish(t *testing.T) int { return f.publishIn(t, "sild") }
+
+func (f *i18nFixture) publishIn(t *testing.T, project string) int {
 	t.Helper()
-	w := f.h.Request("POST", "/v1/translations/projects/sild/releases").
+	w := f.h.Request("POST", "/v1/translations/projects/"+project+"/releases").
 		Cookie("sild_admin", f.owner).Do()
 	if w.Code != http.StatusCreated {
 		t.Fatalf("publish: %d %s", w.Code, w.Body)

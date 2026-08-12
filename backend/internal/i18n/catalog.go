@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -39,6 +40,8 @@ type Catalog struct {
 	// language's own categories are then filled in per locale, so Latvian is asked
 	// for zero even though English never declares one.
 	pluralBases map[string]bool
+	// localeKeys caches that expansion per language: locale → []string.
+	localeKeys sync.Map
 }
 
 var platform = sync.OnceValue(func() *Catalog {
@@ -81,7 +84,7 @@ func load() (*Catalog, error) {
 	}
 	slices.Sort(c.locales)
 	slices.Sort(c.keys)
-	c.pluralBases = derivePluralBases(c.keys)
+	c.pluralBases = PluralBases(c.keys)
 	return c, nil
 }
 
@@ -99,17 +102,17 @@ func NewCatalog(sources map[string]string, pluralBases ...string) *Catalog {
 		c.keys = append(c.keys, k)
 	}
 	slices.Sort(c.keys)
-	c.pluralBases = derivePluralBases(c.keys)
+	c.pluralBases = PluralBases(c.keys)
 	for _, b := range pluralBases {
 		c.pluralBases[b] = true
 	}
 	return c
 }
 
-// derivePluralBases reads plural keys off the source key set: a base is plural
-// when it carries more than one category, which one key merely ending in a
-// category word cannot.
-func derivePluralBases(keys []string) map[string]bool {
+// PluralBases reads plural keys off a key set: a base is plural when it carries
+// more than one category, which one key merely ending in a category word cannot
+// (docs/adr/0004).
+func PluralBases(keys []string) map[string]bool {
 	seen := map[string][]string{}
 	for _, k := range keys {
 		if base, cat, ok := SplitPlural(k); ok && !slices.Contains(seen[base], cat) {
@@ -134,12 +137,7 @@ func (c *Catalog) Keys() []string { return slices.Clone(c.keys) }
 // KeysIn returns the keys one locale's file actually declares, sorted — what a
 // contract test compares against the keys that locale ought to carry.
 func (c *Catalog) KeysIn(locale string) []string {
-	out := make([]string, 0, len(c.byLocale[Normalize(locale)]))
-	for k := range c.byLocale[Normalize(locale)] {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(c.byLocale[Normalize(locale)]))
 }
 
 // Namespaces returns every grouping prefix in use, sorted.
@@ -199,7 +197,20 @@ func (c *Catalog) IsPluralBase(base string) bool { return c.pluralBases[base] }
 // LocaleKeys is every key as it exists for one language: ordinary keys as
 // declared, and each plural base expanded into exactly that language's
 // categories. This is what the editor lists and what a bundle carries.
+//
+// Memoized: a catalog is immutable once built, and every publish, bundle read and
+// key listing asks for the same expansion.
 func (c *Catalog) LocaleKeys(locale string) []string {
+	locale = Normalize(locale)
+	if keys, ok := c.localeKeys.Load(locale); ok {
+		return keys.([]string)
+	}
+	keys := c.expandFor(locale)
+	c.localeKeys.Store(locale, keys)
+	return keys
+}
+
+func (c *Catalog) expandFor(locale string) []string {
 	cats := Categories(locale)
 	expanded := map[string]bool{}
 	out := make([]string, 0, len(c.keys))
@@ -236,22 +247,31 @@ type Overrides map[string]map[string]string
 // locale a tenant override beats the shipped default, so a fully translated
 // fallback never outranks the language actually asked for.
 func (c *Catalog) Resolve(ov Overrides, locale, fallback, key string) string {
+	return c.resolve(ov, c.chain(locale, fallback), key)
+}
+
+// chain is the languages a lookup walks, normalized once for a whole bundle.
+func (c *Catalog) chain(locale, fallback string) [3]string {
+	return [3]string{Normalize(locale), Normalize(fallback), SourceLocale}
+}
+
+func (c *Catalog) resolve(ov Overrides, chain [3]string, key string) string {
 	// A category the language has but the text does not reads as the other form
 	// rather than falling out of the language: an untranslated Latvian zero is
 	// better Latvian than English.
-	tries := []string{key}
+	alt := ""
 	if base, cat, ok := SplitPlural(key); ok && c.pluralBases[base] && cat != CatOther {
-		tries = append(tries, PluralKey(base, CatOther))
+		alt = PluralKey(base, CatOther)
 	}
-	for _, l := range []string{Normalize(locale), Normalize(fallback), SourceLocale} {
+	for _, l := range chain {
 		if l == "" {
 			continue
 		}
-		for _, k := range tries {
-			if v, ok := ov[l][k]; ok && v != "" {
-				return v
-			}
-			if v, ok := c.Default(l, k); ok && v != "" {
+		if v := c.textIn(ov, l, key); v != "" {
+			return v
+		}
+		if alt != "" {
+			if v := c.textIn(ov, l, alt); v != "" {
 				return v
 			}
 		}
@@ -259,14 +279,23 @@ func (c *Catalog) Resolve(ov Overrides, locale, fallback, key string) string {
 	return key
 }
 
+// textIn is one language's text for a key: the tenant's own first, then Sild's.
+func (c *Catalog) textIn(ov Overrides, locale, key string) string {
+	if v := ov[locale][key]; v != "" {
+		return v
+	}
+	return c.byLocale[locale][key]
+}
+
 // Bundle is every key resolved for one locale — what a client holds and renders
 // from. Keys missing in the locale resolve through the same chain, so a bundle
 // is always complete and a client never has to fall back on its own.
 func (c *Catalog) Bundle(ov Overrides, locale, fallback string) map[string]string {
 	keys := c.LocaleKeys(locale)
+	chain := c.chain(locale, fallback)
 	out := make(map[string]string, len(keys))
 	for _, k := range keys {
-		out[k] = c.Resolve(ov, locale, fallback, k)
+		out[k] = c.resolve(ov, chain, k)
 	}
 	return out
 }

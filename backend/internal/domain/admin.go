@@ -362,10 +362,8 @@ func (s *Service) CreateAPIKey(ctx context.Context, tenantID, label string, scop
 	return gen.Full, rec, nil
 }
 
-// keyScope validates a requested key scope and fills in the dimensions the caller
-// left open. A named project with no languages means every language of it — the
-// scope is a restriction, so an unstated dimension restricts nothing. A scope that
-// names nothing at all stays empty, which is a tenant-wide key.
+// keyScope fills in the dimensions the caller left open: the scope is a
+// restriction, so an unstated dimension restricts nothing. Empty is tenant-wide.
 func keyScope(scope models.RoleScope) (models.RoleScope, error) {
 	if !scope.NarrowsTranslations() {
 		// An unscoped key reaches everything, so `publish` on it would decide

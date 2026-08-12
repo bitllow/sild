@@ -23,7 +23,16 @@ export function errorText(e: unknown): string {
 
 type Json = Record<string, unknown> | unknown[];
 
-async function request<T>(method: string, path: string, body?: Json, ifMatch?: string): Promise<T> {
+/** A body already encoded — a file, sent as it is rather than as JSON. */
+export interface RawBody {
+  raw: string;
+  contentType: string;
+}
+
+const isRaw = (body: unknown): body is RawBody =>
+  typeof body === "object" && body !== null && "raw" in body;
+
+async function request<T>(method: string, path: string, body?: Json | RawBody, ifMatch?: string): Promise<T> {
   return (await requestWithETag<T>(method, path, body, ifMatch)).data;
 }
 
@@ -34,11 +43,11 @@ async function request<T>(method: string, path: string, body?: Json, ifMatch?: s
 async function requestWithETag<T>(
   method: string,
   path: string,
-  body?: Json,
+  body?: Json | RawBody,
   ifMatch?: string
 ): Promise<{ data: T; etag: string | null }> {
   const headers: Record<string, string> = {};
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (body !== undefined) headers["Content-Type"] = isRaw(body) ? body.contentType : "application/json";
   if (ifMatch) headers["If-Match"] = ifMatch;
 
   let res: Response;
@@ -47,7 +56,7 @@ async function requestWithETag<T>(
       method,
       credentials: "include",
       headers: Object.keys(headers).length ? headers : undefined,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : isRaw(body) ? body.raw : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, "Network error — is the backend running on :8080?");
@@ -73,39 +82,11 @@ async function requestWithETag<T>(
   return { data: payload as T, etag };
 }
 
-// A file upload whose body IS the file — a translation import. Separate from
-// `post` because the body is neither JSON nor re-serializable.
-async function postFile<T>(path: string, body: string, contentType: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`/v1${path}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": contentType },
-      body,
-    });
-  } catch {
-    throw new ApiError(0, "Network error — is the backend running on :8080?");
-  }
-  const text = await res.text();
-  let payload: unknown = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
-  }
-  if (!res.ok) {
-    const err = (payload as { error?: { code?: string; message?: string } })?.error;
-    throw new ApiError(res.status, err?.message || res.statusText || "Request failed", err?.code);
-  }
-  return payload as T;
-}
-
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
-  postFile,
+  /** POST a body that is already encoded — a translation file, not JSON. */
+  postFile: <T>(path: string, raw: string, contentType: string) =>
+    request<T>("POST", path, { raw, contentType }),
   post: <T>(path: string, body?: Json) => request<T>("POST", path, body ?? {}),
   put: <T>(path: string, body?: Json) => request<T>("PUT", path, body ?? {}),
   patch: <T>(path: string, body?: Json) => request<T>("PATCH", path, body ?? {}),

@@ -130,14 +130,25 @@ export const translationRow = (page: Page, key: string): Locator =>
   page.locator(`[data-testid="translations-row"][data-key="${key}"]`);
 
 // Land on the Translations section with the given locale selected and its keys
-// loaded. Selecting a locale re-queries the server, so wait for the rows.
+// loaded. Waiting for a row is not enough: every locale has widget.home.cta, so
+// the row stays visible from the previous list while the new one is in flight, and
+// the response landing after a caller has typed replaces the rows under it.
 export async function gotoTranslations(page: Page, locale: string): Promise<void> {
   await gotoInbox(page);
   await page.getByTestId("translations-nav").click();
   await expect(page.getByRole("heading", { name: "Translations" })).toBeVisible();
   await expect(translationRows(page).first()).toBeVisible();
-  await page.getByTestId("translations-locale").selectOption(locale);
+  await selectTranslationLocale(page, locale);
   await expect(translationRow(page, "widget.home.cta")).toBeVisible();
+}
+
+// Switch the editor's language and wait for that language's keys to arrive.
+export async function selectTranslationLocale(page: Page, locale: string): Promise<void> {
+  const loaded = page.waitForResponse(
+    (r) => r.url().includes("/keys?") && r.url().includes(`locale=${locale}`) && r.ok()
+  );
+  await page.getByTestId("translations-locale").selectOption(locale);
+  await loaded;
 }
 
 // Type a value into a row and commit it (Enter flushes the debounced save).

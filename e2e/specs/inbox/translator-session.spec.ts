@@ -1,5 +1,6 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
-import { INBOX_URL } from "../../support/env";
+import { INBOX_URL, uid } from "../../support/env";
+import { setTranslation, translationRow } from "../../support/inbox";
 
 // A translator is an ordinary tenant member with a translation-only capability
 // set, so what they land on and what they are offered is the whole of their
@@ -44,7 +45,7 @@ async function signIn(browser: Browser, email: string): Promise<Page> {
 
 test.describe("translations · a translator's own session", () => {
   test("lands on Translations and is offered no queue", async ({ page, browser }) => {
-    const email = `translator-${Date.now()}@example.test`;
+    const email = `${uid("translator")}@example.test`;
     await invite(page, email, ["all"]);
 
     const translator = await signIn(browser, email);
@@ -64,7 +65,7 @@ test.describe("translations · a translator's own session", () => {
   });
 
   test("a language they were not granted is not on the screen", async ({ page, browser }) => {
-    const email = `translator-lv-${Date.now()}@example.test`;
+    const email = `${uid("translator-lv")}@example.test`;
     await invite(page, email, ["lv"]);
 
     const translator = await signIn(browser, email);
@@ -80,18 +81,15 @@ test.describe("translations · a translator's own session", () => {
   // Without the publish grant there is no button; the draft count is what tells
   // them their work is queued rather than lost.
   test("sees their drafts waiting without being able to publish", async ({ page, browser }) => {
-    const email = `translator-drafts-${Date.now()}@example.test`;
+    const email = `${uid("translator-drafts")}@example.test`;
     await invite(page, email, ["all"]);
 
     const translator = await signIn(browser, email);
     await translator.goto(INBOX_URL);
     await expect(translator.getByTestId("translations-row").first()).toBeVisible();
 
-    const row = translator.getByTestId("translations-row").filter({ hasText: "widget.home.cta" }).first();
-    const input = row.getByTestId("translations-value");
-    await input.fill(`Kirjuta meile ${Date.now()}`);
-    await input.press("Enter");
-    await expect(row.getByText("Saved")).toBeVisible();
+    await setTranslation(translator, "widget.home.cta", `Kirjuta meile ${uid("tr")}`);
+    await expect(translationRow(translator, "widget.home.cta")).toBeVisible();
 
     await expect(translator.getByTestId("translations-publish")).toHaveCount(0);
     const drafts = translator.getByTestId("translations-drafts");

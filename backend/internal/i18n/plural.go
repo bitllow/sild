@@ -4,13 +4,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
 )
 
-// A plural key is a set of sibling keys, one per CLDR category the language has
-// (docs/adr/0004). These are the suffixes, in CLDR's own order.
+// The CLDR categories, in CLDR's own order. A plural key is a sibling per category
+// the language has (docs/adr/0004).
 const (
 	CatZero  = "zero"
 	CatOne   = "one"
@@ -59,12 +60,7 @@ func Family(locale string) string {
 // TableLocales is every language the table names, so a contract test can hold the
 // generated client tables to it.
 func TableLocales() []string {
-	out := make([]string, 0, len(plurals().Locales))
-	for l := range plurals().Locales {
-		out = append(out, l)
-	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(plurals().Locales))
 }
 
 // Categories is exactly the categories a language has — what the editor offers a

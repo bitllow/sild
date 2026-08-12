@@ -341,8 +341,13 @@ type draftDiff struct {
 }
 
 func (f *i18nFixture) drafts(t *testing.T, session string) draftDiff {
+	return f.draftsIn(t, "sild", session)
+}
+
+func (f *i18nFixture) draftsIn(t *testing.T, project, session string) draftDiff {
 	t.Helper()
-	w := f.h.Request("GET", "/v1/translations/projects/sild/drafts").Cookie("sild_admin", session).Do()
+	w := f.h.Request("GET", "/v1/translations/projects/"+project+"/drafts").
+		Cookie("sild_admin", session).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("drafts: %d %s", w.Code, w.Body)
 	}
@@ -632,22 +637,14 @@ func TestTheDraftDiffShowsARemovedKey(t *testing.T) {
 	if res := f.declare(t, "shop", "checkout.pay", "Pay now"); res.StatusCode != http.StatusNoContent {
 		t.Fatalf("declare: %d", res.StatusCode)
 	}
-	w := f.h.Request("POST", "/v1/translations/projects/shop/releases").Cookie("sild_admin", f.owner).Do()
-	if w.Code != http.StatusCreated {
-		t.Fatalf("publish: %d %s", w.Code, w.Body)
-	}
-	w = f.h.Request("DELETE", "/v1/translations/projects/shop/declarations/checkout.pay").
+	f.publishIn(t, "shop")
+	w := f.h.Request("DELETE", "/v1/translations/projects/shop/declarations/checkout.pay").
 		Cookie("sild_admin", f.owner).Do()
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("undeclare: %d %s", w.Code, w.Body)
 	}
 
-	w = f.h.Request("GET", "/v1/translations/projects/shop/drafts").Cookie("sild_admin", f.owner).Do()
-	if w.Code != http.StatusOK {
-		t.Fatalf("drafts: %d %s", w.Code, w.Body)
-	}
-	var diff draftDiff
-	testutil.DecodeJSON(t, w, &diff)
+	diff := f.draftsIn(t, "shop", f.owner)
 	var found bool
 	for _, r := range diff.Rows {
 		if r.Key == "checkout.pay" {

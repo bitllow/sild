@@ -94,14 +94,10 @@ func TestATenantDeclaresAPluralKeyByItsSourceForms(t *testing.T) {
 	f.createProject(t, "shop", "Shop")
 	f.enable(t, "shop", "en", "lv")
 
-	w := f.h.Request("POST", "/v1/translations/projects/shop/declarations").
-		Cookie("sild_admin", f.owner).
-		JSON(map[string]any{
-			"key":     "cart.items",
-			"plurals": map[string]string{"one": "{count} item", "other": "{count} items"},
-		}).Do()
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("declare a plural: %d %s", w.Code, w.Body)
+	if res := f.declare(t, "shop", "cart.items", "", map[string]string{
+		"one": "{count} item", "other": "{count} items",
+	}); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("declare a plural: %d", res.StatusCode)
 	}
 
 	lv := f.projectKeys(t, "shop", "lv", "")
@@ -122,16 +118,12 @@ func TestATenantDeclaresAPluralKeyByItsSourceForms(t *testing.T) {
 func TestUndeclaringAPluralRemovesEverySibling(t *testing.T) {
 	f := newI18nFixture(t)
 	f.createProject(t, "shop", "Shop")
-	w := f.h.Request("POST", "/v1/translations/projects/shop/declarations").
-		Cookie("sild_admin", f.owner).
-		JSON(map[string]any{
-			"key":     "cart.items",
-			"plurals": map[string]string{"one": "{count} item", "other": "{count} items"},
-		}).Do()
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("declare: %d %s", w.Code, w.Body)
+	if res := f.declare(t, "shop", "cart.items", "", map[string]string{
+		"one": "{count} item", "other": "{count} items",
+	}); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("declare a plural: %d", res.StatusCode)
 	}
-	w = f.h.Request("DELETE", "/v1/translations/projects/shop/declarations/cart.items").
+	w := f.h.Request("DELETE", "/v1/translations/projects/shop/declarations/cart.items").
 		Cookie("sild_admin", f.owner).Do()
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("undeclare: %d %s", w.Code, w.Body)

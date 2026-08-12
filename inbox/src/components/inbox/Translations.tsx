@@ -1,5 +1,6 @@
 "use client";
 
+import type * as React from "react";
 import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
@@ -46,6 +47,39 @@ const EXPORT_FORMATS: { value: TranslationFormat; label: string }[] = [
   ...IMPORT_FORMATS,
   { value: "sheet", label: "Spreadsheet (key, source, translation)" },
 ];
+
+// Panel is the card chrome every section on this screen shares: a titled header
+// with a line of explanation, and the section's own rows beneath it.
+function Panel({
+  title,
+  subtitle,
+  right,
+  testid,
+  style,
+  children,
+}: {
+  title: string;
+  subtitle?: React.ReactNode;
+  right?: React.ReactNode;
+  testid?: string;
+  style?: React.CSSProperties;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div style={{ ...card, marginTop: 20, ...style }} data-testid={testid}>
+      <div style={{ padding: "14px 16px", borderBottom: rowBorder }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 700 }}>{title}</div>
+          {right}
+        </div>
+        {subtitle && (
+          <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>{subtitle}</div>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 // Locale tags are BCP-47, so the platform already knows what to call them.
 const localeNames = new Intl.DisplayNames(["en"], { type: "language" });
@@ -584,22 +618,22 @@ const DraftChanges = observer(function DraftChanges() {
   const canPublish = store.can("translations.publish");
 
   return (
-    <div style={{ ...card, marginTop: 20 }} data-testid="translations-drafts">
-      <div style={{ padding: "14px 16px", borderBottom: rowBorder }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 700 }}>Draft changes</div>
-          <Badge data-testid="translations-draft-count" variant={pending ? "brand" : "neutral"}>
-            {t.diffLoading && !diff ? "…" : pending}
-          </Badge>
-        </div>
-        <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
-          {pending === 0
-            ? "Everything saved is live."
-            : canPublish
-              ? `Publishing cuts v${diff?.next_version} with these ${pending} changes.`
-              : `Waiting for someone who can publish. ${pending} change${pending === 1 ? "" : "s"} queued.`}
-        </div>
-      </div>
+    <Panel
+      title="Draft changes"
+      testid="translations-drafts"
+      right={
+        <Badge data-testid="translations-draft-count" variant={pending ? "brand" : "neutral"}>
+          {t.diffLoading && !diff ? "…" : pending}
+        </Badge>
+      }
+      subtitle={
+        pending === 0
+          ? "Everything saved is live."
+          : canPublish
+            ? `Publishing cuts v${diff?.next_version} with these ${pending} changes.`
+            : `Waiting for someone who can publish. ${pending} change${pending === 1 ? "" : "s"} queued.`
+      }
+    >
       {pending > 0 && (
         <>
           <div style={{ padding: "10px 16px", display: "flex", gap: 8, borderBottom: open ? rowBorder : undefined }}>
@@ -639,7 +673,7 @@ const DraftChanges = observer(function DraftChanges() {
           )}
         </>
       )}
-    </div>
+    </Panel>
   );
 });
 
@@ -658,14 +692,16 @@ const Transfer = observer(function Transfer() {
   };
 
   return (
-    <div style={{ ...card, marginTop: 20 }} data-testid="translations-transfer">
-      <div style={{ padding: "14px 16px", borderBottom: rowBorder }}>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>Import and export</div>
-        <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
+    <Panel
+      title="Import and export"
+      testid="translations-transfer"
+      subtitle={
+        <>
           Plural forms are reassembled into <code>&lt;plurals&gt;</code> and stringsdict on the
           way out. A spreadsheet is for a translator without an account.
-        </div>
-      </div>
+        </>
+      }
+    >
 
       {canWrite && (
         <div style={{ padding: "14px 16px", borderBottom: rowBorder }}>
@@ -775,28 +811,16 @@ const Transfer = observer(function Transfer() {
           </div>
           <a
             data-testid="translations-export"
-            href={t.exportUrl() ?? "#"}
+            className="sild-btn sild-btn--sm sild-btn--secondary"
+            href={t.exportUrl ?? "#"}
             download
-            style={{
-              flex: "none",
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "0 12px",
-              height: 32,
-              borderRadius: 8,
-              border: "1px solid var(--border-default)",
-              background: "var(--surface-card, #fff)",
-              color: "var(--text-primary)",
-              fontSize: 13,
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
+            style={{ flex: "none", textDecoration: "none" }}
           >
             Download
           </a>
         </div>
       </div>
-    </div>
+    </Panel>
   );
 });
 
@@ -817,14 +841,11 @@ curl -X POST -H "Authorization: Bearer $SILD_KEY" \\
   "${location.origin}/v1/translations/projects/${project}/import?locale=${t.locale || "en"}&format=json"`;
 
   return (
-    <div style={{ ...card, marginTop: 20 }} data-testid="translations-from-ci">
-      <div style={{ padding: "14px 16px", borderBottom: rowBorder }}>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>From CI</div>
-        <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
-          An API key scoped to one project pushes and pulls the same content. A build token
-          limited to a project cannot rewrite anything else — scope it under Settings → API keys.
-        </div>
-      </div>
+    <Panel
+      title="From CI"
+      testid="translations-from-ci"
+      subtitle="An API key scoped to one project pushes and pulls the same content. A build token limited to a project reaches nothing else — mint one under Settings → API keys."
+    >
       <div style={{ padding: "14px 16px" }}>
         <pre
           style={{
@@ -841,7 +862,7 @@ curl -X POST -H "Authorization: Bearer $SILD_KEY" \\
           {snippet}
         </pre>
       </div>
-    </div>
+    </Panel>
   );
 });
 
@@ -856,21 +877,22 @@ const Delivery = observer(function Delivery() {
     ["Offline", "The text bundled in the app, always"],
   ];
   return (
-    <div style={{ ...card, marginTop: 20, marginBottom: 20 }} data-testid="translations-delivery">
-      <div style={{ padding: "14px 16px", borderBottom: rowBorder }}>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>Delivery</div>
-        <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
-          Clients download a language only when its version moves.
-          {t.currentVersion === null ? " Nothing is published yet." : ` Serving v${t.currentVersion}.`}
-        </div>
-      </div>
+    <Panel
+      title="Delivery"
+      testid="translations-delivery"
+      style={{ marginBottom: 20 }}
+      subtitle={
+        "Clients download a language only when its version moves." +
+        (t.currentVersion === null ? " Nothing is published yet." : ` Serving v${t.currentVersion}.`)
+      }
+    >
       {rows.map(([label, value]) => (
         <div key={label} style={{ padding: "10px 16px", display: "flex", gap: 10, borderBottom: rowBorder }}>
           <div style={{ width: 96, flex: "none", fontSize: 12.5, color: "var(--text-tertiary)" }}>{label}</div>
           <div style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>{value}</div>
         </div>
       ))}
-    </div>
+    </Panel>
   );
 });
 

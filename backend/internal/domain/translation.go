@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -74,9 +75,7 @@ type TranslationReleaseView struct {
 	Locales []string
 }
 
-// What an imported row did, or would do. A dry run and the write that follows
-// report the same thing, so the preview a tenant approves cannot disagree with
-// what happens.
+// What an imported row did, or would do.
 const (
 	ImportNew     = "new"
 	ImportChanged = "changed"
@@ -90,6 +89,9 @@ type TranslationImportRow struct {
 	Value  string
 	// Reason says why a row was skipped — an unknown key, or text already there.
 	Reason string
+	// declared is whether the project already has this key, resolved once while the
+	// report is built so the write does not resolve it again.
+	declared bool
 }
 
 // TranslationImportReport is what an import did, or what a dry run would do.
@@ -134,12 +136,20 @@ func sourceHash(s string) string {
 // has never changed them. The platform project exists in every tenant without a
 // row; a tenant-owned one has to have been created.
 func (s *Service) TranslationProject(ctx context.Context, tenantID, project string) (TranslationProjectView, error) {
+	v, _, err := s.projectAndCatalog(ctx, tenantID, project)
+	return v, err
+}
+
+// projectAndCatalog is the project view and the catalog behind it. Every caller
+// that needs both takes them together: building the view reads the declared keys
+// already, and reading them twice per request is the same query twice.
+func (s *Service) projectAndCatalog(ctx context.Context, tenantID, project string) (TranslationProjectView, *i18n.Catalog, error) {
 	p, err := s.store.Translations().GetProject(ctx, tenantID, project)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return TranslationProjectView{}, err
+		return TranslationProjectView{}, nil, err
 	}
 	if p == nil && project != i18n.PlatformProject {
-		return TranslationProjectView{}, ErrNotFound
+		return TranslationProjectView{}, nil, ErrNotFound
 	}
 	return s.projectView(ctx, tenantID, project, p)
 }
@@ -155,7 +165,7 @@ func (s *Service) ListTranslationProjects(ctx context.Context, tenantID string) 
 	for i := range rows {
 		byslug[rows[i].Slug] = &rows[i]
 	}
-	platform, err := s.projectView(ctx, tenantID, i18n.PlatformProject, byslug[i18n.PlatformProject])
+	platform, _, err := s.projectView(ctx, tenantID, i18n.PlatformProject, byslug[i18n.PlatformProject])
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +174,7 @@ func (s *Service) ListTranslationProjects(ctx context.Context, tenantID string) 
 		if rows[i].Slug == i18n.PlatformProject {
 			continue
 		}
-		v, err := s.projectView(ctx, tenantID, rows[i].Slug, &rows[i])
+		v, _, err := s.projectView(ctx, tenantID, rows[i].Slug, &rows[i])
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +185,7 @@ func (s *Service) ListTranslationProjects(ctx context.Context, tenantID string) 
 
 // projectView fills in what the settings row does not carry. p is nil for a
 // platform project the tenant has never configured.
-func (s *Service) projectView(ctx context.Context, tenantID, project string, p *models.TranslationProject) (TranslationProjectView, error) {
+func (s *Service) projectView(ctx context.Context, tenantID, project string, p *models.TranslationProject) (TranslationProjectView, *i18n.Catalog, error) {
 	platform := project == i18n.PlatformProject
 	v := TranslationProjectView{
 		Slug:             project,
@@ -197,7 +207,7 @@ func (s *Service) projectView(ctx context.Context, tenantID, project string, p *
 		}
 		locales, err := s.store.Translations().ProjectLocales(ctx, tenantID, project)
 		if err != nil {
-			return TranslationProjectView{}, err
+			return TranslationProjectView{}, nil, err
 		}
 		if len(locales) > 0 {
 			v.Locales = locales
@@ -206,7 +216,7 @@ func (s *Service) projectView(ctx context.Context, tenantID, project string, p *
 
 	rel, err := s.store.Translations().LatestRelease(ctx, tenantID, project)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return TranslationProjectView{}, err
+		return TranslationProjectView{}, nil, err
 	}
 	if rel != nil {
 		version := rel.Version
@@ -215,15 +225,15 @@ func (s *Service) projectView(ctx context.Context, tenantID, project string, p *
 
 	cat, err := s.catalogFor(ctx, tenantID, project)
 	if err != nil {
-		return TranslationProjectView{}, err
+		return TranslationProjectView{}, nil, err
 	}
 	v.Keys = len(cat.Keys())
 	v.Namespaces = cat.Namespaces()
 	v.Completion, err = s.completion(ctx, tenantID, project, cat, v.Locales)
 	if err != nil {
-		return TranslationProjectView{}, err
+		return TranslationProjectView{}, nil, err
 	}
-	return v, nil
+	return v, cat, nil
 }
 
 // completion is the share of keys carrying text in each enabled locale. A locale
@@ -235,10 +245,14 @@ func (s *Service) completion(ctx context.Context, tenantID, project string, cat 
 	// as shipped never does, and every manifest poll resolves the project.
 	var counts map[string]int
 	for _, l := range locales {
+		if slices.Contains(shipped, l) {
+			out[l] = 100
+			continue
+		}
 		// Per locale, not per source key: Latvian needs a zero form English never
 		// declares, so counting against English would read 100% with one missing.
 		total := len(cat.LocaleKeys(l))
-		if total == 0 || slices.Contains(shipped, l) {
+		if total == 0 {
 			out[l] = 100
 			continue
 		}
@@ -311,7 +325,8 @@ func (s *Service) CreateTranslationProject(ctx context.Context, tenantID, slug, 
 	if err := s.store.Translations().SaveProject(ctx, p, []string{i18n.SourceLocale}); err != nil {
 		return TranslationProjectView{}, err
 	}
-	return s.projectView(ctx, tenantID, slug, p)
+	v, _, err := s.projectView(ctx, tenantID, slug, p)
+	return v, err
 }
 
 // DeleteTranslationProject removes a tenant's project and everything in it. The
@@ -407,7 +422,7 @@ func (s *Service) SaveTranslationProject(ctx context.Context, tenantID, project,
 // TranslationKeys pages the project's keys as they stand in one locale.
 func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale, state, namespace, q string, pp store.PageParams) (store.Page[TranslationKeyView], error) {
 	var empty store.Page[TranslationKeyView]
-	proj, err := s.TranslationProject(ctx, tenantID, project)
+	proj, cat, err := s.projectAndCatalog(ctx, tenantID, project)
 	if err != nil {
 		return empty, err
 	}
@@ -425,10 +440,6 @@ func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale
 		byKey[o.Key] = o
 	}
 
-	cat, err := s.catalogFor(ctx, tenantID, project)
-	if err != nil {
-		return empty, err
-	}
 	// The whole chain, so what the editor shows is what a bundle would publish.
 	// The requested locale's rows are already in hand.
 	ov, err := s.overridesFor(ctx, tenantID, project, proj.FallbackLocale, i18n.SourceLocale)
@@ -448,15 +459,11 @@ func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale
 	for _, k := range keys {
 		source := cat.Source(k)
 		v := TranslationKeyView{
-			Key:          k,
-			Namespace:    i18n.Namespace(k),
-			Source:       source,
-			Value:        cat.Resolve(ov, locale, proj.FallbackLocale, k),
-			State:        TranslationDefault,
-			Placeholders: i18n.Placeholders(source),
-		}
-		if base, category, ok := i18n.SplitPlural(k); ok && cat.IsPluralBase(base) {
-			v.PluralBase, v.PluralCategory = base, category
+			Key:       k,
+			Namespace: i18n.Namespace(k),
+			Source:    source,
+			Value:     cat.Resolve(ov, locale, proj.FallbackLocale, k),
+			State:     TranslationDefault,
 		}
 		if o, ok := byKey[k]; ok {
 			v.State = TranslationCustom
@@ -470,6 +477,11 @@ func (s *Service) TranslationKeys(ctx context.Context, tenantID, project, locale
 		if !matchesTranslationFilter(v, cat, locale, state, q) {
 			continue
 		}
+		// Only for a row that survived the filters: most requests discard most keys.
+		if base, category, ok := i18n.SplitPlural(k); ok && cat.IsPluralBase(base) {
+			v.PluralBase, v.PluralCategory = base, category
+		}
+		v.Placeholders = i18n.Placeholders(source)
 		views = append(views, v)
 	}
 
@@ -500,17 +512,13 @@ func matchesTranslationFilter(v TranslationKeyView, cat *i18n.Catalog, locale, s
 
 // PutTranslationOverride writes a tenant's own text for one key.
 func (s *Service) PutTranslationOverride(ctx context.Context, tenantID, project, locale, key, value string, mayPublish bool) error {
-	proj, err := s.TranslationProject(ctx, tenantID, project)
+	proj, cat, err := s.projectAndCatalog(ctx, tenantID, project)
 	if err != nil {
 		return err
 	}
 	locale = i18n.Normalize(locale)
 	if !slices.Contains(proj.Locales, locale) {
 		return invalid("that language is not enabled for this project")
-	}
-	cat, err := s.catalogFor(ctx, tenantID, project)
-	if err != nil {
-		return err
 	}
 	// DeclaredFor, not Declared: a language's own plural category is writable even
 	// where English declares no such sibling.
@@ -549,12 +557,11 @@ func (s *Service) DeleteTranslationOverride(ctx context.Context, tenantID, proje
 	return s.autoPublish(ctx, tenantID, proj, "")
 }
 
-// DeclareTranslationKey adds a key to a tenant's own project, or rewords the
-// source of one already there — which is what flags its translations for review.
-// A plural declaration carries one source per category the source language has,
-// and lands as that many sibling keys.
+// DeclareTranslationKey adds a key, or rewords the source of one already there —
+// which is what flags its translations for review. A plural declaration carries
+// one source per source-language category and lands as that many siblings.
 func (s *Service) DeclareTranslationKey(ctx context.Context, tenantID, project, key, source string, plurals map[string]string) error {
-	proj, err := s.ownProject(ctx, tenantID, project)
+	proj, _, err := s.ownProject(ctx, tenantID, project)
 	if err != nil {
 		return err
 	}
@@ -608,15 +615,10 @@ func declaredRows(tenantID, project, key, source string, plurals map[string]stri
 	return rows, nil
 }
 
-// UndeclareTranslationKey removes a key and every translation of it. Naming a
-// plural's base removes all of its category siblings — a plural is one key to a
-// tenant, however many rows it takes.
+// UndeclareTranslationKey removes a key and every translation of it. A plural is
+// one key to a tenant, however many category rows it takes.
 func (s *Service) UndeclareTranslationKey(ctx context.Context, tenantID, project, key string) error {
-	proj, err := s.ownProject(ctx, tenantID, project)
-	if err != nil {
-		return err
-	}
-	cat, err := s.catalogFor(ctx, tenantID, project)
+	proj, cat, err := s.ownProject(ctx, tenantID, project)
 	if err != nil {
 		return err
 	}
@@ -639,15 +641,15 @@ func (s *Service) UndeclareTranslationKey(ctx context.Context, tenantID, project
 
 // ownProject loads a project the tenant declares the keys of. The platform
 // project's are the repo's (docs/adr/0003), so it is never one of these.
-func (s *Service) ownProject(ctx context.Context, tenantID, project string) (TranslationProjectView, error) {
-	proj, err := s.TranslationProject(ctx, tenantID, project)
+func (s *Service) ownProject(ctx context.Context, tenantID, project string) (TranslationProjectView, *i18n.Catalog, error) {
+	proj, cat, err := s.projectAndCatalog(ctx, tenantID, project)
 	if err != nil {
-		return proj, err
+		return proj, nil, err
 	}
 	if proj.Platform {
-		return proj, invalid("Sild's own keys are declared in its releases, not here")
+		return proj, nil, invalid("Sild's own keys are declared in its releases, not here")
 	}
-	return proj, nil
+	return proj, cat, nil
 }
 
 func (s *Service) autoPublish(ctx context.Context, tenantID string, proj TranslationProjectView, by string) error {
@@ -658,10 +660,9 @@ func (s *Service) autoPublish(ctx context.Context, tenantID string, proj Transla
 	return err
 }
 
-// ImportTranslations reads a file into one locale's drafts. dryRun reports what
-// would happen and writes nothing; createKeys admits keys the project does not
-// declare, and is off unless the caller asks. Both calls take the same path, so a
-// preview can never disagree with the write that follows.
+// ImportTranslations reads a file into one locale's drafts. A dry run reports what
+// would happen and writes nothing — the same path either way, so a preview cannot
+// disagree with the write.
 func (s *Service) ImportTranslations(
 	ctx context.Context, tenantID, project, locale string, format i18n.Format,
 	raw []byte, dryRun, createKeys, mayPublish bool,
@@ -670,7 +671,7 @@ func (s *Service) ImportTranslations(
 	if !i18n.KnownFormat(format) {
 		return empty, invalid("unsupported format " + string(format))
 	}
-	proj, err := s.TranslationProject(ctx, tenantID, project)
+	proj, cat, err := s.projectAndCatalog(ctx, tenantID, project)
 	if err != nil {
 		return empty, err
 	}
@@ -681,9 +682,8 @@ func (s *Service) ImportTranslations(
 	if createKeys && proj.Platform {
 		return empty, invalid("Sild's own keys are declared in its releases, not here")
 	}
-	// A key carries the English it was authored in, so only a source-language file
-	// can declare one: creating a key from a Latvian file would record Latvian as
-	// its source and flag every translation of it against the wrong text.
+	// A key carries the English it was authored in, so a Latvian file would record
+	// Latvian as its source and flag every translation against the wrong text.
 	if createKeys && locale != i18n.SourceLocale {
 		return empty, invalid("new keys can only be created from a " + i18n.SourceLocale + " file")
 	}
@@ -691,36 +691,23 @@ func (s *Service) ImportTranslations(
 	if err != nil {
 		return empty, invalid(err.Error())
 	}
-
-	cat, err := s.catalogFor(ctx, tenantID, project)
-	if err != nil {
-		return empty, err
-	}
-	existing, err := s.store.Translations().LocaleOverrides(ctx, tenantID, project, locale)
-	if err != nil {
-		return empty, err
-	}
-	held := make(map[string]string, len(existing))
-	for _, o := range existing {
-		held[o.Key] = o.Value
-	}
 	// What this locale renders today, which is what a row has to differ from to be
-	// worth writing. A row that merely restates the shipped text is skipped rather
-	// than frozen into an override — a tenant row exists only for a key the tenant
-	// actually changed, so re-importing an export changes nothing.
+	// worth writing: a row that merely restates the shipped text is skipped rather
+	// than frozen into an override, so re-importing an export changes nothing.
 	ov, err := s.overridesFor(ctx, tenantID, project, locale, proj.FallbackLocale, i18n.SourceLocale)
 	if err != nil {
 		return empty, err
 	}
+	held := ov[locale]
 
 	report := TranslationImportReport{
 		Project: project, Locale: locale, Format: string(format), DryRun: dryRun,
 	}
-	matcher := i18n.NewKeyMatcher(cat.LocaleKeys(locale))
-	for _, name := range sortedMapKeys(incoming) {
+	matcher := i18n.NewKeyMatcher(format, cat.LocaleKeys(locale))
+	for _, name := range slices.Sorted(maps.Keys(incoming)) {
 		value := strings.TrimSpace(incoming[name])
 		key, declared := matcher.Resolve(name)
-		row := TranslationImportRow{Key: key, Value: value}
+		row := TranslationImportRow{Key: key, Value: value, declared: declared}
 		switch {
 		case value == "":
 			row.Key, row.Status, row.Reason = name, ImportSkipped, "no text"
@@ -728,6 +715,7 @@ func (s *Service) ImportTranslations(
 			row.Key, row.Status, row.Reason = name, ImportSkipped, "unknown key"
 		case !declared:
 			row.Key, row.Status = name, ImportNew
+			report.KeysMade++
 		case cat.Resolve(ov, locale, proj.FallbackLocale, key) == value:
 			row.Status, row.Reason = ImportSkipped, "unchanged"
 		case held[key] == "":
@@ -735,10 +723,7 @@ func (s *Service) ImportTranslations(
 		default:
 			row.Status = ImportChanged
 		}
-		report.Rows = append(report.Rows, row)
-	}
-	for _, r := range report.Rows {
-		switch r.Status {
+		switch row.Status {
 		case ImportNew:
 			report.New++
 		case ImportChanged:
@@ -746,18 +731,19 @@ func (s *Service) ImportTranslations(
 		default:
 			report.Skipped++
 		}
+		report.Rows = append(report.Rows, row)
 	}
-	// The whole plan is checked before any of it is written, so a dry run refuses
-	// exactly what the write would refuse — and a file with one bad key late in it
-	// does not leave the earlier ones applied.
-	if err := checkImportPlan(report.Rows, matcher); err != nil {
+
+	// Checked before any of it is written, so a dry run refuses exactly what the
+	// write would refuse — and a file with one bad key late in it does not leave the
+	// earlier ones applied.
+	if err := checkImportPlan(report.Rows); err != nil {
 		return empty, err
 	}
-	report.KeysMade = countUndeclared(report.Rows, matcher)
 	if dryRun {
 		return report, nil
 	}
-	if err := s.applyImport(ctx, tenantID, project, locale, report.Rows, matcher, cat); err != nil {
+	if err := s.applyImport(ctx, tenantID, project, locale, report.Rows, cat); err != nil {
 		return empty, err
 	}
 	if !mayPublish {
@@ -768,12 +754,9 @@ func (s *Service) ImportTranslations(
 
 // checkImportPlan refuses a file that would create a key no route could address.
 // The same rule a declaration goes through, applied before anything is written.
-func checkImportPlan(rows []TranslationImportRow, matcher i18n.KeyMatcher) error {
+func checkImportPlan(rows []TranslationImportRow) error {
 	for _, r := range rows {
-		if r.Status == ImportSkipped {
-			continue
-		}
-		if _, declared := matcher.Resolve(r.Key); declared {
+		if r.Status == ImportSkipped || r.declared {
 			continue
 		}
 		if !validKey(r.Key) {
@@ -784,41 +767,31 @@ func checkImportPlan(rows []TranslationImportRow, matcher i18n.KeyMatcher) error
 	return nil
 }
 
-// countUndeclared is how many keys the import would declare — what a dry run
-// promises and applyImport then creates.
-func countUndeclared(rows []TranslationImportRow, matcher i18n.KeyMatcher) int {
-	n := 0
-	for _, r := range rows {
-		if r.Status == ImportSkipped {
-			continue
-		}
-		if _, declared := matcher.Resolve(r.Key); !declared {
-			n++
-		}
-	}
-	return n
-}
-
 // applyImport writes the rows a report says would change, declaring any key the
 // project does not have yet. The source of a key born this way is the text
 // itself: there is nothing else to write, and the tenant can reword it after.
 func (s *Service) applyImport(
 	ctx context.Context, tenantID, project, locale string,
-	rows []TranslationImportRow, matcher i18n.KeyMatcher, cat *i18n.Catalog,
+	rows []TranslationImportRow, cat *i18n.Catalog,
 ) error {
 	// A key the file spells like a category sibling is only a plural if the file
 	// carries more than one form of it; one key merely ending in "other" is not.
-	plural := pluralBasesInFile(rows)
+	written := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Status != ImportSkipped {
+			written = append(written, r.Key)
+		}
+	}
+	plural := i18n.PluralBases(written)
 	for _, r := range rows {
 		if r.Status == ImportSkipped {
 			continue
 		}
-		key, declared := matcher.Resolve(r.Key)
+		key := r.Key
 		// A key born here is written against its own text, so it is current rather
 		// than stale the moment it lands.
 		source := cat.Source(key)
-		if !declared {
-			key = r.Key
+		if !r.declared {
 			source = r.Value
 			base, _, isSibling := i18n.SplitPlural(key)
 			k := &models.TranslationKey{
@@ -840,46 +813,21 @@ func (s *Service) applyImport(
 	return nil
 }
 
-// pluralBasesInFile is the bases the file carries more than one category for.
-func pluralBasesInFile(rows []TranslationImportRow) map[string]bool {
-	seen := map[string][]string{}
-	for _, r := range rows {
-		if r.Status == ImportSkipped {
-			continue
-		}
-		if base, cat, ok := i18n.SplitPlural(r.Key); ok && !slices.Contains(seen[base], cat) {
-			seen[base] = append(seen[base], cat)
-		}
-	}
-	out := map[string]bool{}
-	for base, cats := range seen {
-		if len(cats) > 1 {
-			out[base] = true
-		}
-	}
-	return out
-}
-
-// ExportTranslations writes one locale out. What it carries is what the editor
-// shows: the whole resolved set, so a translator or a build gets every key rather
-// than only the ones somebody has touched.
+// ExportTranslations writes one locale out: the whole resolved set, so a
+// translator or a build gets every key rather than the ones somebody touched.
 func (s *Service) ExportTranslations(
 	ctx context.Context, tenantID, project, locale string, format i18n.Format,
 ) ([]byte, error) {
 	if !i18n.RenderableFormat(format) {
 		return nil, invalid("unsupported format " + string(format))
 	}
-	proj, err := s.TranslationProject(ctx, tenantID, project)
+	proj, cat, err := s.projectAndCatalog(ctx, tenantID, project)
 	if err != nil {
 		return nil, err
 	}
 	locale = i18n.Normalize(locale)
 	if !slices.Contains(proj.Locales, locale) {
 		return nil, invalid("that language is not enabled for this project")
-	}
-	cat, err := s.catalogFor(ctx, tenantID, project)
-	if err != nil {
-		return nil, err
 	}
 	ov, err := s.overridesFor(ctx, tenantID, project, locale, proj.FallbackLocale, i18n.SourceLocale)
 	if err != nil {
@@ -901,11 +849,13 @@ func (s *Service) ExportTranslations(
 	return out, nil
 }
 
-// TranslationDraftDiff is what publishing would change: every key whose draft
-// text differs from what the current release serves. Before a first release
+// TranslationDraftDiff is what publishing would change. Before a first release
 // everything drafted is a change, because nothing is live.
-func (s *Service) TranslationDraftDiff(ctx context.Context, tenantID, project string) (TranslationDraftDiff, error) {
-	proj, err := s.TranslationProject(ctx, tenantID, project)
+// locales, when given, narrows the diff to the languages the caller holds: a
+// translator scoped to one of ten must not cost ten bundle reads and ten
+// resolutions to be shown one.
+func (s *Service) TranslationDraftDiff(ctx context.Context, tenantID, project string, locales []string) (TranslationDraftDiff, error) {
+	proj, cat, err := s.projectAndCatalog(ctx, tenantID, project)
 	if err != nil {
 		return TranslationDraftDiff{}, err
 	}
@@ -920,9 +870,20 @@ func (s *Service) TranslationDraftDiff(ctx context.Context, tenantID, project st
 		}
 		ov[o.Locale][o.Key] = o.Value
 	}
-	cat, err := s.catalogFor(ctx, tenantID, project)
-	if err != nil {
-		return TranslationDraftDiff{}, err
+	// What the current release serves, in one read rather than one per language.
+	live := map[string]map[string]string{}
+	if proj.CurrentVersion != nil {
+		bundles, err := s.store.Translations().ReleaseBundles(ctx, tenantID, project, *proj.CurrentVersion)
+		if err != nil {
+			return TranslationDraftDiff{}, err
+		}
+		for _, b := range bundles {
+			var strs map[string]string
+			if err := json.Unmarshal(b.Strings, &strs); err != nil {
+				return TranslationDraftDiff{}, err
+			}
+			live[b.Locale] = strs
+		}
 	}
 
 	diff := TranslationDraftDiff{
@@ -930,14 +891,10 @@ func (s *Service) TranslationDraftDiff(ctx context.Context, tenantID, project st
 		NextVersion: nextVersion(proj.CurrentVersion),
 	}
 	for _, locale := range proj.Locales {
-		live := map[string]string{}
-		if proj.CurrentVersion != nil {
-			strs, err := s.TranslationBundle(ctx, tenantID, project, locale, *proj.CurrentVersion)
-			if err != nil && !errors.Is(err, ErrNotFound) {
-				return TranslationDraftDiff{}, err
-			}
-			live = strs
+		if len(locales) > 0 && !slices.Contains(locales, locale) {
+			continue
 		}
+		live := live[locale]
 		// The draft bundle, built exactly as publish would build it, so the preview
 		// is the release rather than a guess at it.
 		draft := cat.Bundle(ov, locale, proj.FallbackLocale)
@@ -966,15 +923,6 @@ func (s *Service) TranslationDraftDiff(ctx context.Context, tenantID, project st
 		return strings.Compare(a.Key, b.Key)
 	})
 	return diff, nil
-}
-
-func sortedMapKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
 }
 
 // PublishTranslations cuts a release: every enabled locale is materialized at

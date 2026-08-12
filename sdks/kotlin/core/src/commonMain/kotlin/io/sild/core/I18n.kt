@@ -265,17 +265,18 @@ class SildI18n internal constructor(
     }
 
     // lookup walks the published bundle, then this language's bundled text, then the
-    // source language's, for each candidate key in turn.
-    private fun lookup(key: String, vararg also: String): String {
-        for (k in listOf(key, *also)) {
-            val text = strings[k]
-                ?: I18N_DEFAULTS[locale]?.get(k)
-                ?: I18N_DEFAULTS[I18N_SOURCE_LOCALE]?.get(k)
-            if (text != null) return text
-        }
+    // source language's; alt is the plural's other form, where there is one.
+    private fun lookup(key: String, alt: String? = null): String {
+        val text = textFor(key) ?: alt?.let { textFor(it) }
+        if (text != null) return text
         onMissingKey?.invoke(key)
         return if (debug) key else ""
     }
+
+    private fun textFor(key: String): String? =
+        strings[key]
+            ?: I18N_DEFAULTS[locale]?.get(key)
+            ?: I18N_DEFAULTS[I18N_SOURCE_LOCALE]?.get(key)
 
     /** Render the language the host asks for, from this call on. Unknown tags are
      *  ignored, so a host may pass the device's setting through unchecked. */
