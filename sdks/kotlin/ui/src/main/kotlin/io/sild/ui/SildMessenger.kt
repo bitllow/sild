@@ -21,6 +21,7 @@ import io.sild.core.SildClient
 import io.sild.core.SildConfig
 import io.sild.core.SildHost
 import io.sild.core.SildStringStore
+import io.sild.core.installStringStore
 
 // SildRuntime holds the host-supplied config process-wide. The config carries a
 // TokenProvider (not parcelable), so the launcher stores it here and the messenger
@@ -51,8 +52,10 @@ object Sild {
      * way to reach. Without it the messenger still works and renders the text
      * bundled in the app until it has polled once.
      */
-    fun init(context: Context, config: SildConfig): SildMessenger =
-        init(config.copy(stringStore = config.stringStore ?: SildPreferences(context)))
+    fun init(context: Context, config: SildConfig): SildMessenger {
+        installStringStore(SildPreferences(context))
+        return init(config)
+    }
 
     // Push (§5.5). The host owns its FCM registration (ADR 0001) and hands the token
     // here; the work is SildHost's, in :core, so Android and iOS run one implementation.

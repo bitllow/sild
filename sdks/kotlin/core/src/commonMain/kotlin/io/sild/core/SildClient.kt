@@ -57,7 +57,6 @@ class SildClient internal constructor(
      *  frame; a published update is fetched off the boot path. */
     val i18n: SildI18n = SildI18n(
         api, cfg.locale,
-        downloads = I18nDownloads.forStore(cfg.stringStore),
         debug = cfg.debugStrings,
         onMissingKey = cfg.onMissingString,
     )
@@ -182,8 +181,7 @@ class SildClient internal constructor(
     private suspend fun refreshTranslations() {
         // The token names the tenant, so this is the first moment what a previous
         // session kept for them can be told apart from another tenant's.
-        i18n.adopt(api.tenant())
-        publishLocale()
+        if (i18n.adopt(api.tenant())) publishLocale()
         runCatching { api.setOwnLocale(i18n.locale) }
         i18n.refreshStaged()
     }

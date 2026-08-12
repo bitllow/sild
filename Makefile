@@ -25,7 +25,7 @@ web-build:
 # Regenerate the widget's bundled string defaults from backend/internal/i18n/locales.
 # `npm run build` runs this too; this target is for regenerating on its own.
 i18n:
-	cd web && $(USE_NODE) && node ../scripts/gen-i18n.mjs
+	cd web && $(USE_NODE) && node ../scripts/gen-plurals.mjs && node ../scripts/gen-i18n.mjs
 
 backend-build: ; $(MAKE) -C backend build
 backend-test:  ; $(MAKE) -C backend test

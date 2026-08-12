@@ -31,7 +31,10 @@ func (s RoleScope) NarrowsTranslations() bool {
 	return len(s.Projects) > 0 || len(s.Locales) > 0
 }
 
-// Allows reports whether a set dimension admits one value.
+// Allows reports whether a set dimension admits one value. An EMPTY set admits
+// nothing: a grant narrowed down to no projects is a grant that reaches none, which
+// is what revoking the last one has to mean. A scope that names no dimension at all
+// is a different thing — see NarrowsTranslations.
 func Allows(set []string, value string) bool {
 	for _, s := range set {
 		if s == ScopeAll || s == value {

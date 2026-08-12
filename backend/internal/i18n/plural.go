@@ -81,7 +81,8 @@ func Category(locale string, n int) string {
 		n = -n
 	}
 	mod10, mod100 := n%10, n%100
-	switch Family(locale) {
+	family := Family(locale)
+	switch family {
 	case "other":
 		return CatOther
 
@@ -92,7 +93,7 @@ func Category(locale string, n int) string {
 		return CatOther
 
 	case "romance", "romance_zero":
-		if n == 1 || (n == 0 && Family(locale) == "romance_zero") {
+		if n == 1 || (n == 0 && family == "romance_zero") {
 			return CatOne
 		}
 		// CLDR gives Romance a "many" for round millions, which is what a compact
@@ -217,33 +218,23 @@ func Category(locale string, n int) string {
 		}
 		return CatOther
 
-	case "polish":
-		// Polish's one is exactly one, where Russian's is any number ending in it.
-		if n == 1 {
-			return CatOne
+	// Three families share the "few" test and differ only in what one is and what
+	// everything else is: Polish's one is exactly one where Russian's is any number
+	// ending in it, and Serbo-Croatian has no many.
+	case "polish", "slavic", "serbocroatian":
+		one := mod10 == 1 && mod100 != 11
+		if family == "polish" {
+			one = n == 1
 		}
-		if mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) {
+		switch {
+		case one:
+			return CatOne
+		case mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14):
 			return CatFew
+		case family == "serbocroatian":
+			return CatOther
 		}
 		return CatMany
-
-	case "slavic":
-		if mod10 == 1 && mod100 != 11 {
-			return CatOne
-		}
-		if mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) {
-			return CatFew
-		}
-		return CatMany
-
-	case "serbocroatian":
-		if mod10 == 1 && mod100 != 11 {
-			return CatOne
-		}
-		if mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) {
-			return CatFew
-		}
-		return CatOther
 	}
 	if n == 1 {
 		return CatOne

@@ -338,10 +338,8 @@ func (s *Service) DeleteTranslationProject(ctx context.Context, tenantID, projec
 	if _, err := s.TranslationProject(ctx, tenantID, project); err != nil {
 		return err
 	}
-	// The grants naming it go first: a scope names projects by id, so a failure
-	// after the project was gone would hand a new project of the same name to
-	// whoever held the old one. Narrowed grants over a project still standing is
-	// the safe half of that pair.
+	// Grants first: a scope names projects by id, so a failure after the project
+	// was gone would hand a new one of the same name to whoever held the old.
 	if err := s.revokeProjectGrants(ctx, tenantID, project); err != nil {
 		return err
 	}
@@ -357,7 +355,7 @@ func (s *Service) revokeProjectGrants(ctx context.Context, tenantID, project str
 		return err
 	}
 	for _, a := range rows {
-		kept := without(a.Scope.Projects, project)
+		kept := slices.DeleteFunc(slices.Clone(a.Scope.Projects), func(p string) bool { return p == project })
 		if len(kept) == len(a.Scope.Projects) {
 			continue
 		}
@@ -371,7 +369,7 @@ func (s *Service) revokeProjectGrants(ctx context.Context, tenantID, project str
 		return err
 	}
 	for _, k := range keys {
-		kept := without(k.Scope.Projects, project)
+		kept := slices.DeleteFunc(slices.Clone(k.Scope.Projects), func(p string) bool { return p == project })
 		if len(kept) == len(k.Scope.Projects) {
 			continue
 		}
@@ -381,18 +379,6 @@ func (s *Service) revokeProjectGrants(ctx context.Context, tenantID, project str
 		}
 	}
 	return nil
-}
-
-// without drops one member, leaving "all" alone: a grant over every project is not
-// a grant that named this one.
-func without(set []string, value string) []string {
-	out := make([]string, 0, len(set))
-	for _, s := range set {
-		if s != value {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // validKey keeps a key addressable as a URL path segment — undeclaring one is a
@@ -630,9 +616,8 @@ func (s *Service) DeclareTranslationKey(ctx context.Context, tenantID, project, 
 	if err != nil {
 		return err
 	}
-	// A key that was ordinary and is now a plural — or the reverse — must not leave
-	// the other shape behind: the editor would list both, and a bundle would carry
-	// both.
+	// A key that was ordinary and is now a plural, or the reverse: the other shape
+	// would otherwise stay, and the editor would list both.
 	if err := s.removeShapesBut(ctx, tenantID, project, key, rows); err != nil {
 		return err
 	}
@@ -875,7 +860,7 @@ func (s *Service) applyImport(
 			written = append(written, r.Key)
 		}
 	}
-	plural := i18n.PluralBases(written)
+	plural := i18n.PluralBasesInFile(written)
 	for _, r := range rows {
 		if r.Status == ImportSkipped {
 			continue

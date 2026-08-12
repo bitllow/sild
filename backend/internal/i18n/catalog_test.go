@@ -376,3 +376,51 @@ func TestNoSurfaceRendersAKeyTheCatalogDoesNotDeclare(t *testing.T) {
 		}
 	}
 }
+
+// Sild's own plural keys are declared like a tenant's, so the one catalog nobody
+// can correct is not the one guessing from names.
+func TestSildsPluralKeysAreDeclaredAndReal(t *testing.T) {
+	cat := i18n.Platform()
+	// Every declared base carries the source language's categories.
+	for _, base := range i18n.DeclaredPluralKeys() {
+		if !cat.IsPluralBase(base) {
+			t.Errorf("%s is declared plural but the catalog does not hold it", base)
+		}
+		for _, c := range i18n.Categories(i18n.SourceLocale) {
+			if !cat.Declared(i18n.PluralKey(base, c)) {
+				t.Errorf("%s is declared plural but has no %s form", base, c)
+			}
+		}
+	}
+	// And nothing that merely looks plural was left undeclared.
+	for base := range i18n.PluralBasesInFile(cat.Keys()) {
+		if !cat.IsPluralBase(base) {
+			t.Errorf("%s has sibling keys but is not declared in plural-keys.json", base)
+		}
+	}
+}
+
+// A tenant's exported keys and Sild's own generated keys are named by one rule, or
+// the same key would be two identifiers depending on who generated it.
+func TestTheGeneratorNamesKeysTheWayGoDoes(t *testing.T) {
+	cat := i18n.Platform()
+	for _, path := range generatedKeyLists {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("generated file not present: %v", err)
+		}
+		src := string(raw)
+		if strings.HasSuffix(path, ".ts") {
+			continue // the TypeScript output is a union of key strings, not identifiers
+		}
+		for _, key := range cat.Keys() {
+			if base, _, ok := i18n.SplitPlural(key); ok && cat.IsPluralBase(base) {
+				key = base
+			}
+			if !strings.Contains(src, i18n.Ident(key)) {
+				t.Errorf("%s names %s something other than %s — the two ident rules disagree",
+					filepath.Base(path), key, i18n.Ident(key))
+			}
+		}
+	}
+}

@@ -20,6 +20,11 @@ interface SildStringStore {
 
 internal expect fun platformStringStore(): SildStringStore?
 
+/** Install where downloaded strings live, for a platform that has no ambient place
+ *  :core can reach. Android's is behind a Context, so `Sild.init(context, config)`
+ *  calls this; iOS needs nothing. */
+fun installStringStore(store: SildStringStore) = I18nDownloads.install(store)
+
 // tenantOf reads the tenant out of the user JWT the host's token provider minted.
 // Not verification — the server does that — only the discriminator a cache needs:
 // two tenants in one process must not read each other's wording.

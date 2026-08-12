@@ -80,8 +80,8 @@ func (r *translationRepo) DeleteProject(ctx context.Context, tenantID, project s
 				return err
 			}
 		}
-		// Grants naming this slug are deliberately left: an empty scope set means
-		// every project, so clearing a translator's only grant would widen it.
+		// The grants naming this slug are the domain's to narrow, before it calls
+		// this — a scope is not the translation repo's row to write.
 		return tx.Where("tenant_id = ? AND slug = ?", tenantID, project).
 			Delete(&models.TranslationProject{}).Error
 	})

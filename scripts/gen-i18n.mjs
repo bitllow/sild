@@ -30,14 +30,28 @@ const k = (s) => JSON.stringify(s).replaceAll("$", "\\$");
 const banner = (comment) =>
   `${comment} Generated from backend/internal/i18n by scripts/gen-i18n.mjs — run \`${COMMAND}\`. Do not edit.`;
 
-// A key's identifier: "widget.home.cta" → widgetHomeCta. Renaming a key removes
-// the member, so a stale lookup is a build error rather than a blank label.
+// A key's identifier: "widget.home.cta" → widgetHomeCta. Renaming a key removes the
+// member, so a stale lookup is a build error rather than a blank label.
+//
+// The same rule as i18n.Ident in Go, which names a TENANT's exported keys — the two
+// must agree, and a contract test holds them to each other.
 function ident(key) {
   const parts = key.split(/[.\-_]/).filter(Boolean);
-  return parts
-    .map((p, i) => (i === 0 ? p[0].toLowerCase() + p.slice(1) : p[0].toUpperCase() + p.slice(1)))
+  const out = parts
+    .map((p, i) => (i === 0 ? p : p[0].toUpperCase() + p.slice(1)))
     .join("");
+  if (!out) return "key";
+  if (/^[0-9]/.test(out) || RESERVED.has(out)) return "key" + out[0].toUpperCase() + out.slice(1);
+  return out;
 }
+
+// What a constant must not be called in Kotlin, Swift or TypeScript.
+const RESERVED = new Set(
+  ("as break case catch class const continue default do else enum extension false for fun guard if " +
+    "import in init interface internal is let new null nil object private protocol public return self " +
+    "static struct super switch this throw true try typealias typeof val var void when where while")
+    .split(" ")
+);
 
 // Which keys are plural: a base carrying more than one category sibling, which a
 // key merely ending in a category word cannot be.
