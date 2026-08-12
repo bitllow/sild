@@ -78,6 +78,11 @@ const (
 	TranslationsPublish Action = "translations.publish"
 	// TranslationsManage covers the project's locales and translator scopes.
 	TranslationsManage Action = "translations.manage"
+	// TranslationsImport and TranslationsExport are the file-shaped surface a build
+	// pipeline uses. Separate from the editor's read and write so a CI key can push
+	// and pull a project's strings without holding the editor.
+	TranslationsImport Action = "translations.import"
+	TranslationsExport Action = "translations.export"
 )
 
 // grant lists which principals hold an action — the only place roles map to
@@ -142,11 +147,15 @@ var capabilities = map[Action]grant{
 	WebhooksReadDeliveries: {adminPriv: true},
 	TeamManage:             {adminPriv: true},
 
-	TranslationsFetch:   {apiKey: true, user: true, admin: true},
-	TranslationsRead:    {admin: true, translator: true},
-	TranslationsWrite:   {adminPriv: true, translator: true},
-	TranslationsPublish: {adminPriv: true, translator: true},
+	TranslationsFetch: {apiKey: true, user: true, admin: true},
+	TranslationsRead:  {admin: true, translator: true},
+	TranslationsWrite: {adminPriv: true, translator: true},
+	// A build token publishes only when its own scope says so (`publish`), which is
+	// off unless the key was minted with it.
+	TranslationsPublish: {apiKey: true, adminPriv: true, translator: true},
 	TranslationsManage:  {adminPriv: true},
+	TranslationsImport:  {apiKey: true, adminPriv: true, translator: true},
+	TranslationsExport:  {apiKey: true, admin: true, translator: true},
 }
 
 // TranslatorActions is the translator role's whole capability set, so a test can

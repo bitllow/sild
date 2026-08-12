@@ -29,6 +29,12 @@ data class SildConfig(
      *  your app has its own language picker. [SildClient.setLocale] changes it
      *  after init without a reconnect. */
     val locale: String? = null,
+    /** Show the key itself when a string resolves to nothing, instead of a blank.
+     *  For development: a customer must never read a dotted key. */
+    val debugStrings: Boolean = false,
+    /** Called with any key that resolves to nothing in any language — a renamed or
+     *  misspelled key. Wire it to your error reporter. */
+    val onMissingString: ((String) -> Unit)? = null,
     /** Client-side ceiling (bytes) on a picked attachment before it is buffered into
      *  memory — a safety bound against OOM, NOT the business limit (the backend enforces
      *  the authoritative per-tenant max). Raise it to match a larger tenant limit. */

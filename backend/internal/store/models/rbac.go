@@ -24,6 +24,13 @@ type RoleScope struct {
 	Publish  bool     `json:"publish,omitempty"`
 }
 
+// NarrowsTranslations reports whether this scope limits translation work at all.
+// A scope naming neither projects nor locales narrows nothing, which is what an
+// API key minted before scopes existed carries.
+func (s RoleScope) NarrowsTranslations() bool {
+	return len(s.Projects) > 0 || len(s.Locales) > 0
+}
+
 // Allows reports whether a set dimension admits one value.
 func Allows(set []string, value string) bool {
 	for _, s := range set {

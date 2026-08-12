@@ -36,6 +36,7 @@ val LocalSildColors = staticCompositionLocalOf<SildColors> { error("SildColors n
 
 /** Looks up one of Sild's own strings in the active language. */
 typealias SildStrings = (String, Map<String, Any>?) -> String
+typealias SildPlurals = (String, Int, Map<String, Any>?) -> String
 
 // Defaults to the bundled English so a preview or a host embedding a screen
 // directly still renders words rather than keys. Built once: every label on the
@@ -44,9 +45,18 @@ private val bundled by lazy { bundledStrings() }
 
 val LocalSildStrings = staticCompositionLocalOf<SildStrings> { { key, vars -> bundled.t(key, vars) } }
 
+val LocalSildPlurals = staticCompositionLocalOf<SildPlurals> {
+    { base, count, vars -> bundled.tPlural(base, count, vars) }
+}
+
 /** The text for [key] in the language the messenger is rendering. */
 @Composable
 internal fun t(key: String, vars: Map<String, Any>? = null): String = LocalSildStrings.current(key, vars)
+
+/** The text for a count, in the plural category the active language uses for it. */
+@Composable
+internal fun tPlural(base: String, count: Int, vars: Map<String, Any>? = null): String =
+    LocalSildPlurals.current(base, count, vars)
 
 val LocalSildRadii = staticCompositionLocalOf { BrandTheme.radii(BrandConfig()) }
 

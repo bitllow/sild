@@ -1,11 +1,94 @@
 import type { TranslationBundle, TranslationManifest } from "../core/types";
-import { DEFAULTS, LOCALES, SOURCE_LOCALE } from "./catalog.generated";
+import {
+  DEFAULTS,
+  LOCALES,
+  PLURAL_DEFAULT_FAMILY,
+  PLURAL_FAMILIES,
+  PLURAL_LOCALES,
+  SOURCE_LOCALE,
+} from "./catalog.generated";
+import type { PluralKey, StringKey } from "./catalog.generated";
+
+export type { PluralKey, StringKey };
 
 /** The reserved project Sild's own strings live in. */
 export const PLATFORM_PROJECT = "sild";
 
 export type Vars = Record<string, string | number>;
-export type Translate = (key: string, vars?: Vars) => string;
+export type Translate = (key: StringKey, vars?: Vars) => string;
+/** A plural is addressed by its base key and a count, never by a sibling. */
+export type TranslatePlural = (base: PluralKey, count: number, vars?: Vars) => string;
+
+/** The category every language has, and the last readable text before giving up. */
+const OTHER = "other";
+
+/** Which categories a language has — Latvian's zero, Estonian's lack of one. */
+export function pluralCategories(locale: string): string[] {
+  const family = PLURAL_LOCALES[normalize(locale)] || PLURAL_DEFAULT_FAMILY;
+  return PLURAL_FAMILIES[family] || PLURAL_FAMILIES[PLURAL_DEFAULT_FAMILY];
+}
+
+/** The plural category for a count. Integers only, per ADR 0004. The families
+ *  here are the ones backend/internal/i18n/plurals.json names. */
+export function pluralCategory(locale: string, count: number): string {
+  const n = Math.abs(Math.trunc(count));
+  const m10 = n % 10;
+  const m100 = n % 100;
+  switch (PLURAL_LOCALES[normalize(locale)] || PLURAL_DEFAULT_FAMILY) {
+    case "other":
+      return OTHER;
+    case "french":
+      return n <= 1 ? "one" : OTHER;
+    case "czech":
+      if (n === 1) return "one";
+      return n >= 2 && n <= 4 ? "few" : OTHER;
+    case "romanian":
+      if (n === 1) return "one";
+      return n === 0 || (m100 >= 1 && m100 <= 19) ? "few" : OTHER;
+    case "lithuanian":
+      if (m100 >= 11 && m100 <= 19) return OTHER;
+      if (m10 === 1) return "one";
+      return m10 >= 2 && m10 <= 9 ? "few" : OTHER;
+    case "latvian":
+      if (m10 === 0 || (m100 >= 11 && m100 <= 19)) return "zero";
+      return m10 === 1 && m100 !== 11 ? "one" : OTHER;
+    case "hebrew":
+      if (n === 1) return "one";
+      return n === 2 ? "two" : OTHER;
+    case "slovenian":
+      if (m100 === 1) return "one";
+      if (m100 === 2) return "two";
+      return m100 === 3 || m100 === 4 ? "few" : OTHER;
+    case "arabic":
+      if (n === 0) return "zero";
+      if (n === 1) return "one";
+      if (n === 2) return "two";
+      if (m100 >= 3 && m100 <= 10) return "few";
+      return m100 >= 11 && m100 <= 99 ? "many" : OTHER;
+    case "welsh":
+      if (n === 0) return "zero";
+      if (n === 1) return "one";
+      if (n === 2) return "two";
+      if (n === 3) return "few";
+      return n === 6 ? "many" : OTHER;
+    case "irish":
+      if (n === 1) return "one";
+      if (n === 2) return "two";
+      if (n >= 3 && n <= 6) return "few";
+      return n >= 7 && n <= 10 ? "many" : OTHER;
+    case "maltese":
+      if (n === 1) return "one";
+      if (n === 0 || (m100 >= 2 && m100 <= 10)) return "few";
+      return m100 >= 11 && m100 <= 19 ? "many" : OTHER;
+    case "polish":
+      if (n === 1) return "one";
+      return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : "many";
+    case "slavic":
+      if (m10 === 1 && m100 !== 11) return "one";
+      return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : "many";
+  }
+  return n === 1 ? "one" : OTHER;
+}
 
 /** The client calls the i18n runtime needs — implemented by SildClient. */
 export interface TranslationSource {
@@ -106,6 +189,11 @@ export interface I18nOptions {
   appId?: string;
   /** Omit for surfaces with no backend (the Appearance preview): bundled text only. */
   source?: TranslationSource;
+  /** Called when a key resolves to nothing at all — a key no locale declares. */
+  onMissingKey?: (key: string) => void;
+  /** Show the key itself for an unresolved lookup. Off ships a blank instead, so
+   *  a customer never reads a dotted key. */
+  debug?: boolean;
 }
 
 /** The widget's active locale and strings. Renders from bundled defaults (or a
@@ -122,11 +210,15 @@ export class I18n {
   private explicit: boolean;
   private held: Held | null;
   private listeners = new Set<() => void>();
+  private onMissingKey?: (key: string) => void;
+  private debug: boolean;
 
   constructor(opts: I18nOptions = {}) {
     this.project = opts.project || PLATFORM_PROJECT;
     this.appId = opts.appId || "";
     this.source = opts.source;
+    this.onMissingKey = opts.onMissingKey;
+    this.debug = !!opts.debug;
     const named = opts.locale ? normalize(opts.locale) : "";
     // Honoured even when Sild ships no bundled text for it: the tenant may have
     // added the language, and its published bundle is what renders.
@@ -137,11 +229,26 @@ export class I18n {
     this.load();
   }
 
-  t: Translate = (key, vars) => {
-    const text =
-      this.strings[key] ?? DEFAULTS[this.locale]?.[key] ?? DEFAULTS[SOURCE_LOCALE][key] ?? key;
-    return interpolate(text, vars);
+  t: Translate = (key, vars) => interpolate(this.lookup(key), vars);
+
+  /** The text for a count, from the category this language uses for it. */
+  tPlural: TranslatePlural = (base, count, vars) => {
+    const category = pluralCategory(this.locale, count);
+    const text = this.lookup(`${base}.${category}`, `${base}.${OTHER}`);
+    return interpolate(text, { count, ...vars });
   };
+
+  // lookup walks the published bundle, then this language's bundled text, then
+  // the source language's. A key that resolves nowhere is a programming error:
+  // it is reported, and only a debug build puts it on screen.
+  private lookup(key: string, ...also: string[]): string {
+    for (const k of [key, ...also]) {
+      const text = this.strings[k] ?? DEFAULTS[this.locale]?.[k] ?? DEFAULTS[SOURCE_LOCALE][k];
+      if (text !== undefined) return text;
+    }
+    this.onMissingKey?.(key);
+    return this.debug ? key : "";
+  }
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);

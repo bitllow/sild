@@ -69,8 +69,22 @@ public final class SildModel {
         return strings.t(key: key, vars: vars.isEmpty ? nil : vars)
     }
 
+    /// The text for a count, in the plural category the active language uses for it.
+    /// `count` is available to the text as `{count}`.
+    public func tPlural(_ base: String, _ count: Int, _ vars: [String: Any] = [:]) -> String {
+        let strings = session?.client.i18n ?? bundled
+        return strings.tPlural(base: base, count: Int32(count), vars: vars.isEmpty ? nil : vars)
+    }
+
     /// Re-poll for published strings when the messenger comes back to the front.
     public func onForeground() { session?.client.onForeground() }
+
+    /// Apply the tenant's published strings now, rather than at the next start. For an
+    /// app that would rather its text moved on its own schedule than between launches.
+    public func refreshStrings() async {
+        guard let client = session?.client else { return }
+        try? await client.refreshStrings()
+    }
 
     /// Render [tag] from now on, for a host with its own language picker.
     public func setLocale(_ tag: String) { session?.client.setLocale(tag: tag) }

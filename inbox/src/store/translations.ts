@@ -1,9 +1,12 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import {
   adminApi,
+  type ApiDraftDiff,
+  type ApiImportReport,
   type ApiTranslationKey,
   type ApiTranslationProject,
   type ApiTranslationRelease,
+  type TranslationFormat,
   type TranslationKeyParams,
   type TranslationStateFilter,
 } from "@/api/admin";
@@ -88,6 +91,20 @@ export class TranslationsStore {
   releaseList = new Paged<ApiTranslationRelease>((r) => r.version);
   publishing = false;
 
+  /** What publishing would change. Null until the panel is opened for a project. */
+  diff: ApiDraftDiff | null = null;
+  diffLoading = false;
+
+  /** The file picked for import, its shape, and what the server says it would do.
+   *  A file is only applied through the report it produced, so what a tenant
+   *  approves and what is written cannot differ. */
+  importFile: { name: string; body: string } | null = null;
+  importFormat: TranslationFormat = "json";
+  importCreateKeys = false;
+  importReport: ApiImportReport | null = null;
+  importing = false;
+  exportFormat: TranslationFormat = "json";
+
   loaded = false;
   error: string | null = null;
 
@@ -97,6 +114,7 @@ export class TranslationsStore {
   saves = new Map<string, SaveState>();
 
   private keysSeq = 0;
+  private diffSeq = 0;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private completionTimer: ReturnType<typeof setTimeout> | null = null;
@@ -161,7 +179,7 @@ export class TranslationsStore {
         this.locale = first.locales[0] ?? first.fallback_locale;
       });
       if (!this.project) return;
-      await Promise.all([this.loadKeys(), this.loadReleases()]);
+      await Promise.all([this.loadKeys(), this.loadReleases(), this.loadDiff()]);
     } catch (e) {
       runInAction(() => {
         this.loaded = true;
@@ -260,7 +278,9 @@ export class TranslationsStore {
     this.namespace = "";
     this.keyList.clear();
     this.releaseList.clear();
-    void Promise.all([this.loadKeys(), this.loadReleases()]);
+    this.diff = null;
+    this.clearImport();
+    void Promise.all([this.loadKeys(), this.loadReleases(), this.loadDiff()]);
   };
 
   setSearch = (q: string) => {
@@ -336,7 +356,7 @@ export class TranslationsStore {
           row.state = "custom";
         }
       });
-      this.scheduleCompletionReload();
+      this.scheduleRecount();
     } catch (e) {
       runInAction(() => {
         this.saves.set(id, "failed");
@@ -369,17 +389,19 @@ export class TranslationsStore {
       return;
     }
     runInAction(() => this.saves.set(id, "saved"));
-    this.scheduleCompletionReload();
+    this.scheduleRecount();
     await this.refreshRow(project.id, locale, key);
   };
 
-  // The server counts completion, so a translated value only shows up in the figure
-  // after a re-read. Coalesced: a burst of edits is one extra request, not one each.
-  private scheduleCompletionReload = () => {
+  // The server counts completion and decides what is still unpublished, so an edit
+  // only shows up in either figure after a re-read. Coalesced: a burst of edits is
+  // one extra pair of requests, not one each.
+  private scheduleRecount = () => {
     if (this.completionTimer) clearTimeout(this.completionTimer);
     this.completionTimer = setTimeout(() => {
       this.completionTimer = null;
       void this.reloadProject();
+      void this.loadDiff();
     }, SAVE_DELAY);
   };
 
@@ -438,12 +460,14 @@ export class TranslationsStore {
   };
 
   // ─────────────────────────── declared keys ───────────────────────────
-  declareKey = async (key: string, source: string) => {
+  /** Declare a key. `plurals` gives the source language's forms instead of one
+   *  source, which is what makes the key a plural. */
+  declareKey = async (key: string, source: string, plurals?: Record<string, string>) => {
     const project = this.project;
     if (!project) return false;
     runInAction(() => (this.error = null));
     try {
-      await adminApi.declareTranslationKey(project.id, key.trim(), source.trim());
+      await adminApi.declareTranslationKey(project.id, key.trim(), source.trim(), plurals);
     } catch (e) {
       runInAction(() => (this.error = errorText(e)));
       return false;
@@ -553,6 +577,108 @@ export class TranslationsStore {
     await this.releaseList.loadMore((cursor) => adminApi.listTranslationReleases(project.id, cursor));
   };
 
+  // ─────────────────────────── drafts waiting to publish ───────────────────
+  /** What a publish would change. Read on demand: it compares every locale's draft
+   *  bundle against the live one, so it is not something to poll. */
+  loadDiff = async () => {
+    const project = this.project;
+    if (!project) return;
+    const seq = ++this.diffSeq;
+    runInAction(() => (this.diffLoading = true));
+    try {
+      const diff = await adminApi.translationDrafts(project.id);
+      runInAction(() => {
+        if (seq !== this.diffSeq) return;
+        this.diff = diff;
+      });
+    } catch (e) {
+      runInAction(() => {
+        if (seq !== this.diffSeq) return;
+        this.error = errorText(e);
+      });
+    } finally {
+      runInAction(() => {
+        if (seq === this.diffSeq) this.diffLoading = false;
+      });
+    }
+  };
+
+  get pendingCount(): number {
+    return this.diff?.rows.length ?? 0;
+  }
+
+  // ─────────────────────────── import and export ───────────────────────────
+  setImportFormat = (format: TranslationFormat) => {
+    this.importFormat = format;
+    this.importReport = null;
+  };
+
+  setImportCreateKeys = (on: boolean) => {
+    this.importCreateKeys = on;
+    // The flag changes what the file would do, so the report it produced is stale.
+    this.importReport = null;
+  };
+
+  setExportFormat = (format: TranslationFormat) => (this.exportFormat = format);
+
+  exportUrl = (): string | null => {
+    const project = this.project;
+    if (!project || !this.locale) return null;
+    return adminApi.translationExportUrl(project.id, this.locale, this.exportFormat);
+  };
+
+  /** Read a picked file and ask the server what it would do — never a write. */
+  previewImport = async (name: string, body: string) => {
+    runInAction(() => {
+      this.importFile = { name, body };
+      this.importReport = null;
+      this.error = null;
+    });
+    await this.runImport(true);
+  };
+
+  clearImport = () => {
+    this.importFile = null;
+    this.importReport = null;
+  };
+
+  /** Apply the file the report was taken from. */
+  applyImport = async () => {
+    if (!this.importReport || this.importReport.dry_run === false) return;
+    if (!(await this.runImport(false))) return;
+    runInAction(() => (this.importFile = null));
+    await Promise.all([this.reloadProject(), this.loadKeys(), this.loadDiff()]);
+  };
+
+  private runImport = async (dryRun: boolean) => {
+    const project = this.project;
+    const file = this.importFile;
+    if (!project || !file || !this.locale || this.importing) return false;
+    runInAction(() => {
+      this.importing = true;
+      this.error = null;
+    });
+    try {
+      const report = await adminApi.importTranslations(
+        project.id,
+        {
+          locale: this.locale,
+          format: this.importFormat,
+          dryRun,
+          createKeys: this.importCreateKeys,
+        },
+        file.body
+      );
+      runInAction(() => (this.importReport = report));
+      return true;
+    } catch (e) {
+      runInAction(() => (this.error = errorText(e)));
+      return false;
+    } finally {
+      runInAction(() => (this.importing = false));
+    }
+  };
+
   publish = () => this.runRelease((id) => adminApi.publishTranslationRelease(id));
 
   rollback = (version: number) => this.runRelease((id) => adminApi.rollbackTranslationRelease(id, version));
@@ -568,7 +694,7 @@ export class TranslationsStore {
     try {
       const released = await fn(project.id);
       runInAction(() => (project.current_version = released.version));
-      await Promise.all([this.loadReleases(), this.loadKeys(), this.reloadProject()]);
+      await Promise.all([this.loadReleases(), this.loadKeys(), this.reloadProject(), this.loadDiff()]);
     } catch (e) {
       runInAction(() => (this.error = errorText(e)));
     } finally {
@@ -587,6 +713,8 @@ export class TranslationsStore {
     this.releaseList.clear();
     this.drafts.clear();
     this.saves.clear();
+    this.diff = null;
+    this.clearImport();
     this.loaded = false;
     this.error = null;
   };

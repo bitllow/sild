@@ -105,6 +105,12 @@ const devProjects: NonNullable<import("@playwright/test").PlaywrightTestConfig["
     use: { ...devices["Desktop Chrome"], baseURL: BACKEND_URL },
   },
   {
+    // Pure functions from web/, checked against a repo table. No browser, no
+    // backend — this is the only JavaScript test runner the repo has.
+    name: "unit",
+    testDir: "./specs/unit",
+  },
+  {
     // Cross-surface flows open a second (widget) context themselves; the base
     // context is the authed agent inbox.
     name: "cross",

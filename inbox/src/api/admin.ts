@@ -143,6 +143,10 @@ export interface ApiKeyRecord {
   prefix: string;
   created_at: string;
   revoked_at?: string | null;
+  /** What the key is held to. Empty means tenant-wide. */
+  projects?: string[] | null;
+  locales?: string[] | null;
+  publish?: boolean;
 }
 
 export interface ApiKeyCreated {
@@ -375,6 +379,11 @@ export interface ApiTranslationKey {
   /** Draft text for the requested locale: the override if one exists, else the default. */
   value: string;
   state: ApiTranslationState;
+  /** Set on a plural's category sibling: the key it belongs to, and which form it is. */
+  plural_base: string;
+  plural_category: string;
+  /** The `{name}`s this text will have filled in. */
+  placeholders: string[] | null;
 }
 
 export interface TranslationKeyParams {
@@ -396,6 +405,45 @@ export interface ApiTranslationPublished {
   version: number;
   published_at: string;
   locales: string[];
+}
+
+/** A file shape an import accepts; `sheet` is export-only. */
+export type TranslationFormat = "json" | "csv" | "sheet" | "android" | "ios" | "ios-plurals";
+
+export interface ApiImportRow {
+  key: string;
+  status: "new" | "changed" | "skipped";
+  value: string;
+  reason: string;
+}
+
+/** What an import did, or — with dry_run — what it would do. */
+export interface ApiImportReport {
+  project: string;
+  locale: string;
+  format: string;
+  dry_run: boolean;
+  new: number;
+  changed: number;
+  skipped: number;
+  keys_created: number;
+  rows: ApiImportRow[];
+}
+
+export interface ApiDraftRow {
+  locale: string;
+  key: string;
+  /** What the current release serves; empty for a key that is new since it. */
+  live: string;
+  draft: string;
+}
+
+/** What publishing would change — the preview before approving a release. */
+export interface ApiDraftDiff {
+  project: string;
+  version: number | null;
+  next_version: number;
+  rows: ApiDraftRow[];
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────
@@ -479,7 +527,10 @@ export const adminApi = {
     collectAll<ApiKeyRecord>((cursor) =>
       api.get<ApiPage<ApiKeyRecord>>(`/api-keys${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
     ),
-  createApiKey: (label: string) => api.post<ApiKeyCreated>("/api-keys", { label }),
+  /** A scope holds the key to those translation projects and languages — a build
+   *  token. Omit it for a tenant-wide key. */
+  createApiKey: (label: string, scope?: { projects?: string[]; locales?: string[]; publish?: boolean }) =>
+    api.post<ApiKeyCreated>("/api-keys", { label, ...(scope ?? {}) }),
   revokeApiKey: (id: string) => api.del<void>(`/api-keys/${id}`),
 
   // ── Settings: webhooks ────────────────────────────────────────────────
@@ -546,8 +597,12 @@ export const adminApi = {
     api.del<void>(`/translations/projects/${encodeURIComponent(project)}`),
 
   // A key is the tenant's declaration; the values under it are its translations.
-  declareTranslationKey: (project: string, key: string, source: string) =>
-    api.post<void>(`/translations/projects/${encodeURIComponent(project)}/declarations`, { key, source }),
+  declareTranslationKey: (project: string, key: string, source: string, plurals?: Record<string, string>) =>
+    api.post<void>(`/translations/projects/${encodeURIComponent(project)}/declarations`, {
+      key,
+      source,
+      ...(plurals ? { plurals } : {}),
+    }),
   undeclareTranslationKey: (project: string, key: string) =>
     api.del<void>(
       `/translations/projects/${encodeURIComponent(project)}/declarations/${encodeURIComponent(key)}`
@@ -589,6 +644,33 @@ export const adminApi = {
     api.post<ApiTranslationPublished>(
       `/translations/projects/${encodeURIComponent(project)}/releases/${version}/rollback`
     ),
+
+  /** What a publish would change, per locale. */
+  translationDrafts: (project: string) =>
+    api.get<ApiDraftDiff>(`/translations/projects/${encodeURIComponent(project)}/drafts`),
+
+  /** The body IS the file. `dryRun` reports without writing; the same call without
+   *  it writes exactly what the report said. */
+  importTranslations: (
+    project: string,
+    opts: { locale: string; format: TranslationFormat; dryRun?: boolean; createKeys?: boolean },
+    file: string
+  ) => {
+    const q = new URLSearchParams({ locale: opts.locale, format: opts.format });
+    if (opts.dryRun) q.set("dry_run", "1");
+    if (opts.createKeys) q.set("create_keys", "1");
+    return api.postFile<ApiImportReport>(
+      `/translations/projects/${encodeURIComponent(project)}/import?${q}`,
+      file,
+      opts.format === "json" ? "application/json" : "text/plain"
+    );
+  },
+
+  /** Where a browser downloads an export from. Same-origin, so the session cookie
+   *  rides along and no token has to be handled here. */
+  translationExportUrl: (project: string, locale: string, format: TranslationFormat) =>
+    `/v1/translations/projects/${encodeURIComponent(project)}/export?` +
+    new URLSearchParams({ locale, format }),
 
   // ── Settings: appearance (§8) — brands saved as one staged set ─────────
   getBrands: () => api.getVersioned<ApiBrands>("/brands"),

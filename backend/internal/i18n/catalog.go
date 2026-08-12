@@ -22,6 +22,11 @@ const PlatformProject = "sild"
 // fallback before the key itself.
 const SourceLocale = "en"
 
+// CatalogVersion is the SDK line this key set belongs to, reported by the manifest
+// so a tenant developer can tell what a bundle targets before upgrading. It moves
+// with the native SDK version — a contract test holds the two together.
+const CatalogVersion = "0.1.2"
+
 //go:embed locales/*.json
 var localeFS embed.FS
 
@@ -30,6 +35,10 @@ type Catalog struct {
 	byLocale map[string]map[string]string
 	locales  []string
 	keys     []string
+	// pluralBases are the keys whose text is a set of category siblings. A
+	// language's own categories are then filled in per locale, so Latvian is asked
+	// for zero even though English never declares one.
+	pluralBases map[string]bool
 }
 
 var platform = sync.OnceValue(func() *Catalog {
@@ -72,13 +81,15 @@ func load() (*Catalog, error) {
 	}
 	slices.Sort(c.locales)
 	slices.Sort(c.keys)
+	c.pluralBases = derivePluralBases(c.keys)
 	return c, nil
 }
 
 // NewCatalog builds a catalog whose only shipped locale is the source one — the
 // shape a tenant-owned project has, where the declared keys are the sources and
-// every other language arrives as an override.
-func NewCatalog(sources map[string]string) *Catalog {
+// every other language arrives as an override. pluralBases are the keys the
+// tenant declared plural; with none given they are read off the key names.
+func NewCatalog(sources map[string]string, pluralBases ...string) *Catalog {
 	c := &Catalog{
 		byLocale: map[string]map[string]string{SourceLocale: sources},
 		locales:  []string{SourceLocale},
@@ -88,7 +99,30 @@ func NewCatalog(sources map[string]string) *Catalog {
 		c.keys = append(c.keys, k)
 	}
 	slices.Sort(c.keys)
+	c.pluralBases = derivePluralBases(c.keys)
+	for _, b := range pluralBases {
+		c.pluralBases[b] = true
+	}
 	return c
+}
+
+// derivePluralBases reads plural keys off the source key set: a base is plural
+// when it carries more than one category, which one key merely ending in a
+// category word cannot.
+func derivePluralBases(keys []string) map[string]bool {
+	seen := map[string][]string{}
+	for _, k := range keys {
+		if base, cat, ok := SplitPlural(k); ok && !slices.Contains(seen[base], cat) {
+			seen[base] = append(seen[base], cat)
+		}
+	}
+	out := map[string]bool{}
+	for base, cats := range seen {
+		if len(cats) > 1 {
+			out[base] = true
+		}
+	}
+	return out
 }
 
 // Locales returns every locale the platform ships, sorted.
@@ -96,6 +130,17 @@ func (c *Catalog) Locales() []string { return slices.Clone(c.locales) }
 
 // Keys returns every declared key, sorted.
 func (c *Catalog) Keys() []string { return slices.Clone(c.keys) }
+
+// KeysIn returns the keys one locale's file actually declares, sorted — what a
+// contract test compares against the keys that locale ought to carry.
+func (c *Catalog) KeysIn(locale string) []string {
+	out := make([]string, 0, len(c.byLocale[Normalize(locale)]))
+	for k := range c.byLocale[Normalize(locale)] {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
 
 // Namespaces returns every grouping prefix in use, sorted.
 func (c *Catalog) Namespaces() []string {
@@ -118,13 +163,62 @@ func Namespace(key string) string {
 	return ""
 }
 
-// Source returns the English a key was authored with.
-func (c *Catalog) Source(key string) string { return c.byLocale[SourceLocale][key] }
+// Source returns the English a key was authored with. A plural sibling English
+// does not have — Latvian's zero — sources from the base's other form, which is
+// what a translator is working from.
+func (c *Catalog) Source(key string) string {
+	if v, ok := c.byLocale[SourceLocale][key]; ok {
+		return v
+	}
+	if base, _, ok := SplitPlural(key); ok && c.pluralBases[base] {
+		return c.byLocale[SourceLocale][PluralKey(base, CatOther)]
+	}
+	return ""
+}
 
 // Declared reports whether the key exists in the platform project.
 func (c *Catalog) Declared(key string) bool {
 	_, ok := c.byLocale[SourceLocale][key]
 	return ok
+}
+
+// DeclaredFor reports whether a locale has this key to translate. It admits the
+// plural siblings the language itself needs: a Latvian zero form is writable
+// even though English declares no such key.
+func (c *Catalog) DeclaredFor(locale, key string) bool {
+	if c.Declared(key) {
+		return true
+	}
+	base, cat, ok := SplitPlural(key)
+	return ok && c.pluralBases[base] && slices.Contains(Categories(locale), cat)
+}
+
+// IsPluralBase reports whether a key's text is a set of category siblings.
+func (c *Catalog) IsPluralBase(base string) bool { return c.pluralBases[base] }
+
+// LocaleKeys is every key as it exists for one language: ordinary keys as
+// declared, and each plural base expanded into exactly that language's
+// categories. This is what the editor lists and what a bundle carries.
+func (c *Catalog) LocaleKeys(locale string) []string {
+	cats := Categories(locale)
+	expanded := map[string]bool{}
+	out := make([]string, 0, len(c.keys))
+	for _, k := range c.keys {
+		base, _, ok := SplitPlural(k)
+		if !ok || !c.pluralBases[base] {
+			out = append(out, k)
+			continue
+		}
+		if expanded[base] {
+			continue
+		}
+		expanded[base] = true
+		for _, cat := range cats {
+			out = append(out, PluralKey(base, cat))
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Default returns the shipped text for a key in a locale.
@@ -142,15 +236,24 @@ type Overrides map[string]map[string]string
 // locale a tenant override beats the shipped default, so a fully translated
 // fallback never outranks the language actually asked for.
 func (c *Catalog) Resolve(ov Overrides, locale, fallback, key string) string {
+	// A category the language has but the text does not reads as the other form
+	// rather than falling out of the language: an untranslated Latvian zero is
+	// better Latvian than English.
+	tries := []string{key}
+	if base, cat, ok := SplitPlural(key); ok && c.pluralBases[base] && cat != CatOther {
+		tries = append(tries, PluralKey(base, CatOther))
+	}
 	for _, l := range []string{Normalize(locale), Normalize(fallback), SourceLocale} {
 		if l == "" {
 			continue
 		}
-		if v, ok := ov[l][key]; ok && v != "" {
-			return v
-		}
-		if v, ok := c.Default(l, key); ok && v != "" {
-			return v
+		for _, k := range tries {
+			if v, ok := ov[l][k]; ok && v != "" {
+				return v
+			}
+			if v, ok := c.Default(l, k); ok && v != "" {
+				return v
+			}
 		}
 	}
 	return key
@@ -160,8 +263,9 @@ func (c *Catalog) Resolve(ov Overrides, locale, fallback, key string) string {
 // from. Keys missing in the locale resolve through the same chain, so a bundle
 // is always complete and a client never has to fall back on its own.
 func (c *Catalog) Bundle(ov Overrides, locale, fallback string) map[string]string {
-	out := make(map[string]string, len(c.keys))
-	for _, k := range c.keys {
+	keys := c.LocaleKeys(locale)
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
 		out[k] = c.Resolve(ov, locale, fallback, k)
 	}
 	return out

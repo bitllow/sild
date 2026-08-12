@@ -13,6 +13,8 @@
   "widget.composer.tooLarge": "Fail on liiga suur (kuni {mb} MB).",
   "widget.composer.unnamedFile": "manus",
   "widget.composer.uploading": "Üleslaadimine…",
+  "widget.home.agentsOnline.one": "{count} agent võrgus",
+  "widget.home.agentsOnline.other": "{count} agenti võrgus",
   "widget.home.cta": "Saada meile sõnum",
   "widget.home.directChat": "Otsevestlus",
   "widget.home.newConversation": "Uus vestlus",

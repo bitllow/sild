@@ -44,6 +44,8 @@ func TestRawBodyRoutesDeclareTheirOwnCap(t *testing.T) {
 	raw := map[string]int64{
 		"POST /v1/email/inbound":           middleware.BodyLimitEmail,
 		"PUT /v1/uploads/local/*objectKey": middleware.BodyLimitUpload,
+		// The body of an import IS the translation file.
+		"POST /v1/translations/projects/:project/import": middleware.BodyLimitImport,
 	}
 	for _, r := range routeManifest() {
 		want, ok := raw[r.Method+" "+r.Path]

@@ -86,6 +86,10 @@ public struct SildMessenger: View {
             _ = model.state.stringsRevision
             return model.t(key, vars)
         })
+        .environment(\.sildPlurals, { [model] base, count, vars in
+            _ = model.state.stringsRevision
+            return model.tPlural(base, Int(count), vars)
+        })
         .preferredColorScheme(style.preferredScheme)
         .onAppear {
             if case let .conversation(id) = target {

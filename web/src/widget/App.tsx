@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { BrandConfig, PendingAttachment, WidgetConversation, WidgetState } from "../core/types";
 import type { WidgetClient } from "../core/client";
-import type { I18n, Translate } from "../i18n";
+import type { I18n, Translate, TranslatePlural } from "../i18n";
 import { LAUNCHER_ICON, parseTopics, type WidgetMode } from "./theme";
 
 // Repaint on every notification from the source — new client state, or a
@@ -19,6 +19,11 @@ function useClientState(client: WidgetClient): WidgetState {
 function useTranslate(i18n: I18n): Translate {
   useSubscribed(i18n);
   return i18n.t;
+}
+
+function usePlural(i18n: I18n): TranslatePlural {
+  useSubscribed(i18n);
+  return i18n.tPlural;
 }
 
 // ── icons ──────────────────────────────────────────────────────────────────
@@ -148,6 +153,7 @@ export function App({ client, config, i18n, conversationId, name, mode = "live",
   const started = useRef(false);
   const state = useClientState(client);
   const t = useTranslate(i18n);
+  const tp = usePlural(i18n);
   const [draft, setDraft] = useState(false);
   const recorded = useRef("");
 
@@ -241,6 +247,7 @@ export function App({ client, config, i18n, conversationId, name, mode = "live",
               client={client}
               config={config}
               t={t}
+              tp={tp}
               name={name}
               state={state}
               preview={preview}
@@ -258,14 +265,15 @@ export function App({ client, config, i18n, conversationId, name, mode = "live",
 }
 
 // TeamHeader renders the "agents online" row shown on Home when showTeam is on.
-function TeamHeader() {
+function TeamHeader({ tp }: { tp: TranslatePlural }) {
+  const online = 2;
   return (
     <div class="team">
       <div class="stack">
         <span class="tav" style={{ background: "#7C9CF5" }}>E</span>
         <span class="tav" style={{ background: "#E58A6B" }}>M</span>
       </div>
-      <span class="online">2 agents online</span>
+      <span class="online">{tp("widget.home.agentsOnline", online)}</span>
     </div>
   );
 }
@@ -274,6 +282,7 @@ function Home({
   client,
   config,
   t,
+  tp,
   name,
   state,
   preview,
@@ -282,6 +291,7 @@ function Home({
   client: WidgetClient;
   config: BrandConfig;
   t: Translate;
+  tp: TranslatePlural;
   name?: string;
   state: WidgetState;
   preview: boolean;
@@ -307,7 +317,7 @@ function Home({
           </span>
           {/* sound + close live in the shared panel-level cluster now */}
         </div>
-        {config.showTeam && <TeamHeader />}
+        {config.showTeam && <TeamHeader tp={tp} />}
         <h1>{config.heading}</h1>
         {config.sub && <p>{config.sub}</p>}
       </div>

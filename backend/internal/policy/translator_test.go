@@ -25,6 +25,8 @@ func everything() models.RoleScope {
 func TestATranslatorHoldsExactlyTheTranslationCapabilities(t *testing.T) {
 	want := []policy.Action{
 		policy.PrincipalRead,
+		policy.TranslationsExport,
+		policy.TranslationsImport,
 		policy.TranslationsPublish,
 		policy.TranslationsRead,
 		policy.TranslationsWrite,

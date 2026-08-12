@@ -21,10 +21,14 @@ type TranslationProject struct {
 // TranslationKey is one string a tenant-owned project declares: the key and the
 // source text every translation of it is written against.
 type TranslationKey struct {
-	TenantID  string `gorm:"primaryKey;size:40"`
-	Project   string `gorm:"primaryKey;size:64"`
-	Key       string `gorm:"primaryKey;size:255;column:string_key"`
-	Source    string `gorm:"type:text"`
+	TenantID string `gorm:"primaryKey;size:40"`
+	Project  string `gorm:"primaryKey;size:64"`
+	Key      string `gorm:"primaryKey;size:255;column:string_key"`
+	Source   string `gorm:"type:text"`
+	// Plural marks a category sibling, declared rather than read off the key name:
+	// the editor has to offer a language's categories for a key nothing has
+	// translated yet (docs/adr/0004).
+	Plural    bool
 	UpdatedAt time.Time
 }
 

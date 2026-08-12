@@ -259,17 +259,20 @@ func (s *Service) ingest(ctx context.Context, tenantID string, in mail.InboundEm
 // original subject ("Re: …") so the sender's response threads back by
 // sender + subject — no token needed (§6.2).
 //
-// An inbound sender is an address and nothing else, so no locale is recorded for
-// them; the text resolves at the tenant's fallback language.
+// The language is whatever Sild has recorded for that address from a client
+// session; an address it has only ever seen over mail has none, and the text
+// resolves at the tenant's fallback language.
 func (s *Service) sendAutoReply(ctx context.Context, cfg *models.TenantEmailConfig, convID, to string) {
 	if to == "" {
 		return
 	}
-	blank := s.ResolveText(ctx, cfg.TenantID, "", "email.autoReply.subject")
+	locales, _ := s.store.Contacts().Locales(ctx, cfg.TenantID, []string{to})
+	locale := locales[to]
+	blank := s.ResolveText(ctx, cfg.TenantID, locale, "email.autoReply.subject")
 	out := mail.OutboundEmail{
 		To: to, FromName: cfg.FromName, FromAddress: cfg.FromAddress,
 		Subject: blank,
-		Body:    s.ResolveText(ctx, cfg.TenantID, "", "email.autoReply.body"),
+		Body:    s.ResolveText(ctx, cfg.TenantID, locale, "email.autoReply.body"),
 	}
 	if t, err := s.store.Email().Get(ctx, cfg.TenantID, convID); err == nil {
 		out.Subject = replySubject(t.Subject, blank)
@@ -378,15 +381,20 @@ func (s *Service) maybeSendOutboundEmail(ctx context.Context, tenantID, convID s
 	}
 	cfg, _ := s.store.Tenants().GetEmailConfig(ctx, tenantID)
 	thread, _ := s.store.Email().Get(ctx, tenantID, convID)
-	blank := s.ResolveText(ctx, tenantID, "", "email.autoReply.subject")
-	subject, replyTo := blank, ""
-	if thread != nil {
-		subject = replySubject(thread.Subject, blank)
-		if cfg != nil {
-			replyTo = replyToWithToken(cfg.FromAddress, thread.ThreadToken)
-		}
+	// The language each recipient reads, the way the push fan-out resolves it. A
+	// recipient Sild has never seen on a client has none, and gets the tenant's
+	// fallback language.
+	locales, _ := s.store.Contacts().Locales(ctx, tenantID, recipients)
+	replyTo := ""
+	if thread != nil && cfg != nil {
+		replyTo = replyToWithToken(cfg.FromAddress, thread.ThreadToken)
 	}
 	for _, to := range recipients {
+		blank := s.ResolveText(ctx, tenantID, locales[to], "email.autoReply.subject")
+		subject := blank
+		if thread != nil {
+			subject = replySubject(thread.Subject, blank)
+		}
 		out := mail.OutboundEmail{To: to, Subject: subject, Body: msg.Body, ReplyTo: replyTo}
 		if cfg != nil {
 			out.FromName, out.FromAddress = cfg.FromName, cfg.FromAddress

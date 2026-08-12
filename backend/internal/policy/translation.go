@@ -7,14 +7,29 @@ import (
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
+// translationActions is the whole translation surface, so a credential can be
+// held to it. Listed rather than derived from the name: an action's capability is
+// never inferred from a string here.
+var translationActions = []Action{
+	TranslationsFetch, TranslationsRead, TranslationsWrite,
+	TranslationsPublish, TranslationsManage, TranslationsImport, TranslationsExport,
+	PrincipalRead,
+}
+
+// IsTranslationAction reports whether an action is part of that surface.
+// PrincipalRead is included: a credential that cannot ask who it is cannot report a
+// useful error.
+func IsTranslationAction(a Action) bool { return slices.Contains(translationActions, a) }
+
 // AuthorizeTranslation decides a translation action against one project and
-// locale. Locale is empty for project-wide actions. Only the translator role
-// carries a scope; every other role reaching the action is tenant-wide.
+// locale. Locale is empty for project-wide actions. A translator's grant and a
+// scoped API key narrow here; every other role reaching the action is
+// tenant-wide.
 func AuthorizeTranslation(p *principal.Principal, a Action, project, locale string) error {
 	if err := Authorize(p, a, ResourceAttrs{}); err != nil {
 		return err
 	}
-	scope, ok := p.ScopeOf(models.PlatformTranslator)
+	scope, ok := p.TranslationScope()
 	if !ok || holdsWithoutTranslator(p, a) {
 		return nil
 	}
@@ -47,7 +62,7 @@ func MayPublish(p *principal.Principal, project string) bool {
 // it filters at all — a translator granted one project must land on it and must
 // not learn the others exist.
 func TranslationNarrowing(p *principal.Principal, a Action) (models.RoleScope, bool) {
-	scope, ok := p.ScopeOf(models.PlatformTranslator)
+	scope, ok := p.TranslationScope()
 	if !ok || holdsWithoutTranslator(p, a) {
 		return models.RoleScope{}, false
 	}

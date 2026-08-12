@@ -14,6 +14,7 @@ import (
 	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
+	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/storage"
 	"github.com/bitllow/sild/backend/internal/webasset"
@@ -99,7 +100,26 @@ func (h *Handler) authChain(r routeSpec) []gin.HandlerFunc {
 	if roles := r.roles(); len(roles) > 0 {
 		guard = append(guard, middleware.RequireRole(roles...))
 	}
+	// A scoped API key is a build token and reaches the translation surface only.
+	// Policy refuses it too, but a key-only route (minting a user token) takes the
+	// credential kind AS its authorization and asks policy nothing — so the bound
+	// is derived from the route's declaration here as well.
+	if !slices.ContainsFunc(r.Actions, policy.IsTranslationAction) {
+		guard = append(guard, refuseBuildTokens)
+	}
 	return guard
+}
+
+// refuseBuildTokens turns away a translation-scoped API key. Nothing else is
+// affected: an unscoped key is the tenant's own backend credential.
+func refuseBuildTokens(c *gin.Context) {
+	if middleware.Get(c).IsBuildToken() {
+		httpx.Error(c, http.StatusForbidden, "forbidden",
+			"this key is held to a translation project")
+		c.Abort()
+		return
+	}
+	c.Next()
 }
 
 // credentialGuard maps the declared principal kinds onto the middleware that

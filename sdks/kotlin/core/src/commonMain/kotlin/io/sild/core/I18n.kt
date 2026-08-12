@@ -16,6 +16,9 @@ data class TranslationManifest(
     val project: String = "",
     val fallback_locale: String = "",
     val locales: Map<String, Int> = emptyMap(),
+    /** The SDK line Sild's own key set belongs to, so a host can tell what the
+     *  bundles it is serving target. Empty for a tenant's own project. */
+    val sdk_version: String = "",
 )
 
 /** GET /v1/translations/bundle → one published locale in full. */
@@ -68,6 +71,99 @@ fun normalizeLocale(tag: String?): String {
     return (if (i > 0) t.substring(0, i) else t).lowercase()
 }
 
+/** The category every language has, and the last readable text before giving up. */
+private const val CAT_OTHER = "other"
+
+/** Which categories a language has — Latvian's zero, Estonian's lack of one. */
+fun pluralCategories(locale: String): List<String> {
+    val family = I18N_PLURAL_LOCALES[normalizeLocale(locale)] ?: I18N_PLURAL_DEFAULT_FAMILY
+    return I18N_PLURAL_FAMILIES[family] ?: I18N_PLURAL_FAMILIES.getValue(I18N_PLURAL_DEFAULT_FAMILY)
+}
+
+/** The plural category for a count. Integers only, per ADR 0004. The families here
+ *  are the ones backend/internal/i18n/plurals.json names. */
+fun pluralCategory(locale: String, count: Int): String {
+    val n = if (count < 0) -count else count
+    val m10 = n % 10
+    val m100 = n % 100
+    return when (I18N_PLURAL_LOCALES[normalizeLocale(locale)] ?: I18N_PLURAL_DEFAULT_FAMILY) {
+        "other" -> CAT_OTHER
+        "french" -> if (n <= 1) "one" else CAT_OTHER
+        "czech" -> when {
+            n == 1 -> "one"
+            n in 2..4 -> "few"
+            else -> CAT_OTHER
+        }
+        "romanian" -> when {
+            n == 1 -> "one"
+            n == 0 || m100 in 1..19 -> "few"
+            else -> CAT_OTHER
+        }
+        "lithuanian" -> when {
+            m100 in 11..19 -> CAT_OTHER
+            m10 == 1 -> "one"
+            m10 in 2..9 -> "few"
+            else -> CAT_OTHER
+        }
+        "latvian" -> when {
+            m10 == 0 || m100 in 11..19 -> "zero"
+            m10 == 1 && m100 != 11 -> "one"
+            else -> CAT_OTHER
+        }
+        "hebrew" -> when {
+            n == 1 -> "one"
+            n == 2 -> "two"
+            else -> CAT_OTHER
+        }
+        "slovenian" -> when (m100) {
+            1 -> "one"
+            2 -> "two"
+            3, 4 -> "few"
+            else -> CAT_OTHER
+        }
+        "arabic" -> when {
+            n == 0 -> "zero"
+            n == 1 -> "one"
+            n == 2 -> "two"
+            m100 in 3..10 -> "few"
+            m100 in 11..99 -> "many"
+            else -> CAT_OTHER
+        }
+        "welsh" -> when (n) {
+            0 -> "zero"
+            1 -> "one"
+            2 -> "two"
+            3 -> "few"
+            6 -> "many"
+            else -> CAT_OTHER
+        }
+        "irish" -> when {
+            n == 1 -> "one"
+            n == 2 -> "two"
+            n in 3..6 -> "few"
+            n in 7..10 -> "many"
+            else -> CAT_OTHER
+        }
+        "maltese" -> when {
+            n == 1 -> "one"
+            n == 0 || m100 in 2..10 -> "few"
+            m100 in 11..19 -> "many"
+            else -> CAT_OTHER
+        }
+        "polish" -> when {
+            n == 1 -> "one"
+            m10 in 2..4 && m100 !in 12..14 -> "few"
+            else -> "many"
+        }
+        "slavic" -> when {
+            m10 == 1 && m100 != 11 -> "one"
+            m10 in 2..4 && m100 !in 12..14 -> "few"
+            else -> "many"
+        }
+        else -> if (n == 1) "one" else CAT_OTHER
+    }
+}
+
 /** The caller's most preferred locale that is actually offered, or "" if none. */
 fun negotiateLocale(prefs: List<String>, offered: List<String>): String {
     val have = offered.map { normalizeLocale(it) }.toSet()
@@ -105,6 +201,10 @@ class SildI18n internal constructor(
     private val project: String = PLATFORM_PROJECT,
     private val now: () -> Long = ::elapsedMillis,
     private val downloads: I18nDownloads = I18nDownloads.shared,
+    // A key that resolves nowhere is a programming error: it is reported, and only
+    // a debug build puts the key itself on screen.
+    private val debug: Boolean = false,
+    private val onMissingKey: ((String) -> Unit)? = null,
 ) {
     /** The language being rendered. */
     @Volatile
@@ -154,12 +254,27 @@ class SildI18n internal constructor(
     }
 
     /** The text for [key] in the active language, with `{name}` placeholders filled. */
-    fun t(key: String, vars: Map<String, Any>? = null): String {
-        val text = strings[key]
-            ?: I18N_DEFAULTS[locale]?.get(key)
-            ?: I18N_DEFAULTS[I18N_SOURCE_LOCALE]?.get(key)
-            ?: key
-        return interpolate(text, vars)
+    fun t(key: String, vars: Map<String, Any>? = null): String = interpolate(lookup(key), vars)
+
+    /** The text for a count, from the category this language uses for it. `count`
+     *  is available to the text as `{count}`. */
+    fun tPlural(base: String, count: Int, vars: Map<String, Any>? = null): String {
+        val category = pluralCategory(locale, count)
+        val text = lookup("$base.$category", "$base.$CAT_OTHER")
+        return interpolate(text, mapOf("count" to count) + (vars ?: emptyMap()))
+    }
+
+    // lookup walks the published bundle, then this language's bundled text, then the
+    // source language's, for each candidate key in turn.
+    private fun lookup(key: String, vararg also: String): String {
+        for (k in listOf(key, *also)) {
+            val text = strings[k]
+                ?: I18N_DEFAULTS[locale]?.get(k)
+                ?: I18N_DEFAULTS[I18N_SOURCE_LOCALE]?.get(k)
+            if (text != null) return text
+        }
+        onMissingKey?.invoke(key)
+        return if (debug) key else ""
     }
 
     /** Render the language the host asks for, from this call on. Unknown tags are
