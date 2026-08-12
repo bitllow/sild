@@ -199,3 +199,38 @@ func TestAScopedKeyCannotFetchAnotherProjectsBundle(t *testing.T) {
 		t.Errorf("an ordinary client lost its manifest: %d %s", w.Code, w.Body)
 	}
 }
+
+// A key that becomes a plural — or stops being one — leaves no half of the old
+// shape behind, or the editor would list both and a bundle would carry both.
+func TestRedeclaringAKeyReplacesItsShape(t *testing.T) {
+	f := newI18nFixture(t)
+	f.createProject(t, "shop", "Shop")
+
+	if res := f.declare(t, "shop", "cart.items", "Items"); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("declare ordinary: %d", res.StatusCode)
+	}
+	if res := f.declare(t, "shop", "cart.items", "", map[string]string{
+		"one": "{count} item", "other": "{count} items",
+	}); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("declare plural: %d", res.StatusCode)
+	}
+	rows := f.projectKeys(t, "shop", "en", "")
+	if _, ok := rows["cart.items"]; ok {
+		t.Errorf("the ordinary key survived becoming a plural: %v", rows)
+	}
+	if _, ok := rows["cart.items.one"]; !ok {
+		t.Errorf("the plural did not land: %v", rows)
+	}
+
+	// And back again.
+	if res := f.declare(t, "shop", "cart.items", "Items"); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("declare ordinary again: %d", res.StatusCode)
+	}
+	rows = f.projectKeys(t, "shop", "en", "")
+	if _, ok := rows["cart.items.one"]; ok {
+		t.Errorf("a sibling survived the key becoming ordinary: %v", rows)
+	}
+	if len(rows) != 1 {
+		t.Errorf("%d rows for one key: %v", len(rows), rows)
+	}
+}

@@ -37,8 +37,16 @@ export function pluralCategory(locale: string, count: number): string {
   switch (PLURAL_LOCALES[normalize(locale)] || PLURAL_DEFAULT_FAMILY) {
     case "other":
       return OTHER;
-    case "french":
+    case "hindi":
       return n <= 1 ? "one" : OTHER;
+    case "romance":
+    case "romance_zero":
+      if (n === 1) return "one";
+      if (n === 0 && (PLURAL_LOCALES[normalize(locale)] || "") === "romance_zero") return "one";
+      // CLDR gives Romance a "many" for round millions, which is what a compact
+      // "2 million" reads as.
+      if (n !== 0 && n % 1_000_000 === 0) return "many";
+      return OTHER;
     case "czech":
       if (n === 1) return "one";
       return n >= 2 && n <= 4 ? "few" : OTHER;
@@ -78,14 +86,19 @@ export function pluralCategory(locale: string, count: number): string {
       return n >= 7 && n <= 10 ? "many" : OTHER;
     case "maltese":
       if (n === 1) return "one";
-      if (n === 0 || (m100 >= 2 && m100 <= 10)) return "few";
+      if (n === 2) return "two";
+      if (n === 0 || (m100 >= 3 && m100 <= 10)) return "few";
       return m100 >= 11 && m100 <= 19 ? "many" : OTHER;
     case "polish":
+      // Polish's one is exactly one, where Russian's is any number ending in it.
       if (n === 1) return "one";
       return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : "many";
     case "slavic":
       if (m10 === 1 && m100 !== 11) return "one";
       return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : "many";
+    case "serbocroatian":
+      if (m10 === 1 && m100 !== 11) return "one";
+      return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : OTHER;
   }
   return n === 1 ? "one" : OTHER;
 }

@@ -338,12 +338,14 @@ func (s *Service) DeleteTranslationProject(ctx context.Context, tenantID, projec
 	if _, err := s.TranslationProject(ctx, tenantID, project); err != nil {
 		return err
 	}
-	if err := s.store.Translations().DeleteProject(ctx, tenantID, project); err != nil {
+	// The grants naming it go first: a scope names projects by id, so a failure
+	// after the project was gone would hand a new project of the same name to
+	// whoever held the old one. Narrowed grants over a project still standing is
+	// the safe half of that pair.
+	if err := s.revokeProjectGrants(ctx, tenantID, project); err != nil {
 		return err
 	}
-	// The grants naming it go with it. A scope names projects by id, so leaving them
-	// would hand a new project of the same name to whoever held the old one.
-	return s.revokeProjectGrants(ctx, tenantID, project)
+	return s.store.Translations().DeleteProject(ctx, tenantID, project)
 }
 
 // revokeProjectGrants drops one project from every translator assignment and every
@@ -628,12 +630,40 @@ func (s *Service) DeclareTranslationKey(ctx context.Context, tenantID, project, 
 	if err != nil {
 		return err
 	}
+	// A key that was ordinary and is now a plural — or the reverse — must not leave
+	// the other shape behind: the editor would list both, and a bundle would carry
+	// both.
+	if err := s.removeShapesBut(ctx, tenantID, project, key, rows); err != nil {
+		return err
+	}
 	for _, k := range rows {
 		if err := s.store.Translations().PutKey(ctx, &k); err != nil {
 			return err
 		}
 	}
 	return s.autoPublish(ctx, tenantID, proj, "")
+}
+
+// removeShapesBut drops the rows this declaration replaces: the bare key when it
+// becomes a plural, and every category sibling when it stops being one.
+func (s *Service) removeShapesBut(ctx context.Context, tenantID, project, key string, rows []models.TranslationKey) error {
+	keeping := make(map[string]bool, len(rows))
+	for _, k := range rows {
+		keeping[k.Key] = true
+	}
+	gone := []string{key}
+	for _, c := range i18n.EveryCategory() {
+		gone = append(gone, i18n.PluralKey(key, c))
+	}
+	for _, k := range gone {
+		if keeping[k] {
+			continue
+		}
+		if err := s.store.Translations().DeleteKey(ctx, tenantID, project, k); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // declaredRows is the key rows one declaration writes: one for an ordinary key,
@@ -899,10 +929,12 @@ func (s *Service) ExportTranslations(
 	keys := cat.LocaleKeys(locale)
 	rows := make([]i18n.Row, 0, len(keys))
 	for _, k := range keys {
+		base, _, sibling := i18n.SplitPlural(k)
 		rows = append(rows, i18n.Row{
 			Key:    k,
 			Source: cat.Source(k),
 			Value:  cat.Resolve(ov, locale, proj.FallbackLocale, k),
+			Plural: sibling && cat.IsPluralBase(base),
 		})
 	}
 	out, err := i18n.Render(format, locale, rows)

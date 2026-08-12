@@ -140,7 +140,15 @@ fun pluralCategory(locale: String, count: Int): String {
     val m100 = n % 100
     return when (I18N_PLURAL_LOCALES[normalizeLocale(locale)] ?: I18N_PLURAL_DEFAULT_FAMILY) {
         "other" -> CAT_OTHER
-        "french" -> if (n <= 1) "one" else CAT_OTHER
+        "hindi" -> if (n <= 1) "one" else CAT_OTHER
+        "romance", "romance_zero" -> when {
+            n == 1 -> "one"
+            n == 0 && I18N_PLURAL_LOCALES[normalizeLocale(locale)] == "romance_zero" -> "one"
+            // CLDR gives Romance a "many" for round millions, which is what a
+            // compact "2 million" reads as.
+            n != 0 && n % 1_000_000 == 0 -> "many"
+            else -> CAT_OTHER
+        }
         "czech" -> when {
             n == 1 -> "one"
             n in 2..4 -> "few"
@@ -198,11 +206,13 @@ fun pluralCategory(locale: String, count: Int): String {
         }
         "maltese" -> when {
             n == 1 -> "one"
-            n == 0 || m100 in 2..10 -> "few"
+            n == 2 -> "two"
+            n == 0 || m100 in 3..10 -> "few"
             m100 in 11..19 -> "many"
             else -> CAT_OTHER
         }
         "polish" -> when {
+            // Polish's one is exactly one, where Russian's is any number ending in it.
             n == 1 -> "one"
             m10 in 2..4 && m100 !in 12..14 -> "few"
             else -> "many"
@@ -211,6 +221,11 @@ fun pluralCategory(locale: String, count: Int): String {
             m10 == 1 && m100 != 11 -> "one"
             m10 in 2..4 && m100 !in 12..14 -> "few"
             else -> "many"
+        }
+        "serbocroatian" -> when {
+            m10 == 1 && m100 != 11 -> "one"
+            m10 in 2..4 && m100 !in 12..14 -> "few"
+            else -> CAT_OTHER
         }
         else -> if (n == 1) "one" else CAT_OTHER
     }
