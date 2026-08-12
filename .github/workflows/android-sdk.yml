@@ -203,7 +203,7 @@ jobs:
         working-directory: sdks/swift
         # Keep in step with SildUnitTests + SildSampleUITests.
         env:
-          EXPECTED_TESTS: "11"
+          EXPECTED_TESTS: "15"
         run: |
           set -o pipefail
           xcodebuild test -project SildSample.xcodeproj -scheme SildSample \
