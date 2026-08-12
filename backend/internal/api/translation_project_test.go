@@ -285,13 +285,9 @@ func TestAProjectScopedTranslatorCannotReachASecondProject(t *testing.T) {
 	f.declare(t, "shop", ownKey, ownSource)
 	f.declare(t, "marketing", "ad.headline", "Buy now")
 
-	admin := f.h.SeedAdmin(f.tenant.ID, "translator@test", models.PlatformTranslator)
-	w := f.h.Request("PUT", "/v1/translations/grants/"+admin.ID).
-		Cookie("sild_admin", f.owner).
-		JSON(map[string]any{"projects": []string{"shop"}, "locales": []string{}}).Do()
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("grant: %d %s", w.Code, w.Body)
-	}
+	f.h.SeedAdminScoped(f.tenant.ID, "translator@test", models.PlatformTranslator, models.RoleScope{
+		Projects: []string{"shop"}, Locales: []string{models.ScopeAll},
+	})
 	token := loginAs(t, f.h, "translator@test")
 
 	if w := f.h.Request("GET", "/v1/translations/projects/shop/keys?locale=en").
@@ -305,7 +301,7 @@ func TestAProjectScopedTranslatorCannotReachASecondProject(t *testing.T) {
 
 	// The collection narrows rather than refusing: a translator granted one project
 	// lands on it, and is not told the others exist.
-	w = f.h.Request("GET", "/v1/translations/projects").Cookie("sild_admin", token).Do()
+	w := f.h.Request("GET", "/v1/translations/projects").Cookie("sild_admin", token).Do()
 	if w.Code != http.StatusOK {
 		t.Fatalf("project list for a scoped translator: %d %s", w.Code, w.Body)
 	}
@@ -315,6 +311,40 @@ func TestAProjectScopedTranslatorCannotReachASecondProject(t *testing.T) {
 	testutil.DecodeJSON(t, w, &res)
 	if len(res.Items) != 1 || res.Items[0]["slug"] != "shop" {
 		t.Fatalf("listed projects = %v, want only shop", res.Items)
+	}
+}
+
+// The screen a scoped translator gets must be the work they may actually do:
+// languages they cannot write are not theirs to see either.
+func TestALanguageScopedTranslatorSeesOnlyTheirLanguages(t *testing.T) {
+	f := newI18nFixture(t)
+	if w := f.h.Request("PUT", "/v1/translations/projects/sild").Cookie("sild_admin", f.owner).
+		JSON(map[string]any{"locales": []string{"en", "lv", "es"}, "fallback_locale": "en"}).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("enable languages: %d %s", w.Code, w.Body)
+	}
+	f.h.SeedAdminScoped(f.tenant.ID, "lv@test", models.PlatformTranslator, models.RoleScope{
+		Projects: []string{models.ScopeAll}, Locales: []string{"lv"},
+	})
+	cookie := loginAs(t, f.h, "lv@test")
+
+	var res struct {
+		Items []struct {
+			Slug       string         `json:"slug"`
+			Locales    []string       `json:"locales"`
+			Completion map[string]int `json:"completion"`
+		} `json:"items"`
+	}
+	testutil.DecodeJSON(t, f.h.Request("GET", "/v1/translations/projects").Cookie("sild_admin", cookie).Do(), &res)
+	if len(res.Items) == 0 {
+		t.Fatal("a granted translator sees no project at all")
+	}
+	for _, p := range res.Items {
+		if len(p.Locales) != 1 || p.Locales[0] != "lv" {
+			t.Fatalf("%s languages = %v, want only lv", p.Slug, p.Locales)
+		}
+		if _, ok := p.Completion["es"]; ok {
+			t.Fatalf("%s reported completion for a language they cannot write: %v", p.Slug, p.Completion)
+		}
 	}
 }
 

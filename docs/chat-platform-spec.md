@@ -345,22 +345,25 @@ GET/POST/DELETE /v1/api-keys[/:id]          owner/admin
 GET/POST/PATCH/DELETE /v1/webhooks[/:id]    owner/admin
 GET    /v1/webhooks/:id/deliveries          owner/admin
 GET/PATCH /v1/channels/email                owner/admin
-GET/POST /v1/team, PATCH /v1/team/:id, POST /v1/team/:id/password
+GET/POST /v1/team, POST /v1/team/:id/password
+GET    /v1/roles                            owner/admin
+POST   /v1/team/:id/roles                   owner/admin
+PUT/DELETE /v1/team/:id/roles/:role         owner/admin
 ```
 
 `GET /v1/principal` returns a discriminated identity plus **effective grants**:
 
 ```json
 { "kind": "admin", "tenant_id": "t_…",
-  "subject": { "id": "adm_…", "role": "agent" },
+  "subject": { "id": "adm_…", "assignments": [ { "role": "agent", "scope": { "peer": true } } ] },
   "grants": [ { "action": "conversations.list",
                 "scope": { "kinds": ["support"], "requires_assignment": true } } ] }
 ```
 
 Grants carry the **scope** each action is held over, not just its name: an agent
-with `peer_access` and one without both hold `conversations.list`, and only the
-scope tells them apart. Frontends render affordances from this rather than
-re-deriving policy from role flags.
+whose assignment reaches peer conversations and one whose does not both hold
+`conversations.list`, and only the scope tells them apart. Frontends render
+affordances from this rather than re-deriving policy from the assignments.
 
 ### 4.7 Public
 

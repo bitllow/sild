@@ -11,16 +11,19 @@ import (
 // owner/admin manage api-keys/webhooks/team + all conversations; agent gets the
 // inbox only.
 func RequireRole(roles ...models.PlatformRole) gin.HandlerFunc {
-	allowed := make(map[models.PlatformRole]bool, len(roles))
-	for _, r := range roles {
-		allowed[r] = true
-	}
 	return func(c *gin.Context) {
 		p := Get(c)
-		if p == nil || p.Kind != principal.KindAdmin || !allowed[p.Role] {
+		if p == nil || p.Kind != principal.KindAdmin {
 			httpx.Forbidden(c, "insufficient platform role")
 			return
 		}
-		c.Next()
+		// Any one of them: a second role widens what a member reaches, never narrows it.
+		for _, r := range roles {
+			if p.HasRole(r) {
+				c.Next()
+				return
+			}
+		}
+		httpx.Forbidden(c, "insufficient platform role")
 	}
 }

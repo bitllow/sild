@@ -167,6 +167,21 @@ func (c *Catalog) Bundle(ov Overrides, locale, fallback string) map[string]strin
 	return out
 }
 
+// ValidLanguage reports whether a normalized tag is a language subtag: the two
+// or three letters every ISO 639 code has. Anything else is a typo that would be
+// stored, offered in a picker, and never match a device.
+func ValidLanguage(tag string) bool {
+	if len(tag) < 2 || len(tag) > 3 {
+		return false
+	}
+	for _, r := range tag {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
 // Normalize lowercases a BCP-47 tag's language subtag and drops the rest. Sild
 // ships flat languages, so "en-GB" and "en" are one locale.
 func Normalize(tag string) string {

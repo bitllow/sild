@@ -1,5 +1,11 @@
 import type { MessageAttachment, Presence } from "@/components/ds";
-import type { ApiBrandConfig } from "@/api/admin";
+import type {
+  ApiBrandConfig,
+  ApiPlatformRole,
+  ApiRoleAssignment,
+  ApiRoleDefinition,
+  ApiRoleScope,
+} from "@/api/admin";
 
 export type UiStatus = "queued" | "assigned" | "closed";
 export type Channel = "app" | "email";
@@ -77,14 +83,20 @@ export interface Webhook {
   active: boolean;
 }
 
-export type PlatformRole = "owner" | "admin" | "agent";
+export type PlatformRole = ApiPlatformRole;
+
+/** The limits one assignment carries, and the role catalogue that describes
+ *  them. Identical on the wire, so the API types are these types. */
+export type RoleScope = ApiRoleScope;
+export type RoleAssignment = ApiRoleAssignment;
+export type RoleDefinition = ApiRoleDefinition;
+export type RoleDimension = ApiRoleDefinition["dimensions"][number];
 
 export interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: PlatformRole;
-  peerAccess: boolean;
+  assignments: RoleAssignment[];
 }
 
 /** The email support channel as the Channels settings render it (§6.2). */

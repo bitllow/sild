@@ -45,9 +45,7 @@ func TestArchivedPeerConversationStillGatedOnPeerAccess(t *testing.T) {
 
 	// Grant peer access, re-login (resolved onto the principal at session load) →
 	// the archived read is now admitted and falls back to the sink.
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, true); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
+	h.GrantPeer(tenant.ID, agent.ID)
 	agentCookie = loginAs(t, h, "agent@test")
 	if w := h.Request("GET", "/v1/conversations/"+peer.ID+"/messages").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusOK {
 		t.Fatalf("archived peer read with peer access = %d, want 200", w.Code)

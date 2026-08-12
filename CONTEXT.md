@@ -49,6 +49,25 @@ webhooked, not emailed, not pushed.
 One named messenger appearance for a tenant. Names the tenant in anything an
 end user sees, including notifications about support conversations.
 
+### Access
+
+**Role**:
+A named set of things a person may do — owner, admin, agent, translator. Held,
+never assigned to a resource.
+_Avoid_: permission, group, profile
+
+**Role assignment**:
+One member holding one role, with the scope that role carries. A member holds
+each role at most once and may hold several different ones; a second role only
+ever widens what they can do. Never shortened to "assignment", which belongs to
+a conversation.
+
+**Scope**:
+The limits a role assignment carries — the projects and languages a translator
+may write, whether an agent reaches peer conversations. Each role defines which
+limits it has; a role may define none, and then it is tenant-wide.
+_Avoid_: permission, access level
+
 ### Push
 
 **Push token**:
@@ -128,11 +147,6 @@ _Avoid_: outdated, invalid, stale
 **Translator**:
 Someone invited to write translations and nothing else. Sees no conversation,
 contact, or message in the tenant.
-
-**Scope**:
-Which projects and locales a person's role applies to — all of them, or a named
-set.
-_Avoid_: permission, access level
 
 **Release**:
 A project's translations frozen at a point in time and given a version. What a

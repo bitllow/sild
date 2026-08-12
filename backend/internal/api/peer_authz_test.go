@@ -52,9 +52,7 @@ func TestPeerAccessGatesEveryRole(t *testing.T) {
 	}
 
 	// Re-login: peer_access is resolved onto the principal at session load.
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	adminCookie := loginAs(t, h, "admin@test")
 	if w := h.Request("GET", "/v1/conversations/"+peer.ID).Cookie("sild_admin", adminCookie).Do(); w.Code != http.StatusOK {
 		t.Fatalf("admin with peer access: peer read = %d %s, want 200", w.Code, w.Body)
@@ -69,43 +67,46 @@ func TestOnlyOwnerMayGrantPeerAccess(t *testing.T) {
 	h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
 	admin := h.SeedAdmin(tenant.ID, "admin@test", models.PlatformAdmin)
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
-	ctx := context.Background()
 	adminCookie := loginAs(t, h, "admin@test")
 
-	for _, target := range []struct{ who, id string }{{"self", admin.ID}, {"a colleague", agent.ID}} {
-		w := h.Request("PATCH", "/v1/team/"+target.id).
-			Cookie("sild_admin", adminCookie).JSON(map[string]any{"peer_access": true}).Do()
+	for _, target := range []struct {
+		who, id, method, path string
+	}{
+		{"self", admin.ID, "POST", "/v1/team/" + admin.ID + "/roles"},
+		{"a colleague", agent.ID, "PUT", "/v1/team/" + agent.ID + "/roles/agent"},
+	} {
+		body := map[string]any{"scope": map[string]any{"peer": true}}
+		if target.method == "POST" {
+			body["role"] = models.PlatformAgent
+		}
+		w := h.Request(target.method, target.path).Cookie("sild_admin", adminCookie).JSON(body).Do()
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("admin granting peer access to %s = %d %s, want 403", target.who, w.Code, w.Body)
 		}
 	}
 	// Nothing was persisted by the rejected attempts.
 	for _, id := range []string{admin.ID, agent.ID} {
-		a, err := h.Store.Admins().Get(ctx, tenant.ID, id)
-		if err != nil {
-			t.Fatalf("reload %s: %v", id, err)
-		}
-		if a.PeerAccess {
-			t.Fatalf("peer_access must still be false for %s", id)
+		if h.PeerAccess(tenant.ID, id) {
+			t.Fatalf("peer access must still be off for %s", id)
 		}
 	}
 
-	// Role changes are still an admin's to make.
-	w := h.Request("PATCH", "/v1/team/"+agent.ID).
-		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": string(models.PlatformAdmin)}).Do()
+	// Roles are still an admin's to hand out.
+	w := h.Request("POST", "/v1/team/"+agent.ID+"/roles").
+		Cookie("sild_admin", adminCookie).JSON(map[string]any{"role": models.PlatformAdmin}).Do()
 	if w.Code != http.StatusNoContent {
-		t.Fatalf("admin changing a role = %d %s, want 204", w.Code, w.Body)
+		t.Fatalf("admin granting a role = %d %s, want 204", w.Code, w.Body)
 	}
 
+	// The agent already holds the role, so the owner rescopes it rather than adding.
 	owner := loginAs(t, h, "owner@test")
-	w = h.Request("PATCH", "/v1/team/"+agent.ID).
-		Cookie("sild_admin", owner).JSON(map[string]any{"peer_access": true}).Do()
+	w = h.Request("PUT", "/v1/team/"+agent.ID+"/roles/agent").
+		Cookie("sild_admin", owner).JSON(map[string]any{"scope": map[string]any{"peer": true}}).Do()
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("owner granting peer access = %d %s, want 204", w.Code, w.Body)
 	}
-	a, err := h.Store.Admins().Get(ctx, tenant.ID, agent.ID)
-	if err != nil || !a.PeerAccess {
-		t.Fatalf("peer_access should be true after the owner's grant (err=%v)", err)
+	if !h.PeerAccess(tenant.ID, agent.ID) {
+		t.Fatal("peer access should be on after the owner's grant")
 	}
 }
 
@@ -122,32 +123,32 @@ func TestAdminCannotEscalateToOwnerForPeerAccess(t *testing.T) {
 	adminCookie := loginAs(t, h, "admin@test")
 
 	// Self-promotion is refused.
-	w := h.Request("PATCH", "/v1/team/"+admin.ID).
-		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": "owner"}).Do()
+	w := h.Request("POST", "/v1/team/"+admin.ID+"/roles").
+		Cookie("sild_admin", adminCookie).JSON(map[string]any{"role": "owner"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin self-promoting to owner = %d %s, want 403", w.Code, w.Body)
 	}
 	// Nor promoting a colleague.
 	agent := h.SeedAdmin(tenant.ID, "agent@test", models.PlatformAgent)
-	w = h.Request("PATCH", "/v1/team/"+agent.ID).
-		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": "owner"}).Do()
+	w = h.Request("POST", "/v1/team/"+agent.ID+"/roles").
+		Cookie("sild_admin", adminCookie).JSON(map[string]any{"role": "owner"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin appointing another owner = %d %s, want 403", w.Code, w.Body)
 	}
-	// Nor demoting the real owner out of the way.
-	w = h.Request("PATCH", "/v1/team/"+ownerRec.ID).
-		Cookie("sild_admin", adminCookie).JSON(map[string]any{"platform_role": "agent"}).Do()
+	// Nor taking the real owner's role away.
+	w = h.Request("DELETE", "/v1/team/"+ownerRec.ID+"/roles/owner").
+		Cookie("sild_admin", adminCookie).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin demoting the owner = %d %s, want 403", w.Code, w.Body)
 	}
 
-	// The role never moved.
-	a, err := h.Store.Admins().Get(ctx, tenant.ID, admin.ID)
+	// Nothing moved: still an admin, still no peer access.
+	held, err := h.Svc.RoleAssignments(ctx, tenant.ID, admin.ID)
 	if err != nil {
 		t.Fatalf("reload admin: %v", err)
 	}
-	if a.PlatformRole != models.PlatformAdmin || a.PeerAccess {
-		t.Fatalf("admin record must be untouched, got role=%s peer_access=%v", a.PlatformRole, a.PeerAccess)
+	if len(held) != 1 || held[0].Role != models.PlatformAdmin {
+		t.Fatalf("admin assignments must be untouched, got %v", held)
 	}
 	// A fresh session is still an admin without peer access.
 	adminCookie = loginAs(t, h, "admin@test")
@@ -172,7 +173,7 @@ func TestOwnerAccountIsProtectedOnEveryTeamRoute(t *testing.T) {
 
 	// POST /team — no minting an owner you control.
 	w := h.Request("POST", "/v1/team").Cookie("sild_admin", adminCookie).
-		JSON(map[string]any{"email": "attacker@test", "platform_role": "owner"}).Do()
+		JSON(map[string]any{"email": "attacker@test", "role": "owner"}).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("admin inviting an owner = %d %s, want 403", w.Code, w.Body)
 	}
@@ -200,7 +201,7 @@ func TestOwnerAccountIsProtectedOnEveryTeamRoute(t *testing.T) {
 
 	// Legitimate team management still works.
 	if w := h.Request("POST", "/v1/team").Cookie("sild_admin", adminCookie).
-		JSON(map[string]any{"email": "helper@test", "platform_role": "agent"}).Do(); w.Code != http.StatusCreated {
+		JSON(map[string]any{"email": "helper@test", "role": "agent"}).Do(); w.Code != http.StatusCreated {
 		t.Fatalf("admin inviting an agent = %d %s, want 201", w.Code, w.Body)
 	}
 	if w := h.Request("POST", "/v1/team/"+agent.ID+"/password").Cookie("sild_admin", adminCookie).
@@ -211,7 +212,7 @@ func TestOwnerAccountIsProtectedOnEveryTeamRoute(t *testing.T) {
 	// The owner may do all of it.
 	ownerCookie := loginAs(t, h, "owner@test")
 	if w := h.Request("POST", "/v1/team").Cookie("sild_admin", ownerCookie).
-		JSON(map[string]any{"email": "co-owner@test", "platform_role": "owner"}).Do(); w.Code != http.StatusCreated {
+		JSON(map[string]any{"email": "co-owner@test", "role": "owner"}).Do(); w.Code != http.StatusCreated {
 		t.Fatalf("owner inviting an owner = %d %s, want 201", w.Code, w.Body)
 	}
 	if w := h.Request("POST", "/v1/team/"+owner.ID+"/password").Cookie("sild_admin", ownerCookie).
@@ -238,23 +239,23 @@ func TestLastOwnerCannotBeDemoted(t *testing.T) {
 	ctx := context.Background()
 	cookie := loginAs(t, h, "owner@test")
 
-	w := h.Request("PATCH", "/v1/team/"+owner.ID).
-		Cookie("sild_admin", cookie).JSON(map[string]any{"platform_role": "admin"}).Do()
+	w := h.Request("DELETE", "/v1/team/"+owner.ID+"/roles/owner").Cookie("sild_admin", cookie).Do()
 	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("sole owner self-demotion = %d %s, want 422", w.Code, w.Body)
+		t.Fatalf("sole owner stepping down = %d %s, want 422", w.Code, w.Body)
 	}
-	if a, err := h.Store.Admins().Get(ctx, tenant.ID, owner.ID); err != nil || a.PlatformRole != models.PlatformOwner {
-		t.Fatalf("owner must still be owner (err=%v)", err)
+	held, err := h.Svc.RoleAssignments(ctx, tenant.ID, owner.ID)
+	if err != nil || len(held) == 0 || held[0].Role != models.PlatformOwner {
+		t.Fatalf("owner must still be owner (err=%v, held=%v)", err, held)
 	}
 
 	// With a co-owner, stepping down is allowed.
 	second := h.SeedAdmin(tenant.ID, "second@test", models.PlatformAgent)
-	if w := h.Request("PATCH", "/v1/team/"+second.ID).
-		Cookie("sild_admin", cookie).JSON(map[string]any{"platform_role": "owner"}).Do(); w.Code != http.StatusNoContent {
+	if w := h.Request("POST", "/v1/team/"+second.ID+"/roles").
+		Cookie("sild_admin", cookie).JSON(map[string]any{"role": "owner"}).Do(); w.Code != http.StatusNoContent {
 		t.Fatalf("owner appointing a second owner = %d %s, want 204", w.Code, w.Body)
 	}
-	if w := h.Request("PATCH", "/v1/team/"+owner.ID).
-		Cookie("sild_admin", cookie).JSON(map[string]any{"platform_role": "admin"}).Do(); w.Code != http.StatusNoContent {
+	if w := h.Request("DELETE", "/v1/team/"+owner.ID+"/roles/owner").
+		Cookie("sild_admin", cookie).Do(); w.Code != http.StatusNoContent {
 		t.Fatalf("owner stepping down with a co-owner = %d %s, want 204", w.Code, w.Body)
 	}
 }
@@ -284,9 +285,7 @@ func TestCloseRequiresConversationAccess(t *testing.T) {
 		t.Fatalf("agent closing a support conversation: %d %s, want 200", w.Code, w.Body)
 	}
 
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, agent.ID, true); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
+	h.GrantPeer(tenant.ID, agent.ID)
 	agentCookie = loginAs(t, h, "agent@test")
 	if w := h.Request("POST", "/v1/conversations/"+peer.ID+"/close").Cookie("sild_admin", agentCookie).Do(); w.Code != http.StatusOK {
 		t.Fatalf("agent with peer access closing a peer conversation: %d %s, want 200", w.Code, w.Body)
@@ -308,9 +307,7 @@ func TestSharedSendImplicitlyJoinsOperator(t *testing.T) {
 	tenant := h.SeedTenant()
 	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
 	ctx := context.Background()
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("peer access: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	owner := loginAs(t, h, "owner@test")
 	peer := mkPeer(t, h, tenant.ID, "trip_send")
 

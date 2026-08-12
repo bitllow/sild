@@ -12,7 +12,7 @@ export type ApiMemberKind = "user" | "agent" | "bot" | "email";
 // Conversation roles are tenant-defined free strings ("rider"/"driver"/"support"/
 // "client"/…). The UI derives all labels and colors from whatever roles appear.
 export type ApiConvRole = string;
-export type ApiPlatformRole = "owner" | "admin" | "agent";
+export type ApiPlatformRole = "owner" | "admin" | "agent" | "translator";
 
 export interface ApiAssignment {
   id: string;
@@ -161,16 +161,43 @@ export interface ApiWebhook {
 }
 
 
+/** The limits one assignment carries. Which of them a role has is the role's
+ *  own declaration, served by /v1/roles. */
+export interface ApiRoleScope {
+  peer?: boolean;
+  projects?: string[];
+  locales?: string[];
+  publish?: boolean;
+}
+
+export interface ApiRoleAssignment {
+  role: ApiPlatformRole;
+  scope: ApiRoleScope;
+}
+
 export interface ApiTeamMember {
   id: string;
   email: string;
   first_name?: string;
   last_name?: string;
-  platform_role: ApiPlatformRole;
-  /** Per-user access to the peer-conversations surface (Settings → Team). */
-  peer_access: boolean;
+  /** Every role this member holds, each with its scope. */
+  assignments: ApiRoleAssignment[];
   has_password: boolean;
   created_at: string;
+}
+
+/** A role as the Team screen renders it: what it is for, and what it scopes. */
+export interface ApiRoleDefinition {
+  role: ApiPlatformRole;
+  label: string;
+  description: string;
+  dimensions: {
+    key: keyof ApiRoleScope;
+    kind: "set" | "toggle";
+    label: string;
+    help: string;
+    source?: string;
+  }[];
 }
 
 /**
@@ -221,7 +248,9 @@ export interface ApiPrincipal {
   tenant_id: string;
   subject?: {
     id: string;
-    role?: ApiPlatformRole;
+    /** The caller's own assignments, scope included — a translator is refused
+     *  /v1/team and has no other way to see what they were granted. */
+    assignments?: ApiRoleAssignment[];
     email?: string;
     first_name?: string;
     last_name?: string;
@@ -472,10 +501,19 @@ export const adminApi = {
     collectAll<ApiTeamMember>((cursor) =>
       api.get<ApiPage<ApiTeamMember>>(`/team${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
     ),
-  setTeamRole: (id: string, role: ApiPlatformRole) =>
-    api.patch<void>(`/team/${id}`, { platform_role: role }),
-  setTeamPeerAccess: (id: string, peerAccess: boolean) =>
-    api.patch<void>(`/team/${id}`, { peer_access: peerAccess }),
+  listRoles: () => api.get<{ roles: ApiRoleDefinition[] }>("/roles"),
+  inviteMember: (member: {
+    email: string;
+    first_name: string;
+    last_name: string;
+    role: ApiPlatformRole;
+    scope: ApiRoleScope;
+  }) => api.post<ApiTeamMember>("/team", member),
+  assignRole: (id: string, role: ApiPlatformRole, scope: ApiRoleScope) =>
+    api.post<void>(`/team/${id}/roles`, { role, scope }),
+  setRoleScope: (id: string, role: ApiPlatformRole, scope: ApiRoleScope) =>
+    api.put<void>(`/team/${id}/roles/${role}`, { scope }),
+  removeRole: (id: string, role: ApiPlatformRole) => api.del<void>(`/team/${id}/roles/${role}`),
 
   // ── Settings: channels (§6.2) ─────────────────────────────────────────
   // Read returns the version; the write quotes it back, so a concurrent edit

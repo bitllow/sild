@@ -56,6 +56,21 @@ func (f *i18nFixture) put(t *testing.T, locale, key, value string) *http.Respons
 		JSON(map[string]any{"locale": locale, "value": value}).Do().Result()
 }
 
+// manifestVersion is what a device would see: the published version of lv, or 0
+// before anything is published.
+func (f *i18nFixture) manifestVersion(t *testing.T) int {
+	t.Helper()
+	w := f.h.Request("GET", "/v1/translations/manifest?project=sild").Cookie("sild_admin", f.owner).Do()
+	if w.Code != http.StatusOK {
+		t.Fatalf("manifest: %d %s", w.Code, w.Body)
+	}
+	var m struct {
+		Locales map[string]int `json:"locales"`
+	}
+	testutil.DecodeJSON(t, w, &m)
+	return m.Locales["lv"]
+}
+
 func (f *i18nFixture) publish(t *testing.T) int {
 	t.Helper()
 	w := f.h.Request("POST", "/v1/translations/projects/sild/releases").
@@ -238,7 +253,7 @@ func TestATenantAddedLanguageFallsBackRatherThanShowingKeys(t *testing.T) {
 
 func TestTranslatorCannotReachAnythingButTranslations(t *testing.T) {
 	f := newI18nFixture(t)
-	f.h.SeedAdmin(f.tenant.ID, "translator@test", models.PlatformTranslator)
+	f.h.SeedAdminScoped(f.tenant.ID, "translator@test", models.PlatformTranslator, everyProjectAndLanguage())
 	cookie := loginAs(t, f.h, "translator@test")
 
 	for _, path := range []string{"/v1/team", "/v1/api-keys", "/v1/brands", "/v1/realtime/token"} {
@@ -266,14 +281,11 @@ func TestTranslatorCannotReachAnythingButTranslations(t *testing.T) {
 	}
 }
 
-func TestATranslatorsGrantNarrowsWhichLanguagesTheyMayWrite(t *testing.T) {
+func TestATranslatorsScopeNarrowsWhichLanguagesTheyMayWrite(t *testing.T) {
 	f := newI18nFixture(t)
-	tr := f.h.SeedAdmin(f.tenant.ID, "translator@test", models.PlatformTranslator)
-	if w := f.h.Request("PUT", "/v1/translations/grants/"+tr.ID).
-		Cookie("sild_admin", f.owner).
-		JSON(map[string]any{"projects": []string{}, "locales": []string{"lv"}}).Do(); w.Code != http.StatusNoContent {
-		t.Fatalf("set grant: %d %s", w.Code, w.Body)
-	}
+	f.h.SeedAdminScoped(f.tenant.ID, "translator@test", models.PlatformTranslator, models.RoleScope{
+		Projects: []string{models.ScopeAll}, Locales: []string{"lv"},
+	})
 	cookie := loginAs(t, f.h, "translator@test")
 
 	granted := f.h.Request("PUT", "/v1/translations/projects/sild/keys/"+titleKey).
@@ -290,15 +302,60 @@ func TestATranslatorsGrantNarrowsWhichLanguagesTheyMayWrite(t *testing.T) {
 	}
 }
 
-func TestATranslatorCannotPublish(t *testing.T) {
+// Auto-publish is the project's setting, but publishing is the person's grant:
+// a draft-only translator's edit must not go live because someone else turned it on.
+func TestADraftOnlyTranslatorDoesNotTripAutoPublish(t *testing.T) {
 	f := newI18nFixture(t)
-	f.h.SeedAdmin(f.tenant.ID, "translator@test", models.PlatformTranslator)
+	if w := f.h.Request("PUT", "/v1/translations/projects/sild").Cookie("sild_admin", f.owner).
+		JSON(map[string]any{"locales": []string{"en", "lv"}, "fallback_locale": "en", "auto_publish": true}).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("enable auto-publish: %d %s", w.Code, w.Body)
+	}
+	f.h.SeedAdminScoped(f.tenant.ID, "drafter@test", models.PlatformTranslator, everyProjectAndLanguage())
+	cookie := loginAs(t, f.h, "drafter@test")
+
+	before := f.manifestVersion(t)
+	if w := f.h.Request("PUT", "/v1/translations/projects/sild/keys/"+titleKey).Cookie("sild_admin", cookie).
+		JSON(map[string]any{"locale": "lv", "value": "Runā ar mums"}).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("draft write: %d %s", w.Code, w.Body)
+	}
+	if got := f.manifestVersion(t); got != before {
+		t.Fatalf("the draft went live: version moved %d → %d", before, got)
+	}
+
+	// The owner's own write still auto-publishes — the setting is not broken.
+	if w := f.h.Request("PUT", "/v1/translations/projects/sild/keys/"+titleKey).Cookie("sild_admin", f.owner).
+		JSON(map[string]any{"locale": "lv", "value": "Sazinieties"}).Do(); w.Code != http.StatusNoContent {
+		t.Fatalf("owner write: %d %s", w.Code, w.Body)
+	}
+	if got := f.manifestVersion(t); got == before {
+		t.Fatal("auto-publish did not fire for a caller who may publish")
+	}
+}
+
+// everyProjectAndLanguage is the widest translator scope: every project, every
+// language, drafts only.
+func everyProjectAndLanguage() models.RoleScope {
+	return models.RoleScope{Projects: []string{models.ScopeAll}, Locales: []string{models.ScopeAll}}
+}
+
+func TestATranslatorCannotPublishUntilItIsGranted(t *testing.T) {
+	f := newI18nFixture(t)
+	f.h.SeedAdminScoped(f.tenant.ID, "translator@test", models.PlatformTranslator, everyProjectAndLanguage())
 	cookie := loginAs(t, f.h, "translator@test")
 
 	w := f.h.Request("POST", "/v1/translations/projects/sild/releases").
 		Cookie("sild_admin", cookie).Do()
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("translator publishing = %d, want 403", w.Code)
+	}
+
+	scope := everyProjectAndLanguage()
+	scope.Publish = true
+	f.h.SeedAdminScoped(f.tenant.ID, "publisher@test", models.PlatformTranslator, scope)
+	publisher := loginAs(t, f.h, "publisher@test")
+	if w := f.h.Request("POST", "/v1/translations/projects/sild/releases").
+		Cookie("sild_admin", publisher).Do(); w.Code != http.StatusCreated {
+		t.Fatalf("translator granted publishing = %d %s, want 201", w.Code, w.Body)
 	}
 }
 
@@ -374,12 +431,9 @@ func seedOverride(t *testing.T, h *testutil.Harness, tenantID, locale, key, valu
 
 func TestALocaleScopedTranslatorCannotReadAnotherLanguage(t *testing.T) {
 	f := newI18nFixture(t)
-	tr := f.h.SeedAdmin(f.tenant.ID, "translator@test", models.PlatformTranslator)
-	if w := f.h.Request("PUT", "/v1/translations/grants/"+tr.ID).
-		Cookie("sild_admin", f.owner).
-		JSON(map[string]any{"locales": []string{"es"}}).Do(); w.Code != http.StatusNoContent {
-		t.Fatalf("set grant: %d %s", w.Code, w.Body)
-	}
+	f.h.SeedAdminScoped(f.tenant.ID, "translator@test", models.PlatformTranslator, models.RoleScope{
+		Projects: []string{models.ScopeAll}, Locales: []string{"es"},
+	})
 	cookie := loginAs(t, f.h, "translator@test")
 
 	if w := f.h.Request("GET", "/v1/translations/projects/sild/keys?locale=lv").

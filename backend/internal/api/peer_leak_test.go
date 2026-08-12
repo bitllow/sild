@@ -68,12 +68,9 @@ func TestUnifiedListNeverLeaksPeerToNonPeerOperator(t *testing.T) {
 func TestPeerAccessOperatorSeesPeerRows(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
-	ctx := context.Background()
 
 	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
-	if err := h.Svc.SetPeerAccess(ctx, tenant.ID, admin.ID, true); err != nil {
-		t.Fatalf("grant peer access: %v", err)
-	}
+	h.GrantPeer(tenant.ID, admin.ID)
 	owner := loginAs(t, h, "owner@test")
 	peer := mkPeer(t, h, tenant.ID, "trip_visible")
 

@@ -44,7 +44,7 @@ func TestEveryCollectionPagesToExhaustion(t *testing.T) {
 			JSON(map[string]any{"url": fmt.Sprintf("https://ex.test/%d", i), "events": []string{"message.created"}}).Do(), &wh)
 		webhookID = wh.ID
 		h.Request("POST", "/v1/team").Cookie("sild_admin", owner).
-			JSON(map[string]any{"email": fmt.Sprintf("ex%d@test", i), "platform_role": "agent"}).Do()
+			JSON(map[string]any{"email": fmt.Sprintf("ex%d@test", i), "role": "agent"}).Do()
 	}
 
 	// Deliveries are written by the webhook worker, not by any route, so seed them

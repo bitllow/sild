@@ -58,7 +58,11 @@ func (a *Auth) resolveAdmin(ctx context.Context, rawCookie string) (*principal.P
 	if err != nil {
 		return nil, false
 	}
-	return &principal.Principal{TenantID: admin.TenantID, Kind: principal.KindAdmin, AdminID: admin.ID, Role: admin.PlatformRole, PeerAccess: admin.PeerAccess}, true
+	roles, err := a.store.RoleAssignments().ListByAdmin(ctx, admin.TenantID, admin.ID)
+	if err != nil {
+		return nil, false
+	}
+	return principal.ForAdmin(admin, roles), true
 }
 
 // ── Middleware (enforce a specific credential type) ─────────────────────────

@@ -17,6 +17,7 @@ type Store interface {
 	Tenants() TenantRepo
 	APIKeys() APIKeyRepo
 	Admins() AdminRepo
+	RoleAssignments() RoleAssignmentRepo
 	SigningKeys() SigningKeyRepo
 	Conversations() ConversationRepo
 	Contacts() ContactRepo
