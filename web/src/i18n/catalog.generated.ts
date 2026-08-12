@@ -34,6 +34,7 @@ export type StringKey =
   | "widget.logoAlt"
   | "widget.notifications.disable"
   | "widget.notifications.enable"
+  | "widget.poweredBy"
   | "widget.status.connecting"
   | "widget.status.loading"
   | "widget.status.reconnecting"
@@ -85,6 +86,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logo",
     "widget.notifications.disable": "Turn off reply notifications",
     "widget.notifications.enable": "Turn on reply notifications",
+    "widget.poweredBy": "Powered by Sild",
     "widget.status.connecting": "Connecting…",
     "widget.status.loading": "Loading…",
     "widget.status.reconnecting": "Reconnecting…",
@@ -129,6 +131,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logotipo",
     "widget.notifications.disable": "Desactivar notificaciones de respuestas",
     "widget.notifications.enable": "Activar notificaciones de respuestas",
+    "widget.poweredBy": "Con tecnología de Sild",
     "widget.status.connecting": "Conectando…",
     "widget.status.loading": "Cargando…",
     "widget.status.reconnecting": "Reconectando…",
@@ -173,6 +176,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logo",
     "widget.notifications.disable": "Lülita vastuste teavitused välja",
     "widget.notifications.enable": "Lülita vastuste teavitused sisse",
+    "widget.poweredBy": "Töötab Sildi abil",
     "widget.status.connecting": "Ühendamine…",
     "widget.status.loading": "Laadimine…",
     "widget.status.reconnecting": "Taasühendamine…",
@@ -218,6 +222,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logotipas",
     "widget.notifications.disable": "Išjungti pranešimus apie atsakymus",
     "widget.notifications.enable": "Įjungti pranešimus apie atsakymus",
+    "widget.poweredBy": "Veikia su Sild",
     "widget.status.connecting": "Jungiamasi…",
     "widget.status.loading": "Įkeliama…",
     "widget.status.reconnecting": "Jungiamasi iš naujo…",
@@ -263,6 +268,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logotips",
     "widget.notifications.disable": "Izslēgt paziņojumus par atbildēm",
     "widget.notifications.enable": "Ieslēgt paziņojumus par atbildēm",
+    "widget.poweredBy": "Darbojas ar Sild",
     "widget.status.connecting": "Notiek savienošana…",
     "widget.status.loading": "Ielādē…",
     "widget.status.reconnecting": "Atkārtoti savienojas…",
@@ -309,6 +315,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Логотип",
     "widget.notifications.disable": "Отключить уведомления об ответах",
     "widget.notifications.enable": "Включить уведомления об ответах",
+    "widget.poweredBy": "Работает на Sild",
     "widget.status.connecting": "Подключение…",
     "widget.status.loading": "Загрузка…",
     "widget.status.reconnecting": "Переподключение…",

@@ -37,6 +37,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logo",
         "widget.notifications.disable" to "Turn off reply notifications",
         "widget.notifications.enable" to "Turn on reply notifications",
+        "widget.poweredBy" to "Powered by Sild",
         "widget.status.connecting" to "Connecting…",
         "widget.status.loading" to "Loading…",
         "widget.status.reconnecting" to "Reconnecting…",
@@ -81,6 +82,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logotipo",
         "widget.notifications.disable" to "Desactivar notificaciones de respuestas",
         "widget.notifications.enable" to "Activar notificaciones de respuestas",
+        "widget.poweredBy" to "Con tecnología de Sild",
         "widget.status.connecting" to "Conectando…",
         "widget.status.loading" to "Cargando…",
         "widget.status.reconnecting" to "Reconectando…",
@@ -125,6 +127,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logo",
         "widget.notifications.disable" to "Lülita vastuste teavitused välja",
         "widget.notifications.enable" to "Lülita vastuste teavitused sisse",
+        "widget.poweredBy" to "Töötab Sildi abil",
         "widget.status.connecting" to "Ühendamine…",
         "widget.status.loading" to "Laadimine…",
         "widget.status.reconnecting" to "Taasühendamine…",
@@ -170,6 +173,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logotipas",
         "widget.notifications.disable" to "Išjungti pranešimus apie atsakymus",
         "widget.notifications.enable" to "Įjungti pranešimus apie atsakymus",
+        "widget.poweredBy" to "Veikia su Sild",
         "widget.status.connecting" to "Jungiamasi…",
         "widget.status.loading" to "Įkeliama…",
         "widget.status.reconnecting" to "Jungiamasi iš naujo…",
@@ -215,6 +219,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logotips",
         "widget.notifications.disable" to "Izslēgt paziņojumus par atbildēm",
         "widget.notifications.enable" to "Ieslēgt paziņojumus par atbildēm",
+        "widget.poweredBy" to "Darbojas ar Sild",
         "widget.status.connecting" to "Notiek savienošana…",
         "widget.status.loading" to "Ielādē…",
         "widget.status.reconnecting" to "Atkārtoti savienojas…",
@@ -261,6 +266,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Логотип",
         "widget.notifications.disable" to "Отключить уведомления об ответах",
         "widget.notifications.enable" to "Включить уведомления об ответах",
+        "widget.poweredBy" to "Работает на Sild",
         "widget.status.connecting" to "Подключение…",
         "widget.status.loading" to "Загрузка…",
         "widget.status.reconnecting" to "Переподключение…",
@@ -384,6 +390,7 @@ object SildKeys {
     const val widgetLogoAlt: String = "widget.logoAlt"
     const val widgetNotificationsDisable: String = "widget.notifications.disable"
     const val widgetNotificationsEnable: String = "widget.notifications.enable"
+    const val widgetPoweredBy: String = "widget.poweredBy"
     const val widgetStatusConnecting: String = "widget.status.connecting"
     const val widgetStatusLoading: String = "widget.status.loading"
     const val widgetStatusReconnecting: String = "widget.status.reconnecting"

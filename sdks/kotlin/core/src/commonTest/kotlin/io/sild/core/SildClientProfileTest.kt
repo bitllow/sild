@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
 // unconfigured profile asserts nothing; a configured-empty one asserts empty.
 class SildClientProfileTest {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val writes = mutableListOf<String>()
+    private val writes = Recorded<String>()
 
     @AfterTest fun tearDown() {
         scope.cancel()

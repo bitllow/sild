@@ -19,8 +19,8 @@ import kotlin.test.assertTrue
 // Offline REST tests: 401 refresh-and-retry, error extraction, upload grant → PUT.
 // A live backend won't hand out an expired token to order, hence a scripted engine.
 class SildApiTest {
-    private val minted = mutableListOf<String>()
-    private val requests = mutableListOf<HttpRequestData>()
+    private val minted = Recorded<String>()
+    private val requests = Recorded<HttpRequestData>()
 
     private val base = "http://api.test"
 

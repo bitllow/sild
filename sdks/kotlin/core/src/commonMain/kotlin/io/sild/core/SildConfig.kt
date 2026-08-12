@@ -29,6 +29,10 @@ data class SildConfig(
      *  your app has its own language picker. [SildClient.setLocale] changes it
      *  after init without a reconnect. */
     val locale: String? = null,
+    /** Where to keep downloaded strings between launches. iOS has one by default;
+     *  on Android `Sild.init(context, config)` supplies it. Null keeps text for the
+     *  process only. */
+    val stringStore: SildStringStore? = platformStringStore(),
     /** Show the key itself when a string resolves to nothing, instead of a blank.
      *  For development: a customer must never read a dotted key. */
     val debugStrings: Boolean = false,

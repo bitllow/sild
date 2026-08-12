@@ -29,6 +29,20 @@ func (r *apiKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]model
 	return ks, err
 }
 
+func (r *apiKeyRepo) Rescope(ctx context.Context, tenantID, id string, scope models.RoleScope) error {
+	res := r.db.WithContext(ctx).Model(&models.APIKey{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Select("scope").
+		Updates(&models.APIKey{Scope: scope})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (r *apiKeyRepo) Revoke(ctx context.Context, tenantID, id string) error {
 	now := time.Now()
 	res := r.db.WithContext(ctx).Model(&models.APIKey{}).

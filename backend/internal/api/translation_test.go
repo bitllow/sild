@@ -472,3 +472,25 @@ func TestTranslationsAreScopedToTheirTenant(t *testing.T) {
 		}
 	}
 }
+
+// The attribution mark is translated so a Latvian visitor can read it, not reworded
+// so a tenant can put their own name on it. Hiding it stays a brand setting.
+func TestTheAttributionIsTranslatedButNotOverridable(t *testing.T) {
+	f := newI18nFixture(t)
+	const key = "widget.poweredBy"
+
+	rows := f.keys(t, "lv", "")
+	if got := rows[key]["value"]; got == "" || got == "Powered by Sild" {
+		t.Fatalf("lv attribution = %q, want Sild's own Latvian", got)
+	}
+	res := f.put(t, "lv", key, "Darbojas ar Acme")
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("rewording the attribution: %d", res.StatusCode)
+	}
+	// And a row written straight to the store still does not reach a bundle.
+	seedOverride(t, f.h, f.tenant.ID, "lv", key, "Darbojas ar Acme")
+	v := f.publish(t)
+	if got := f.bundle(t, "lv", v)[key]; got == "Darbojas ar Acme" {
+		t.Errorf("a stored override reached the published bundle: %q", got)
+	}
+}

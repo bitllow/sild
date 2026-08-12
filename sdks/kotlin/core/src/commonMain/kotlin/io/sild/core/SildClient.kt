@@ -55,8 +55,12 @@ class SildClient internal constructor(
 
     /** The active language and its strings. Renders bundled defaults from the first
      *  frame; a published update is fetched off the boot path. */
-    val i18n: SildI18n =
-        SildI18n(api, cfg.locale, debug = cfg.debugStrings, onMissingKey = cfg.onMissingString)
+    val i18n: SildI18n = SildI18n(
+        api, cfg.locale,
+        downloads = I18nDownloads.forStore(cfg.stringStore),
+        debug = cfg.debugStrings,
+        onMissingKey = cfg.onMissingString,
+    )
 
     /** Render [tag] from now on, without a reconnect — for an app whose own language
      *  picker changed. The recipient locale Sild composes push in follows it. */
@@ -176,6 +180,10 @@ class SildClient internal constructor(
     /** Poll for published strings and tell Sild what language this person reads.
      *  Both are off the boot path: neither may delay the support channel. */
     private suspend fun refreshTranslations() {
+        // The token names the tenant, so this is the first moment what a previous
+        // session kept for them can be told apart from another tenant's.
+        i18n.adopt(api.tenant())
+        publishLocale()
         runCatching { api.setOwnLocale(i18n.locale) }
         i18n.refreshStaged()
     }

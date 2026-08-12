@@ -129,7 +129,7 @@ fun HomeScreen(state: SildState, onNew: () -> Unit, onOpen: (String) -> Unit, on
             }
             if (state.error != null) SildError(state.error!!)
             if (brand.poweredBy) {
-                Text("Powered by Sild", color = colors.tertiary, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text(t(SildKeys.widgetPoweredBy), color = colors.tertiary, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
     }

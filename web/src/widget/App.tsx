@@ -254,7 +254,7 @@ export function App({ client, config, i18n, conversationId, name, mode = "live",
               onNew={() => setDraft(true)}
             />
           )}
-          {config.poweredBy && <div class="powered">Powered by Sild</div>}
+          {config.poweredBy && <div class="powered">{t("widget.poweredBy")}</div>}
         </div>
       )}
       <button class={`launcher${open && !preview ? " open" : ""}`} aria-label={t("widget.home.title")} onClick={toggle}>

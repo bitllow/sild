@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
 // link — has no row unless the client fetches it.
 class SildClientThreadTest {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val paths = mutableListOf<String>()
+    private val paths = Recorded<String>()
 
     @AfterTest fun tearDown() {
         scope.cancel()

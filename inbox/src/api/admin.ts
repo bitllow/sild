@@ -408,7 +408,16 @@ export interface ApiTranslationPublished {
 }
 
 /** A file shape an import accepts; `sheet` is export-only. */
-export type TranslationFormat = "json" | "csv" | "sheet" | "android" | "ios" | "ios-plurals";
+export type TranslationFormat =
+  | "json"
+  | "csv"
+  | "sheet"
+  | "android"
+  | "ios"
+  | "ios-plurals"
+  | "kotlin"
+  | "swift"
+  | "typescript";
 
 export interface ApiImportRow {
   key: string;

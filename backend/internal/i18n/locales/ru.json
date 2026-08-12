@@ -31,6 +31,7 @@
   "widget.logoAlt": "Логотип",
   "widget.notifications.disable": "Отключить уведомления об ответах",
   "widget.notifications.enable": "Включить уведомления об ответах",
+  "widget.poweredBy": "Работает на Sild",
   "widget.status.connecting": "Подключение…",
   "widget.status.loading": "Загрузка…",
   "widget.status.reconnecting": "Переподключение…",

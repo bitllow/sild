@@ -29,6 +29,7 @@
   "widget.logoAlt": "Logotipo",
   "widget.notifications.disable": "Desactivar notificaciones de respuestas",
   "widget.notifications.enable": "Activar notificaciones de respuestas",
+  "widget.poweredBy": "Con tecnología de Sild",
   "widget.status.connecting": "Conectando…",
   "widget.status.loading": "Cargando…",
   "widget.status.reconnecting": "Reconectando…",

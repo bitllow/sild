@@ -238,6 +238,15 @@ func (c *Catalog) Default(locale, key string) (string, bool) {
 	return v, ok
 }
 
+// reserved keys render Sild's own text in every language and take no tenant
+// override: the attribution mark is translated so a Latvian visitor can read it,
+// not reworded so a tenant can put their own name on it. Hiding it entirely stays
+// a brand setting the tenant owns.
+var reserved = []string{"widget.poweredBy"}
+
+// Reserved reports whether a key's text is Sild's to write in every language.
+func Reserved(key string) bool { return slices.Contains(reserved, key) }
+
 // Overrides is a tenant's own text, by locale then key. A missing entry means
 // the tenant did not change that string.
 type Overrides map[string]map[string]string
@@ -281,7 +290,7 @@ func (c *Catalog) resolve(ov Overrides, chain [3]string, key string) string {
 
 // textIn is one language's text for a key: the tenant's own first, then Sild's.
 func (c *Catalog) textIn(ov Overrides, locale, key string) string {
-	if v := ov[locale][key]; v != "" {
+	if v := ov[locale][key]; v != "" && !Reserved(key) {
 		return v
 	}
 	return c.byLocale[locale][key]

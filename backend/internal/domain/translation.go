@@ -338,7 +338,59 @@ func (s *Service) DeleteTranslationProject(ctx context.Context, tenantID, projec
 	if _, err := s.TranslationProject(ctx, tenantID, project); err != nil {
 		return err
 	}
-	return s.store.Translations().DeleteProject(ctx, tenantID, project)
+	if err := s.store.Translations().DeleteProject(ctx, tenantID, project); err != nil {
+		return err
+	}
+	// The grants naming it go with it. A scope names projects by id, so leaving them
+	// would hand a new project of the same name to whoever held the old one.
+	return s.revokeProjectGrants(ctx, tenantID, project)
+}
+
+// revokeProjectGrants drops one project from every translator assignment and every
+// scoped key. A grant that named only that project ends up naming nothing, which
+// grants nothing — the Team screen shows it as such.
+func (s *Service) revokeProjectGrants(ctx context.Context, tenantID, project string) error {
+	rows, err := s.store.RoleAssignments().ListByTenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	for _, a := range rows {
+		kept := without(a.Scope.Projects, project)
+		if len(kept) == len(a.Scope.Projects) {
+			continue
+		}
+		a.Scope.Projects = kept
+		if err := s.store.RoleAssignments().Rescope(ctx, tenantID, a.AdminUserID, a.Role, a.Scope); err != nil {
+			return err
+		}
+	}
+	keys, err := s.store.APIKeys().ListByTenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		kept := without(k.Scope.Projects, project)
+		if len(kept) == len(k.Scope.Projects) {
+			continue
+		}
+		k.Scope.Projects = kept
+		if err := s.store.APIKeys().Rescope(ctx, tenantID, k.ID, k.Scope); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// without drops one member, leaving "all" alone: a grant over every project is not
+// a grant that named this one.
+func without(set []string, value string) []string {
+	out := make([]string, 0, len(set))
+	for _, s := range set {
+		if s != value {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // validKey keeps a key addressable as a URL path segment — undeclaring one is a
@@ -524,6 +576,9 @@ func (s *Service) PutTranslationOverride(ctx context.Context, tenantID, project,
 	// where English declares no such sibling.
 	if !cat.DeclaredFor(locale, key) {
 		return invalid("unknown key")
+	}
+	if i18n.Reserved(key) {
+		return invalid("that string is Sild's own; turn the attribution off in Appearance instead")
 	}
 	if strings.TrimSpace(value) == "" {
 		return invalid("value is required")

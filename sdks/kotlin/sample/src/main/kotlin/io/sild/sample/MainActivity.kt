@@ -35,7 +35,8 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Sild.init(SildConfig(baseUrl = DevBackend.BASE, tokenProvider = DevBackend.tokenProvider, userId = DevBackend.USER_ID))
+        // With a Context, so published strings survive the app being killed.
+        Sild.init(this, SildConfig(baseUrl = DevBackend.BASE, tokenProvider = DevBackend.tokenProvider, userId = DevBackend.USER_ID))
         setContent { AcmeRidesScreen() }
     }
 }
