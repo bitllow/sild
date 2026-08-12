@@ -622,6 +622,12 @@ func (s *Service) UndeclareTranslationKey(ctx context.Context, tenantID, project
 	if err != nil {
 		return err
 	}
+	// A sibling names the whole plural: the editor shows one key per base, and
+	// removing "cart.items.one" and leaving the rest is not a state a tenant asked
+	// for.
+	if base, _, ok := i18n.SplitPlural(key); ok && cat.IsPluralBase(base) {
+		key = base
+	}
 	gone := []string{key}
 	if cat.IsPluralBase(key) {
 		// Every category, not the source language's: a Latvian zero form is a row of

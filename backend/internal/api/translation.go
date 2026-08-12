@@ -444,7 +444,9 @@ func (h *Handler) listTranslationReleases(c *gin.Context) {
 
 func (h *Handler) translationManifest(c *gin.Context) {
 	project := translationProject(c)
-	if !apiutil.Authorize(c, policy.TranslationsFetch) {
+	// Held to the project like every other translation read: a build token scoped to
+	// one project must not learn what another publishes either.
+	if !apiutil.AuthorizeTranslation(c, policy.TranslationsFetch, project, "") {
 		return
 	}
 	m, err := h.svc.TranslationManifest(c.Request.Context(), apiutil.Tenant(c), project)
@@ -473,8 +475,8 @@ func (h *Handler) translationManifest(c *gin.Context) {
 
 func (h *Handler) translationBundle(c *gin.Context) {
 	project := translationProject(c)
-	locale := c.Query("locale")
-	if !apiutil.Authorize(c, policy.TranslationsFetch) {
+	locale := i18n.Normalize(c.Query("locale"))
+	if !apiutil.AuthorizeTranslation(c, policy.TranslationsFetch, project, locale) {
 		return
 	}
 	version, err := strconv.Atoi(c.Query("version"))

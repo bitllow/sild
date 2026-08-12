@@ -323,7 +323,7 @@ const KeyRow = observer(function KeyRow({ row, t }: { row: ApiTranslationKey; t:
             data-testid="translations-undeclare"
             size="sm"
             variant="ghost"
-            onClick={() => void t.undeclareKey(row.key)}
+            onClick={() => void t.undeclareKey(row.plural_base || row.key)}
           >
             Remove
           </Button>

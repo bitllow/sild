@@ -3,6 +3,8 @@ package api_test
 import (
 	"net/http"
 	"testing"
+
+	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
 const agentsOnline = "widget.home.agentsOnline"
@@ -150,5 +152,50 @@ func TestAPluralDeclarationNeedsEverySourceForm(t *testing.T) {
 		}}).Do()
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("a form the source language does not have: %d %s", w.Code, w.Body)
+	}
+}
+
+// The editor labels a plural row by its base, so removing one is removing the key
+// — whichever sibling the row happened to name.
+func TestRemovingOneSiblingRemovesThePlural(t *testing.T) {
+	f := newI18nFixture(t)
+	f.createProject(t, "shop", "Shop")
+	if res := f.declare(t, "shop", "cart.items", "", map[string]string{
+		"one": "{count} item", "other": "{count} items",
+	}); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("declare: %d", res.StatusCode)
+	}
+	w := f.h.Request("DELETE", "/v1/translations/projects/shop/declarations/cart.items.one").
+		Cookie("sild_admin", f.owner).Do()
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("undeclare a sibling: %d %s", w.Code, w.Body)
+	}
+	if rows := f.projectKeys(t, "shop", "en", ""); len(rows) != 0 {
+		t.Errorf("%d rows survived: %v", len(rows), rows)
+	}
+}
+
+// A build token holds the client fetch, so the fetch is held to its project too.
+func TestAScopedKeyCannotFetchAnotherProjectsBundle(t *testing.T) {
+	f := newI18nFixture(t)
+	f.createProject(t, "shop", "Shop")
+	f.publish(t)
+	key := f.h.SeedScopedAPIKey(f.tenant.ID, models.RoleScope{Projects: []string{"shop"}})
+
+	w := f.h.Request("GET", "/v1/translations/manifest?project=shop").Bearer(key).Do()
+	if w.Code != http.StatusOK {
+		t.Fatalf("its own manifest: %d %s", w.Code, w.Body)
+	}
+	if w = f.h.Request("GET", "/v1/translations/manifest?project=sild").Bearer(key).Do(); w.Code != http.StatusForbidden {
+		t.Errorf("another project's manifest: %d %s", w.Code, w.Body)
+	}
+	w = f.h.Request("GET", "/v1/translations/bundle?project=sild&locale=lv&version=1").Bearer(key).Do()
+	if w.Code != http.StatusForbidden {
+		t.Errorf("another project's bundle: %d %s", w.Code, w.Body)
+	}
+	// A user JWT carries no translation scope, so the client read is untouched.
+	token := f.h.MintToken(f.tenant.ID, "u_alice")
+	if w := f.h.Request("GET", "/v1/translations/manifest?project=sild").Bearer(token).Do(); w.Code != http.StatusOK {
+		t.Errorf("an ordinary client lost its manifest: %d %s", w.Code, w.Body)
 	}
 }
