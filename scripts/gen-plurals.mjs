@@ -55,7 +55,16 @@ async function main() {
   for (const [sig, members] of [...bySignature].sort((a, b) => b[1].length - a[1].length)) {
     const named = members.map((l) => current.locales[l]).filter(Boolean);
     const inherited = named.find((n) => members.every((l) => current.locales[l] === n) && !taken.has(n));
-    const name = NAMES[members.join(" ")] || (taken.has(inherited) ? null : inherited) || `like_${members[0]}`;
+    const name = NAMES[members.join(" ")] || inherited;
+    if (!name) {
+      // Every family is a `case` in three hand-written rule switches. A new one
+      // would fall through to one/other in all of them and only surface as a failing
+      // case table later, so it stops here instead.
+      throw new Error(
+        `no rule is written for the family holding ${members.join(" ")} — ` +
+          `add a case to plural.go, index.ts and I18n.kt, then name it in NAMES`
+      );
+    }
     taken.add(name);
     // Every language has "other": it is the last readable text a lookup falls to,
     // even where no integer selects it.

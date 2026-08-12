@@ -1,5 +1,7 @@
 package io.sild.core
 
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -16,25 +18,10 @@ private class MemoryStore : SildStringStore {
 
 // A JWT is three dot-separated parts; only the payload matters here, and only its
 // tenant claim. Unsigned: the server verifies, this does not.
-private fun tokenFor(tenant: String): String =
-    "header.${base64Url("{\"tid\":\"$tenant\",\"sub\":\"u_1\"}")}.signature"
-
-private fun base64Url(s: String): String {
-    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-    val bytes = s.encodeToByteArray()
-    val out = StringBuilder()
-    var i = 0
-    while (i < bytes.size) {
-        val b0 = bytes[i].toInt() and 0xFF
-        val b1 = if (i + 1 < bytes.size) bytes[i + 1].toInt() and 0xFF else -1
-        val b2 = if (i + 2 < bytes.size) bytes[i + 2].toInt() and 0xFF else -1
-        out.append(alphabet[b0 shr 2])
-        out.append(alphabet[((b0 and 0x03) shl 4) or (if (b1 >= 0) b1 shr 4 else 0)])
-        if (b1 >= 0) out.append(alphabet[((b1 and 0x0F) shl 2) or (if (b2 >= 0) b2 shr 6 else 0)])
-        if (b2 >= 0) out.append(alphabet[b2 and 0x3F])
-        i += 3
-    }
-    return out.toString()
+@OptIn(ExperimentalEncodingApi::class)
+private fun tokenFor(tenant: String): String {
+    val payload = "{\"tid\":\"$tenant\",\"sub\":\"u_1\"}".encodeToByteArray()
+    return "header.${Base64.UrlSafe.encode(payload)}.signature"
 }
 
 class I18nCacheTest {
@@ -85,6 +72,22 @@ class I18nCacheTest {
         assertNull(downloads.get("t_other", PLATFORM_PROJECT, "lv"))
     }
 
+    // The pointer and the bundles are one slot, so a pointer can never name a bundle
+    // that is not there.
+    @Test
+    fun whatIsKeptIsOneSlotPerTenantAndProject() {
+        val store = MemoryStore()
+        val downloads = I18nDownloads(store)
+        downloads.put("t_acme", PLATFORM_PROJECT, "lv", HeldBundle(1, mapOf("a" to "b")))
+        downloads.put("t_acme", PLATFORM_PROJECT, "et", HeldBundle(2, mapOf("a" to "c")))
+        assertEquals(1, store.slots.size, "two locales took ${store.slots.size} slots: ${store.slots.keys}")
+        assertEquals("et", downloads.settledLocale("t_acme", PLATFORM_PROJECT))
+
+        val fresh = I18nDownloads(store)
+        assertEquals("b", fresh.get("t_acme", PLATFORM_PROJECT, "lv")?.strings?.get("a"))
+        assertEquals("c", fresh.get("t_acme", PLATFORM_PROJECT, "et")?.strings?.get("a"))
+    }
+
     // A device asking for a language the tenant does not publish negotiates to one
     // they do; the next cold start has to adopt that, not guess from the device again.
     @Test
@@ -94,7 +97,7 @@ class I18nCacheTest {
 
         // "fi" is what the device asks for and what Sild ships no text for.
         val fresh = SildI18n(source = null, devicePrefs = listOf("fi"), downloads = I18nDownloads(store))
-        fresh.adopt("t_acme")
+        assertTrue(fresh.adopt("t_acme"), "adopting a kept bundle is a change worth publishing")
         assertEquals("lv", fresh.locale)
         assertEquals("Latviski", fresh.t("widget.home.cta"))
     }

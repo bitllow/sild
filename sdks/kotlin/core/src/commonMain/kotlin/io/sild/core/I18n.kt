@@ -38,71 +38,67 @@ internal class ManifestRead(val manifest: TranslationManifest?, val etag: String
 @Serializable
 internal data class HeldBundle(val version: Int, val strings: Map<String, String>)
 
-// Downloaded bundles outlive the session: a messenger closed and reopened builds a
-// new client, and without this its predecessor's download would be thrown away, so
-// "activates at next start" would never activate anything. Keyed by TENANT as well
-// as project and locale — two tenants in one process must not read each other's
-// wording — and written through to a platform store where there is one, so the next
-// cold start has it too.
-internal class I18nDownloads(internal val store: SildStringStore? = null) {
+/** Everything one tenant kept for one project: the bundles, and the language their
+ *  offering settled on. One slot, so the pointer cannot name a bundle that is not
+ *  there. */
+@Serializable
+internal data class HeldProject(
+    val settled: String = "",
+    val bundles: Map<String, HeldBundle> = emptyMap(),
+)
+
+// Downloaded bundles outlive the session, or "activates at next start" would never
+// activate anything. Keyed by tenant: two tenants in one process must not read each
+// other's wording.
+internal class I18nDownloads(store: SildStringStore? = null) {
+    @Volatile
+    private var store: SildStringStore? = store
     // Replaced whole rather than mutated: this is read on the main thread and
     // written from whichever dispatcher the fetch ran on.
     @Volatile
-    private var byLocale: Map<String, HeldBundle> = emptyMap()
+    private var byProject: Map<String, HeldProject> = emptyMap()
 
-    fun get(tenant: String, project: String, locale: String): HeldBundle? {
-        val key = slot(tenant, project, locale)
-        byLocale[key]?.let { return it }
-        val raw = store?.read(key) ?: return null
-        val held = runCatching { Json.decodeFromString<HeldBundle>(raw) }.getOrNull() ?: return null
-        byLocale = byLocale + (key to held)
-        return held
-    }
+    fun get(tenant: String, project: String, locale: String): HeldBundle? =
+        held(tenant, project).bundles[locale]
 
-    fun put(tenant: String, project: String, locale: String, held: HeldBundle) {
-        val key = slot(tenant, project, locale)
-        byLocale = byLocale + (key to held)
-        settled = settled + (settledSlot(tenant, project) to locale)
+    /** The language this tenant's offering settled on, or "" if no fetch ever did.
+     *  A device asking for Finnish against a tenant publishing Latvian negotiates to
+     *  Latvian; without this the next start would guess Finnish and adopt nothing. */
+    fun settledLocale(tenant: String, project: String): String = held(tenant, project).settled
+
+    fun put(tenant: String, project: String, locale: String, bundle: HeldBundle) {
+        val key = slot(tenant, project)
+        val next = held(tenant, project).let {
+            it.copy(settled = locale, bundles = it.bundles + (locale to bundle))
+        }
+        byProject = byProject + (key to next)
         // A tenant with no identity yet is held in memory only: a slot that cannot
         // name whose text it is would be read by the next tenant along.
         if (tenant.isEmpty()) return
-        runCatching {
-            store?.write(key, Json.encodeToString(held))
-            store?.write(settledSlot(tenant, project), locale)
-        }
+        runCatching { store?.write(key, Json.encodeToString(next)) }
     }
 
-    /** The language this tenant's offering settled on, if a fetch ever settled one.
-     *  A device asking for Finnish against a tenant that publishes Latvian negotiates
-     *  to Latvian; without this the next start would guess Finnish again and adopt
-     *  nothing. */
-    fun settledLocale(tenant: String, project: String): String? {
-        val key = settledSlot(tenant, project)
-        settled[key]?.let { return it }
-        val stored = store?.read(key) ?: return null
-        settled = settled + (key to stored)
-        return stored
+    // A miss is remembered as an empty one: the store is a platform call, and a
+    // device on a language nobody published would otherwise re-read it every time.
+    private fun held(tenant: String, project: String): HeldProject {
+        val key = slot(tenant, project)
+        byProject[key]?.let { return it }
+        val raw = if (tenant.isEmpty()) null else store?.read(key)
+        val held = raw?.let { runCatching { Json.decodeFromString<HeldProject>(it) }.getOrNull() }
+            ?: HeldProject()
+        byProject = byProject + (key to held)
+        return held
     }
 
-    @Volatile
-    private var settled: Map<String, String> = emptyMap()
-
-    private fun settledSlot(tenant: String, project: String) = "sild_i18n_${tenant}_${project}_@locale"
-
-    private fun slot(tenant: String, project: String, locale: String) =
-        "sild_i18n_${tenant}_${project}_$locale"
+    private fun slot(tenant: String, project: String) = "sild_i18n_${tenant}_$project"
 
     companion object {
-        /** The process-wide one, which every client built from a config shares. */
+        /** The process-wide downloads. The store is installed once — by the platform,
+         *  or by `Sild.init(context, config)` where only the host can reach one. */
         val shared = I18nDownloads(platformStringStore())
 
-        // One per store, so two clients sharing a config share their downloads and a
-        // host that supplied its own place to write is honoured.
-        private val byStore = mutableMapOf<SildStringStore, I18nDownloads>()
-
-        fun forStore(store: SildStringStore?): I18nDownloads {
-            if (store == null || store === shared.store) return shared
-            return byStore.getOrPut(store) { I18nDownloads(store) }
+        fun install(store: SildStringStore) {
+            shared.store = store
         }
     }
 }
@@ -138,12 +134,13 @@ fun pluralCategory(locale: String, count: Int): String {
     val n = if (count < 0) -count else count
     val m10 = n % 10
     val m100 = n % 100
-    return when (I18N_PLURAL_LOCALES[normalizeLocale(locale)] ?: I18N_PLURAL_DEFAULT_FAMILY) {
+    val family = I18N_PLURAL_LOCALES[normalizeLocale(locale)] ?: I18N_PLURAL_DEFAULT_FAMILY
+    return when (family) {
         "other" -> CAT_OTHER
         "hindi" -> if (n <= 1) "one" else CAT_OTHER
         "romance", "romance_zero" -> when {
             n == 1 -> "one"
-            n == 0 && I18N_PLURAL_LOCALES[normalizeLocale(locale)] == "romance_zero" -> "one"
+            n == 0 && family == "romance_zero" -> "one"
             // CLDR gives Romance a "many" for round millions, which is what a
             // compact "2 million" reads as.
             n != 0 && n % 1_000_000 == 0 -> "many"
@@ -211,21 +208,14 @@ fun pluralCategory(locale: String, count: Int): String {
             m100 in 11..19 -> "many"
             else -> CAT_OTHER
         }
-        "polish" -> when {
-            // Polish's one is exactly one, where Russian's is any number ending in it.
-            n == 1 -> "one"
+        // Three families share the "few" test and differ only in what one is and what
+        // everything else is: Polish's one is exactly one where Russian's is any
+        // number ending in it, and Serbo-Croatian has no many.
+        "polish", "slavic", "serbocroatian" -> when {
+            if (family == "polish") n == 1 else m10 == 1 && m100 != 11 -> "one"
             m10 in 2..4 && m100 !in 12..14 -> "few"
+            family == "serbocroatian" -> CAT_OTHER
             else -> "many"
-        }
-        "slavic" -> when {
-            m10 == 1 && m100 != 11 -> "one"
-            m10 in 2..4 && m100 !in 12..14 -> "few"
-            else -> "many"
-        }
-        "serbocroatian" -> when {
-            m10 == 1 && m100 != 11 -> "one"
-            m10 in 2..4 && m100 !in 12..14 -> "few"
-            else -> CAT_OTHER
         }
         else -> if (n == 1) "one" else CAT_OTHER
     }
@@ -318,15 +308,17 @@ class SildI18n internal constructor(
     /** Name the tenant whose text this client renders, and take up what was kept for
      *  them. Called once the host's token has been minted — which is the "activates
      *  at next SDK start" half of the delivery contract. */
-    internal fun adopt(tenant: String) {
-        if (tenant.isEmpty() || tenant == this.tenant) return
+    internal fun adopt(tenant: String): Boolean {
+        if (tenant.isEmpty() || tenant == this.tenant) return false
         this.tenant = tenant
+        val before = locale to version
         // The language an earlier session negotiated against what this tenant
         // publishes, unless the host named one — an instruction outranks a memory.
         if (!explicit) {
-            downloads.settledLocale(tenant, project)?.let { locale = it }
+            downloads.settledLocale(tenant, project).takeIf { it.isNotEmpty() }?.let { locale = it }
         }
         adoptDownloaded()
+        return before != locale to version
     }
 
     // What an earlier session kept is this session's starting text.

@@ -640,11 +640,6 @@ export class TranslationsStore {
     await this.runImport(true);
   };
 
-  /** The language a pending report was taken against — what Apply writes to. */
-  get importLocale(): string {
-    return this.importReport?.locale ?? this.locale;
-  }
-
   clearImport = () => {
     this.importFile = null;
     this.importReport = null;
@@ -672,7 +667,7 @@ export class TranslationsStore {
         {
           // An apply names the locale its report was taken in, not whatever the
           // screen shows now.
-          locale: dryRun ? this.locale : this.importLocale,
+          locale: dryRun ? this.locale : (this.importReport?.locale ?? this.locale),
           format: this.importFormat,
           dryRun,
           createKeys: this.importCreateKeys,

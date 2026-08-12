@@ -665,7 +665,7 @@ func TestTheDraftDiffShowsARemovedKey(t *testing.T) {
 func TestDeletingAProjectRevokesItsGrants(t *testing.T) {
 	f := newI18nFixture(t)
 	f.createProject(t, "shop", "Shop")
-	member := f.h.SeedAdminScoped(f.tenant.ID, "shopkeeper@test", models.PlatformTranslator,
+	f.h.SeedAdminScoped(f.tenant.ID, "shopkeeper@test", models.PlatformTranslator,
 		models.RoleScope{Projects: []string{"shop"}, Locales: []string{models.ScopeAll}})
 	key := f.h.SeedScopedAPIKey(f.tenant.ID, models.RoleScope{Projects: []string{"shop"}})
 	session := loginAs(t, f.h, "shopkeeper@test")
@@ -693,7 +693,6 @@ func TestDeletingAProjectRevokesItsGrants(t *testing.T) {
 	if strings.Contains(w.Body.String(), `"projects":["shop"]`) {
 		t.Errorf("the team screen still shows the deleted project as granted:\n%s", w.Body)
 	}
-	_ = member
 }
 
 // Declaring keys is the tenant's act. A build token does it as the build's source

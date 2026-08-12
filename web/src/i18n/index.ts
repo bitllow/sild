@@ -34,7 +34,8 @@ export function pluralCategory(locale: string, count: number): string {
   const n = Math.abs(Math.trunc(count));
   const m10 = n % 10;
   const m100 = n % 100;
-  switch (PLURAL_LOCALES[normalize(locale)] || PLURAL_DEFAULT_FAMILY) {
+  const family = PLURAL_LOCALES[normalize(locale)] || PLURAL_DEFAULT_FAMILY;
+  switch (family) {
     case "other":
       return OTHER;
     case "hindi":
@@ -42,7 +43,7 @@ export function pluralCategory(locale: string, count: number): string {
     case "romance":
     case "romance_zero":
       if (n === 1) return "one";
-      if (n === 0 && (PLURAL_LOCALES[normalize(locale)] || "") === "romance_zero") return "one";
+      if (n === 0 && family === "romance_zero") return "one";
       // CLDR gives Romance a "many" for round millions, which is what a compact
       // "2 million" reads as.
       if (n !== 0 && n % 1_000_000 === 0) return "many";
@@ -89,16 +90,17 @@ export function pluralCategory(locale: string, count: number): string {
       if (n === 2) return "two";
       if (n === 0 || (m100 >= 3 && m100 <= 10)) return "few";
       return m100 >= 11 && m100 <= 19 ? "many" : OTHER;
+    // Three families share the "few" test and differ only in what one is and what
+    // everything else is: Polish's one is exactly one where Russian's is any number
+    // ending in it, and Serbo-Croatian has no many.
     case "polish":
-      // Polish's one is exactly one, where Russian's is any number ending in it.
-      if (n === 1) return "one";
-      return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : "many";
     case "slavic":
-      if (m10 === 1 && m100 !== 11) return "one";
-      return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : "many";
-    case "serbocroatian":
-      if (m10 === 1 && m100 !== 11) return "one";
-      return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "few" : OTHER;
+    case "serbocroatian": {
+      const one = family === "polish" ? n === 1 : m10 === 1 && m100 !== 11;
+      if (one) return "one";
+      if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return "few";
+      return family === "serbocroatian" ? OTHER : "many";
+    }
   }
   return n === 1 ? "one" : OTHER;
 }

@@ -31,6 +31,9 @@ const CatalogVersion = "0.1.2"
 //go:embed locales/*.json
 var localeFS embed.FS
 
+//go:embed plural-keys.json
+var pluralKeysFS []byte
+
 // Catalog is the platform project's keys and their text per locale.
 type Catalog struct {
 	byLocale map[string]map[string]string
@@ -55,6 +58,17 @@ var platform = sync.OnceValue(func() *Catalog {
 
 // Platform returns the embedded catalog.
 func Platform() *Catalog { return platform() }
+
+// DeclaredPluralKeys is what plural-keys.json names, so a contract test can hold
+// the declaration and the locale files to each other.
+func DeclaredPluralKeys() []string {
+	out := make([]string, 0, len(platform().pluralBases))
+	for base := range platform().pluralBases {
+		out = append(out, base)
+	}
+	slices.Sort(out)
+	return out
+}
 
 func load() (*Catalog, error) {
 	entries, err := localeFS.ReadDir("locales")
@@ -84,7 +98,16 @@ func load() (*Catalog, error) {
 	}
 	slices.Sort(c.locales)
 	slices.Sort(c.keys)
-	c.pluralBases = PluralBases(c.keys)
+	var declared struct {
+		Keys []string `json:"keys"`
+	}
+	if err := json.Unmarshal(pluralKeysFS, &declared); err != nil {
+		return nil, fmt.Errorf("plural-keys.json: %w", err)
+	}
+	c.pluralBases = map[string]bool{}
+	for _, base := range declared.Keys {
+		c.pluralBases[base] = true
+	}
 	return c, nil
 }
 
@@ -92,10 +115,8 @@ func load() (*Catalog, error) {
 // shape a tenant-owned project has, where the declared keys are the sources and
 // every other language arrives as an override.
 //
-// pluralBases are the keys the tenant DECLARED plural, and they are the whole
-// answer: a project may have ordinary keys called `status.one` and `status.other`,
-// and reading pluralness off the names would collapse them into one count-addressed
-// key nobody asked for (docs/adr/0004).
+// pluralBases are the keys the tenant declared plural: a project may have ordinary
+// keys called `status.one` and `status.other` (docs/adr/0004).
 func NewCatalog(sources map[string]string, pluralBases ...string) *Catalog {
 	c := &Catalog{
 		byLocale:    map[string]map[string]string{SourceLocale: sources},
@@ -113,10 +134,13 @@ func NewCatalog(sources map[string]string, pluralBases ...string) *Catalog {
 	return c
 }
 
-// PluralBases reads plural keys off a key set: a base is plural when it carries
-// more than one category, which one key merely ending in a category word cannot
-// (docs/adr/0004).
-func PluralBases(keys []string) map[string]bool {
+// PluralBasesInFile reads plural keys off an imported file's key set: a base is
+// plural when the file carries more than one category for it.
+//
+// The only place inference is allowed. Everywhere else pluralness is declared
+// (docs/adr/0004) — but a file creating keys nobody has declared IS the
+// declaration, and two forms of one key is what a plural looks like there.
+func PluralBasesInFile(keys []string) map[string]bool {
 	seen := map[string][]string{}
 	for _, k := range keys {
 		if base, cat, ok := SplitPlural(k); ok && !slices.Contains(seen[base], cat) {

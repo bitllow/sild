@@ -1,0 +1,6 @@
+{
+  "_comment": "The keys in locales/*.json that are addressed by a count. Declared, not read off the names: status.one and status.other would be two ordinary keys (docs/adr/0004). Codegen reads this too, so the clients group the same keys Go does.",
+  "keys": [
+    "widget.home.agentsOnline"
+  ]
+}

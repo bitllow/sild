@@ -21,13 +21,13 @@ internal expect fun envVar(name: String): String?
 internal expect fun runBlockingTest(block: suspend CoroutineScope.() -> Unit)
 
 /**
- * What a mock engine saw, collected safely. The client issues requests
- * concurrently — a row fetch and its message page go out together — so two handler
- * coroutines append at once and a plain list loses one, failing a test whose
- * request was in fact made. Reads as an ordinary List everywhere else.
+ * What a mock engine saw, collected safely. The client issues requests concurrently
+ * — a row fetch and its message page go out together — so two handler coroutines
+ * append at once and a plain list loses one, failing a test whose request was in
+ * fact made. Reads as an ordinary List everywhere else.
  */
 @OptIn(ExperimentalAtomicApi::class)
-internal class Recorded<T> : List<T> {
+internal class Recorded<T> : AbstractList<T>() {
     // Compare-and-set on a whole immutable list: an append that raced another
     // retries, where `items += x` would silently drop one of them.
     private val items = AtomicReference<List<T>>(emptyList())
@@ -42,25 +42,8 @@ internal class Recorded<T> : List<T> {
     /** Forget what was recorded — a test asserting on the next call only. */
     fun clear() = items.store(emptyList())
 
-    private val now: List<T> get() = items.load()
-
-    override val size: Int get() = now.size
-    override fun isEmpty(): Boolean = now.isEmpty()
-    override fun iterator(): Iterator<T> = now.iterator()
-    override fun listIterator(): ListIterator<T> = now.listIterator()
-    override fun listIterator(index: Int): ListIterator<T> = now.listIterator(index)
-    override fun subList(fromIndex: Int, toIndex: Int): List<T> = now.subList(fromIndex, toIndex)
-    override fun get(index: Int): T = now[index]
-    override fun indexOf(element: T): Int = now.indexOf(element)
-    override fun lastIndexOf(element: T): Int = now.lastIndexOf(element)
-    override fun contains(element: T): Boolean = now.contains(element)
-    override fun containsAll(elements: Collection<T>): Boolean = now.containsAll(elements)
-    override fun toString(): String = now.toString()
-
-    // A List that does not answer equality as a list is only equal to itself, and
-    // `assertEquals(listOf(...), recorded)` compares actual to expected.
-    override fun equals(other: Any?): Boolean = now == other
-    override fun hashCode(): Int = now.hashCode()
+    override val size: Int get() = items.load().size
+    override fun get(index: Int): T = items.load()[index]
 }
 
 /** A unique id per call, so concurrent runs against one sild-dev don't collide. */
