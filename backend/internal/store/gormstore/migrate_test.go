@@ -137,3 +137,89 @@ func TestMigrateDropsRetiredProfileObjects(t *testing.T) {
 		})
 	}
 }
+
+// An upgrade must carry the retired role column and peer flag into assignments,
+// or every existing member authenticates holding nothing.
+func TestMigrationCarriesRetiredRolesIntoAssignments(t *testing.T) {
+	for _, dbc := range dialects(t) {
+		t.Run(string(dbc.Driver), func(t *testing.T) {
+			db, err := gormstore.Open(&config.Config{DB: dbc})
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if err := gormstore.Migrate(db); err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			// Rebuild the shape the previous release left behind.
+			if err := db.Exec("ALTER TABLE admin_users ADD COLUMN platform_role varchar(16)").Error; err != nil {
+				t.Fatalf("re-add platform_role: %v", err)
+			}
+			if err := db.Exec("ALTER TABLE admin_users ADD COLUMN peer_access boolean").Error; err != nil {
+				t.Fatalf("re-add peer_access: %v", err)
+			}
+			tenantID := id.New(id.Tenant)
+			adminID := id.New(id.AdminUser)
+			err = db.Exec(`INSERT INTO admin_users (id, tenant_id, email, platform_role, peer_access, created_at)
+			               VALUES (?, ?, ?, ?, ?, ?)`,
+				adminID, tenantID, "legacy@test", string(models.PlatformAdmin), true, time.Now()).Error
+			if err != nil {
+				t.Fatalf("seed legacy admin: %v", err)
+			}
+
+			if err := gormstore.Migrate(db); err != nil {
+				t.Fatalf("re-migrate: %v", err)
+			}
+
+			var held []models.RoleAssignment
+			if err := db.Where("admin_user_id = ?", adminID).Find(&held).Error; err != nil {
+				t.Fatalf("read assignments: %v", err)
+			}
+			byRole := map[models.PlatformRole]models.RoleScope{}
+			for _, a := range held {
+				byRole[a.Role] = a.Scope
+			}
+			if _, ok := byRole[models.PlatformAdmin]; !ok {
+				t.Fatalf("the retired role did not become an assignment: %v", held)
+			}
+			// Peer access was the person's whatever their role, so it survives as the
+			// agent assignment that now carries it.
+			if !byRole[models.PlatformAgent].Peer {
+				t.Fatalf("peer access was lost: %v", held)
+			}
+			if db.Migrator().HasColumn("admin_users", "platform_role") {
+				t.Error("the retired column is still there after the backfill")
+			}
+
+			// An ungranted translator used to reach every project and language; the
+			// empty set now means the opposite, so the move has to spell it out.
+			if err := db.Exec("ALTER TABLE admin_users ADD COLUMN platform_role varchar(16)").Error; err != nil {
+				t.Fatalf("re-add platform_role: %v", err)
+			}
+			if err := db.Exec("ALTER TABLE admin_users ADD COLUMN peer_access boolean").Error; err != nil {
+				t.Fatalf("re-add peer_access: %v", err)
+			}
+			translatorID := id.New(id.AdminUser)
+			err = db.Exec(`INSERT INTO admin_users (id, tenant_id, email, platform_role, peer_access, created_at)
+			               VALUES (?, ?, ?, ?, ?, ?)`,
+				translatorID, tenantID, "legacy-translator@test", string(models.PlatformTranslator), false, time.Now()).Error
+			if err != nil {
+				t.Fatalf("seed legacy translator: %v", err)
+			}
+			if err := gormstore.Migrate(db); err != nil {
+				t.Fatalf("re-migrate: %v", err)
+			}
+			var translator models.RoleAssignment
+			err = db.Where("admin_user_id = ? AND role = ?", translatorID, models.PlatformTranslator).
+				First(&translator).Error
+			if err != nil {
+				t.Fatalf("read translator assignment: %v", err)
+			}
+			if len(translator.Scope.Projects) == 0 || translator.Scope.Projects[0] != models.ScopeAll {
+				t.Fatalf("an unrestricted translator lost their projects: %+v", translator.Scope)
+			}
+			if len(translator.Scope.Locales) == 0 || translator.Scope.Locales[0] != models.ScopeAll {
+				t.Fatalf("an unrestricted translator lost their languages: %+v", translator.Scope)
+			}
+		})
+	}
+}

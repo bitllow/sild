@@ -9,16 +9,23 @@ import (
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
-func translator() *principal.Principal {
+func translator(scope models.RoleScope) *principal.Principal {
 	return &principal.Principal{
-		TenantID: "t_1", Kind: principal.KindAdmin,
-		AdminID: "adm_1", Role: models.PlatformTranslator,
+		TenantID: "t_1", Kind: principal.KindAdmin, AdminID: "adm_1",
+		Assignments: []principal.Assignment{{Role: models.PlatformTranslator, Scope: scope}},
+	}
+}
+
+func everything() models.RoleScope {
+	return models.RoleScope{
+		Projects: []string{models.ScopeAll}, Locales: []string{models.ScopeAll}, Publish: true,
 	}
 }
 
 func TestATranslatorHoldsExactlyTheTranslationCapabilities(t *testing.T) {
 	want := []policy.Action{
 		policy.PrincipalRead,
+		policy.TranslationsPublish,
 		policy.TranslationsRead,
 		policy.TranslationsWrite,
 	}
@@ -34,40 +41,96 @@ func TestEveryOtherActionRefusesATranslator(t *testing.T) {
 		if slices.Contains(held, a) {
 			continue
 		}
-		if err := policy.Authorize(translator(), a, policy.ResourceAttrs{}); err == nil {
+		if err := policy.Authorize(translator(everything()), a, policy.ResourceAttrs{}); err == nil {
 			t.Errorf("%s is allowed to a translator", a)
 		}
 	}
 }
 
-func TestAGrantNarrowsATranslatorToItsProjectsAndLanguages(t *testing.T) {
-	at := policy.TranslationAttrs{Projects: []string{"sild"}, Locales: []string{"lv"}}
+func TestAScopeNarrowsATranslatorToItsProjectsAndLanguages(t *testing.T) {
+	p := translator(models.RoleScope{Projects: []string{"sild"}, Locales: []string{"lv"}})
 
-	if err := policy.AuthorizeTranslation(translator(), policy.TranslationsWrite, at, "sild", "lv"); err != nil {
+	if err := policy.AuthorizeTranslation(p, policy.TranslationsWrite, "sild", "lv"); err != nil {
 		t.Fatalf("granted project and language refused: %v", err)
 	}
-	if err := policy.AuthorizeTranslation(translator(), policy.TranslationsWrite, at, "sild", "es"); err == nil {
+	if err := policy.AuthorizeTranslation(p, policy.TranslationsWrite, "sild", "es"); err == nil {
 		t.Error("an ungranted language was allowed")
 	}
-	if err := policy.AuthorizeTranslation(translator(), policy.TranslationsWrite, at, "other", "lv"); err == nil {
+	if err := policy.AuthorizeTranslation(p, policy.TranslationsWrite, "other", "lv"); err == nil {
 		t.Error("an ungranted project was allowed")
 	}
 }
 
-func TestAnEmptyGrantMeansEveryProjectAndLanguage(t *testing.T) {
-	if err := policy.AuthorizeTranslation(translator(), policy.TranslationsWrite,
-		policy.TranslationAttrs{}, "sild", "es"); err != nil {
-		t.Fatalf("ungranted translator refused: %v", err)
+// An empty set is what a fresh assignment carries, and it must read as nothing
+// granted — the alternative hands a new translator the whole tenant.
+func TestAnEmptyScopeGrantsNothing(t *testing.T) {
+	if err := policy.AuthorizeTranslation(translator(models.RoleScope{}),
+		policy.TranslationsWrite, "sild", "es"); err == nil {
+		t.Fatal("an unscoped translator was allowed to write")
 	}
 }
 
-// Grants narrow a translator; they must not narrow anyone else.
-func TestAGrantDoesNotNarrowAnOwner(t *testing.T) {
-	owner := &principal.Principal{
-		TenantID: "t_1", Kind: principal.KindAdmin, AdminID: "adm_2", Role: models.PlatformOwner,
+func TestAllKeepsGrantingAProjectAddedLater(t *testing.T) {
+	p := translator(models.RoleScope{Projects: []string{models.ScopeAll}, Locales: []string{"lv"}})
+	if err := policy.AuthorizeTranslation(p, policy.TranslationsWrite, "a-project-invented-today", "lv"); err != nil {
+		t.Fatalf("all refused a new project: %v", err)
 	}
-	at := policy.TranslationAttrs{Locales: []string{"lv"}}
-	if err := policy.AuthorizeTranslation(owner, policy.TranslationsWrite, at, "sild", "es"); err != nil {
-		t.Fatalf("owner narrowed by a translator grant: %v", err)
+}
+
+func TestPublishingIsItsOwnGrant(t *testing.T) {
+	scoped := models.RoleScope{Projects: []string{"sild"}, Locales: []string{models.ScopeAll}}
+	if err := policy.AuthorizeTranslation(translator(scoped), policy.TranslationsPublish, "sild", ""); err == nil {
+		t.Fatal("a translator without the publish grant cut a release")
+	}
+	scoped.Publish = true
+	if err := policy.AuthorizeTranslation(translator(scoped), policy.TranslationsPublish, "sild", ""); err != nil {
+		t.Fatalf("a translator granted publishing was refused: %v", err)
+	}
+	if err := policy.AuthorizeTranslation(translator(scoped), policy.TranslationsPublish, "other", ""); err == nil {
+		t.Error("publishing reached a project the assignment does not name")
+	}
+}
+
+// A release is project-wide, so publishing part of one is not a thing to grant.
+func TestPublishingNeedsEveryLanguageOfTheProject(t *testing.T) {
+	oneLanguage := models.RoleScope{Projects: []string{"sild"}, Locales: []string{"lv"}, Publish: true}
+	if err := policy.AuthorizeTranslation(translator(oneLanguage), policy.TranslationsPublish, "sild", ""); err == nil {
+		t.Fatal("a translator scoped to one language published every language")
+	}
+	if policy.MayPublish(translator(oneLanguage), "sild") {
+		t.Error("MayPublish disagrees with the decision it is meant to mirror")
+	}
+	// And their write must not trip a release through the project's auto-publish.
+	if policy.MayPublish(translator(models.RoleScope{Projects: []string{models.ScopeAll}, Locales: []string{models.ScopeAll}}), "sild") {
+		t.Error("a draft-only translator would auto-publish")
+	}
+}
+
+// A scope narrows the translator role. It must not narrow a role that reaches
+// the action on its own.
+func TestATranslatorScopeDoesNotNarrowAnOwner(t *testing.T) {
+	p := &principal.Principal{
+		TenantID: "t_1", Kind: principal.KindAdmin, AdminID: "adm_2",
+		Assignments: []principal.Assignment{
+			{Role: models.PlatformOwner},
+			{Role: models.PlatformTranslator, Scope: models.RoleScope{Locales: []string{"lv"}}},
+		},
+	}
+	if err := policy.AuthorizeTranslation(p, policy.TranslationsWrite, "sild", "es"); err != nil {
+		t.Fatalf("owner narrowed by a translator scope: %v", err)
+	}
+}
+
+func TestASecondRoleOnlyWidens(t *testing.T) {
+	both := &principal.Principal{
+		TenantID: "t_1", Kind: principal.KindAdmin, AdminID: "adm_3",
+		Assignments: append(principal.Held(models.PlatformAgent),
+			principal.Assignment{Role: models.PlatformTranslator, Scope: everything()}),
+	}
+	if err := policy.Authorize(both, policy.ConversationsList, policy.ResourceAttrs{}); err != nil {
+		t.Fatalf("the agent role stopped working next to a translator role: %v", err)
+	}
+	if err := policy.Authorize(both, policy.TranslationsWrite, policy.ResourceAttrs{}); err != nil {
+		t.Fatalf("the translator role stopped working next to an agent role: %v", err)
 	}
 }

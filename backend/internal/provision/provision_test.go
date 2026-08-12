@@ -36,10 +36,18 @@ func TestTenantCreatesAUsableTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get owner: %v", err)
 	}
-	if admin.PlatformRole != models.PlatformOwner {
-		t.Fatalf("owner role = %q", admin.PlatformRole)
+	held, err := h.Svc.RoleAssignments(ctx, res.TenantID, res.AdminID)
+	if err != nil {
+		t.Fatalf("owner assignments: %v", err)
 	}
-	if !admin.PeerAccess {
+	roles := map[models.PlatformRole]models.RoleScope{}
+	for _, a := range held {
+		roles[a.Role] = a.Scope
+	}
+	if _, ok := roles[models.PlatformOwner]; !ok {
+		t.Fatalf("the first member is not an owner: %v", held)
+	}
+	if !roles[models.PlatformAgent].Peer {
 		t.Fatal("the owner cannot see peer conversations")
 	}
 	if admin.FirstName != "Eva" || admin.LastName != "Marleen" {

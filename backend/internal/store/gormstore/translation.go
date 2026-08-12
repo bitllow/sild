@@ -217,31 +217,4 @@ func (r *translationRepo) ReleaseLocales(ctx context.Context, tenantID, project 
 	return locales, err
 }
 
-func (r *translationRepo) Scopes(ctx context.Context, tenantID, adminUserID string) ([]models.TranslatorScope, error) {
-	var ss []models.TranslatorScope
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND admin_user_id = ?", tenantID, adminUserID).
-		Find(&ss).Error
-	return ss, err
-}
-
-func (r *translationRepo) AllScopes(ctx context.Context, tenantID string) ([]models.TranslatorScope, error) {
-	var ss []models.TranslatorScope
-	err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&ss).Error
-	return ss, err
-}
-
-func (r *translationRepo) SetScopes(ctx context.Context, tenantID, adminUserID string, scopes []models.TranslatorScope) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("tenant_id = ? AND admin_user_id = ?", tenantID, adminUserID).
-			Delete(&models.TranslatorScope{}).Error; err != nil {
-			return err
-		}
-		if len(scopes) == 0 {
-			return nil
-		}
-		return tx.Create(&scopes).Error
-	})
-}
-
 var _ store.TranslationRepo = (*translationRepo)(nil)

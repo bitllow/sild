@@ -3,16 +3,10 @@
 import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Avatar, Badge, Button, CopyIcon, Input, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
-import type { PlatformRole } from "@/store/types";
+import { Badge, Button, CopyIcon, Input, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
 import { cardStyle as card, fieldLabel, rowBorder, tabStyle } from "./styles";
 import { Appearance } from "./Appearance";
-
-const ROLE_OPTIONS = [
-  { value: "owner", label: "owner" },
-  { value: "admin", label: "admin" },
-  { value: "agent", label: "agent" },
-];
+import { TeamRoles } from "./TeamRoles";
 
 const PlusInline = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 5 }}>
@@ -23,8 +17,6 @@ const PlusInline = () => (
 export const Settings = observer(function Settings() {
   const store = useStore();
   const tab = store.settingsTab;
-  // Read off the team list we already render rather than adding session state.
-  const viewerIsOwner = store.team.find((t) => t.id === store.meId)?.role === "owner";
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
@@ -131,48 +123,7 @@ export const Settings = observer(function Settings() {
 
           {tab === "team" && (
             <div style={card}>
-              <div style={{ padding: "16px 18px", borderBottom: rowBorder }}>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>Team</div>
-                <div style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 2 }}>
-                  Platform roles guard the API and the inbox. Peer conversations are direct chats between parties with
-                  no assigned agent — grant that access per person.
-                </div>
-              </div>
-              <div style={{ padding: "8px 18px", display: "flex", alignItems: "center", gap: 12, borderBottom: rowBorder, fontSize: 11, fontWeight: 600, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
-                <div style={{ flex: 1 }} />
-                <div style={{ width: 120, flex: "none", textAlign: "right" }}>Peer access</div>
-                <div style={{ width: 130, flex: "none" }}>Role</div>
-              </div>
-              {store.team.map((t) => (
-                <div key={t.id} style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, borderBottom: rowBorder }}>
-                  <Avatar name={t.name} size={36} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>
-                      {t.name}
-                      {t.id === store.meId && (
-                        <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>· You</span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t.email}</div>
-                  </div>
-                  <div style={{ width: 120, flex: "none", display: "flex", justifyContent: "flex-end" }}>
-                    {/* Owner-only server-side, so an admin sees it read-only. */}
-                    <Switch
-                      checked={t.peerAccess}
-                      disabled={!viewerIsOwner}
-                      onChange={(v) => store.setPeerAccess(t.id, v)}
-                    />
-                  </div>
-                  <div style={{ width: 130, flex: "none" }}>
-                    <Select
-                      options={ROLE_OPTIONS}
-                      value={t.role}
-                      onChange={(e) => store.setRole(t.id, e.target.value as PlatformRole)}
-                      size="sm"
-                    />
-                  </div>
-                </div>
-              ))}
+              <TeamRoles />
             </div>
           )}
 

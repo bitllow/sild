@@ -54,7 +54,7 @@ func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result,
 		return nil, err
 	}
 	first, last := SplitName(spec.AdminName)
-	admin, err := svc.InviteAgent(ctx, t.ID, spec.AdminEmail, first, last, models.PlatformOwner)
+	admin, err := svc.InviteAgent(ctx, t.ID, spec.AdminEmail, first, last, models.PlatformOwner, models.RoleScope{})
 	if err != nil {
 		return nil, fmt.Errorf("create owner: %w", err)
 	}
@@ -63,8 +63,9 @@ func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result,
 			return nil, fmt.Errorf("set owner password: %w", err)
 		}
 	}
-	// Only an owner can grant peer access to anyone else, so the first one gets it.
-	if err := svc.SetPeerAccess(ctx, t.ID, admin.ID, true); err != nil {
+	// Peer conversations are the agent role's own grant, so the first owner takes
+	// that role too — otherwise nobody in a fresh tenant can read one.
+	if err := svc.AssignRole(ctx, t.ID, admin.ID, models.PlatformAgent, models.RoleScope{Peer: true}); err != nil {
 		return nil, fmt.Errorf("grant peer access: %w", err)
 	}
 	label := spec.APIKeyLabel

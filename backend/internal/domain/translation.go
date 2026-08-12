@@ -12,7 +12,6 @@ import (
 
 	"github.com/bitllow/sild/backend/internal/i18n"
 	"github.com/bitllow/sild/backend/internal/id"
-	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
@@ -66,15 +65,6 @@ type TranslationReleaseView struct {
 	PublishedBy string
 	// Locales is what this version carries, so a caller need not read it back.
 	Locales []string
-}
-
-// TranslatorGrantView is one translator's scope.
-type TranslatorGrantView struct {
-	AdminUserID string
-	Email       string
-	Name        string
-	Projects    []string
-	Locales     []string
 }
 
 func sourceHash(s string) string {
@@ -231,7 +221,9 @@ func (s *Service) CreateTranslationProject(ctx context.Context, tenantID, slug, 
 	if !validProjectSlug(slug) {
 		return TranslationProjectView{}, invalid("a project id is 2-64 characters of a-z, 0-9 and dashes")
 	}
-	if slug == i18n.PlatformProject {
+	// models.ScopeAll is reserved too: a project named "all" in a translator's
+	// scope would read as every project.
+	if slug == i18n.PlatformProject || slug == models.ScopeAll {
 		return TranslationProjectView{}, invalid("that project id is reserved")
 	}
 	name = strings.TrimSpace(name)
@@ -314,7 +306,7 @@ func (s *Service) SaveTranslationProject(ctx context.Context, tenantID, project,
 	clean := make([]string, 0, len(locales))
 	for _, l := range locales {
 		n := i18n.Normalize(l)
-		if n == "" {
+		if !i18n.ValidLanguage(n) || n == models.ScopeAll {
 			return invalid("locale must be a language tag")
 		}
 		if !slices.Contains(clean, n) {
@@ -434,7 +426,7 @@ func matchesTranslationFilter(v TranslationKeyView, cat *i18n.Catalog, locale, s
 }
 
 // PutTranslationOverride writes a tenant's own text for one key.
-func (s *Service) PutTranslationOverride(ctx context.Context, tenantID, project, locale, key, value string) error {
+func (s *Service) PutTranslationOverride(ctx context.Context, tenantID, project, locale, key, value string, mayPublish bool) error {
 	proj, err := s.TranslationProject(ctx, tenantID, project)
 	if err != nil {
 		return err
@@ -460,11 +452,14 @@ func (s *Service) PutTranslationOverride(ctx context.Context, tenantID, project,
 	if err := s.store.Translations().PutOverride(ctx, o); err != nil {
 		return err
 	}
+	if !mayPublish {
+		return nil
+	}
 	return s.autoPublish(ctx, tenantID, proj, "")
 }
 
 // DeleteTranslationOverride resets a key to the text Sild ships.
-func (s *Service) DeleteTranslationOverride(ctx context.Context, tenantID, project, locale, key string) error {
+func (s *Service) DeleteTranslationOverride(ctx context.Context, tenantID, project, locale, key string, mayPublish bool) error {
 	proj, err := s.TranslationProject(ctx, tenantID, project)
 	if err != nil {
 		return err
@@ -472,6 +467,9 @@ func (s *Service) DeleteTranslationOverride(ctx context.Context, tenantID, proje
 	locale = i18n.Normalize(locale)
 	if err := s.store.Translations().DeleteOverride(ctx, tenantID, project, locale, key); err != nil {
 		return err
+	}
+	if !mayPublish {
+		return nil
 	}
 	return s.autoPublish(ctx, tenantID, proj, "")
 }
@@ -687,90 +685,6 @@ func (s *Service) TranslationBundle(ctx context.Context, tenantID, project, loca
 		return nil, err
 	}
 	return strs, nil
-}
-
-// TranslationScope is the caller's own grant, for policy to narrow writes by.
-func (s *Service) TranslationScope(ctx context.Context, tenantID, adminUserID string) (policy.TranslationAttrs, error) {
-	rows, err := s.store.Translations().Scopes(ctx, tenantID, adminUserID)
-	if err != nil {
-		return policy.TranslationAttrs{}, err
-	}
-	var at policy.TranslationAttrs
-	for _, r := range rows {
-		switch r.Kind {
-		case models.ScopeProject:
-			at.Projects = append(at.Projects, r.Value)
-		case models.ScopeLocale:
-			at.Locales = append(at.Locales, r.Value)
-		}
-	}
-	return at, nil
-}
-
-// TranslatorGrants lists every translator and what they may touch.
-func (s *Service) TranslatorGrants(ctx context.Context, tenantID string) ([]TranslatorGrantView, error) {
-	admins, err := s.store.Admins().List(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.store.Translations().AllScopes(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	byAdmin := map[string]*TranslatorGrantView{}
-	out := []*TranslatorGrantView{}
-	for _, a := range admins {
-		if a.PlatformRole != models.PlatformTranslator {
-			continue
-		}
-		g := &TranslatorGrantView{AdminUserID: a.ID, Email: a.Email, Name: a.DisplayName()}
-		byAdmin[a.ID] = g
-		out = append(out, g)
-	}
-	for _, r := range rows {
-		g, ok := byAdmin[r.AdminUserID]
-		if !ok {
-			continue
-		}
-		switch r.Kind {
-		case models.ScopeProject:
-			g.Projects = append(g.Projects, r.Value)
-		case models.ScopeLocale:
-			g.Locales = append(g.Locales, r.Value)
-		}
-	}
-	views := make([]TranslatorGrantView, 0, len(out))
-	for _, g := range out {
-		views = append(views, *g)
-	}
-	return views, nil
-}
-
-// SetTranslatorScopes replaces one translator's grant. Empty sets mean every
-// project or every language.
-func (s *Service) SetTranslatorScopes(ctx context.Context, tenantID, adminUserID string, projects, locales []string) error {
-	a, err := s.store.Admins().Get(ctx, tenantID, adminUserID)
-	if err != nil {
-		return ErrNotFound
-	}
-	if a.PlatformRole != models.PlatformTranslator {
-		return invalid("that operator is not a translator")
-	}
-	rows := []models.TranslatorScope{}
-	for _, p := range projects {
-		if p == "" {
-			continue
-		}
-		rows = append(rows, models.TranslatorScope{TenantID: tenantID, AdminUserID: adminUserID, Kind: models.ScopeProject, Value: p})
-	}
-	for _, l := range locales {
-		n := i18n.Normalize(l)
-		if n == "" {
-			continue
-		}
-		rows = append(rows, models.TranslatorScope{TenantID: tenantID, AdminUserID: adminUserID, Kind: models.ScopeLocale, Value: n})
-	}
-	return s.store.Translations().SetScopes(ctx, tenantID, adminUserID, rows)
 }
 
 // SetContactLocale records the language a person reads.

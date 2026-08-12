@@ -38,12 +38,12 @@ func TestCreateTenantSetsTheAttachmentCap(t *testing.T) {
 func TestInviteAgentRejectsAnUnknownRole(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
-	if _, err := h.Svc.InviteAgent(context.Background(), tenant.ID, "a@b.test", "", "", models.PlatformRole("superuser")); err == nil {
+	if _, err := h.Svc.InviteAgent(context.Background(), tenant.ID, "a@b.test", "", "", models.PlatformRole("superuser"), models.RoleScope{}); err == nil {
 		t.Fatal("invited an operator with an unknown platform role")
 	}
 	for _, role := range []models.PlatformRole{models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent, ""} {
 		email := string(role) + "@b.test"
-		if _, err := h.Svc.InviteAgent(context.Background(), tenant.ID, email, "", "", role); err != nil {
+		if _, err := h.Svc.InviteAgent(context.Background(), tenant.ID, email, "", "", role, models.RoleScope{}); err != nil {
 			t.Fatalf("role %q rejected: %v", role, err)
 		}
 	}

@@ -115,7 +115,7 @@ func TestListContactConversations(t *testing.T) {
 func TestMessageCarriesAgentName(t *testing.T) {
 	h := testutil.New(t)
 	tenant := h.SeedTenant()
-	admin, err := h.Svc.InviteAgent(context.Background(), tenant.ID, "eva@test", "Eva", "Marleen", models.PlatformOwner)
+	admin, err := h.Svc.InviteAgent(context.Background(), tenant.ID, "eva@test", "Eva", "Marleen", models.PlatformOwner, models.RoleScope{})
 	if err != nil {
 		t.Fatalf("invite: %v", err)
 	}

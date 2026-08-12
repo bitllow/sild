@@ -15,15 +15,21 @@ func user(sub string) *principal.Principal {
 }
 func agent(peer bool) *principal.Principal {
 	return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a1",
-		Role: models.PlatformAgent, PeerAccess: peer}
+		Assignments: []principal.Assignment{{Role: models.PlatformAgent, Scope: models.RoleScope{Peer: peer}}}}
 }
 func admin() *principal.Principal {
 	return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a3",
-		Role: models.PlatformAdmin}
+		Assignments: principal.Held(models.PlatformAdmin)}
 }
+
+// An owner reaching peer conversations holds the agent role for it: peer is that
+// role's dimension, and no other role implies it.
 func owner(peer bool) *principal.Principal {
-	return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a2",
-		Role: models.PlatformOwner, PeerAccess: peer}
+	held := principal.Held(models.PlatformOwner)
+	if peer {
+		held = append(held, principal.Assignment{Role: models.PlatformAgent, Scope: models.RoleScope{Peer: true}})
+	}
+	return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a2", Assignments: held}
 }
 
 // Conversation access across every principal × resource state.

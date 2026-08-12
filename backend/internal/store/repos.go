@@ -12,6 +12,12 @@ import (
 // ErrNotFound is returned by repositories when a row does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrLastOwner refuses a delete that would leave a tenant with no owner.
+var ErrLastOwner = errors.New("last owner")
+
+// ErrDuplicate is a write the unique index refused.
+var ErrDuplicate = errors.New("already exists")
+
 // Participant identifies a member/sender by namespace (exactly one id set).
 type Participant struct {
 	Kind            models.MemberKind
@@ -52,11 +58,22 @@ type AdminRepo interface {
 	FindByEmail(ctx context.Context, email string) ([]models.AdminUser, error)
 	List(ctx context.Context, tenantID string) ([]models.AdminUser, error)
 	SetPassword(ctx context.Context, tenantID, id, passwordHash string) error
-	SetRole(ctx context.Context, tenantID, id string, role models.PlatformRole) error
-	SetPeerAccess(ctx context.Context, tenantID, id string, peerAccess bool) error
 	CreateSession(ctx context.Context, s *models.AdminSession) error
 	GetSession(ctx context.Context, id string) (*models.AdminSession, error)
 	DeleteSession(ctx context.Context, id string) error
+}
+
+// RoleAssignmentRepo holds who may do what: one row per member per role, with
+// that role's scope.
+type RoleAssignmentRepo interface {
+	ListByAdmin(ctx context.Context, tenantID, adminUserID string) ([]models.RoleAssignment, error)
+	ListByTenant(ctx context.Context, tenantID string) ([]models.RoleAssignment, error)
+	// Create adds an assignment, refusing one the member already holds.
+	Create(ctx context.Context, a *models.RoleAssignment) error
+	// Rescope replaces the scope of an assignment already there.
+	Rescope(ctx context.Context, tenantID, adminUserID string, role models.PlatformRole, scope models.RoleScope) error
+	// Delete removes one assignment, refusing to take a tenant's last owner.
+	Delete(ctx context.Context, tenantID, adminUserID string, role models.PlatformRole) error
 }
 
 type SigningKeyRepo interface {

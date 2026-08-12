@@ -23,6 +23,7 @@ const (
 	Tenant       = "t"
 	APIKey       = "key"
 	AdminUser    = "adm"
+	RoleAssign   = "ra"
 	Webhook      = "wh"
 	Delivery     = "whd"
 	Attachment   = "att"

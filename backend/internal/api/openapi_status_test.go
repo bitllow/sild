@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/api"
@@ -38,7 +39,7 @@ func TestDeclaredSuccessStatusMatchesReality(t *testing.T) {
 	testutil.DecodeJSON(t, h.Request("POST", "/v1/api-keys").Cookie("sild_admin", owner).
 		JSON(map[string]any{"label": "probe"}).Do(), &apiKey)
 	testutil.DecodeJSON(t, h.Request("POST", "/v1/team").Cookie("sild_admin", owner).
-		JSON(map[string]any{"email": "probe-agent@test", "platform_role": "agent"}).Do(), &agent)
+		JSON(map[string]any{"email": "probe-agent@test", "role": "agent"}).Do(), &agent)
 
 	var msg struct {
 		ID string `json:"id"`
@@ -115,8 +116,15 @@ func TestDeclaredSuccessStatusMatchesReality(t *testing.T) {
 			return r.Cookie("sild_admin", owner).JSON(map[string]any{"active": false})
 		}},
 		{"GET", "/v1/team", func(r *testutil.Req) *testutil.Req { return r.Cookie("sild_admin", owner) }},
-		{"PATCH", "/v1/team/:id", func(r *testutil.Req) *testutil.Req {
-			return r.Cookie("sild_admin", owner).JSON(map[string]any{"platform_role": "admin"})
+		{"GET", "/v1/roles", func(r *testutil.Req) *testutil.Req { return r.Cookie("sild_admin", owner) }},
+		{"POST", "/v1/team/:id/roles", func(r *testutil.Req) *testutil.Req {
+			return r.Cookie("sild_admin", owner).JSON(map[string]any{"role": "admin"})
+		}},
+		{"PUT", "/v1/team/:id/roles/:role", func(r *testutil.Req) *testutil.Req {
+			return r.Cookie("sild_admin", owner).JSON(map[string]any{"scope": map[string]any{}})
+		}},
+		{"DELETE", "/v1/team/:id/roles/:role", func(r *testutil.Req) *testutil.Req {
+			return r.Cookie("sild_admin", owner)
 		}},
 		{"POST", "/v1/team/:id/password", func(r *testutil.Req) *testutil.Req {
 			return r.Cookie("sild_admin", owner).JSON(map[string]any{"password": "correct horse battery staple"})
@@ -153,8 +161,9 @@ func TestDeclaredSuccessStatusMatchesReality(t *testing.T) {
 			path = replaceParam(tc.path, ":id", webhook.ID)
 		case tc.path == "/v1/api-keys/:id":
 			path = replaceParam(tc.path, ":id", apiKey.ID)
-		case tc.path == "/v1/team/:id" || tc.path == "/v1/team/:id/password":
+		case strings.HasPrefix(tc.path, "/v1/team/:id"):
 			path = replaceParam(tc.path, ":id", agent.ID)
+			path = replaceParam(path, ":role", "agent")
 		default:
 			for param, value := range subst {
 				path = replaceParam(path, param, value)

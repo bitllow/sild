@@ -69,18 +69,3 @@ type TranslationBundle struct {
 	Version  int            `gorm:"primaryKey"`
 	Strings  datatypes.JSON `gorm:"type:json"`
 }
-
-// TranslatorScope limits a translator to one project or one locale. No rows of a
-// kind means every value of it.
-type TranslatorScope struct {
-	TenantID    string `gorm:"primaryKey;size:40"`
-	AdminUserID string `gorm:"primaryKey;size:40"`
-	Kind        string `gorm:"primaryKey;size:16"`
-	Value       string `gorm:"primaryKey;size:64"`
-}
-
-// Scope kinds for TranslatorScope.
-const (
-	ScopeProject = "project"
-	ScopeLocale  = "locale"
-)

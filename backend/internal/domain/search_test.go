@@ -127,5 +127,5 @@ func TestSupportKeywordDoesNotMatchUnindexedMetadata(t *testing.T) {
 // supportScope is an operator without peer_access: support conversations only.
 func supportScope() policy.ResourceScope {
 	return policy.Scope(&principal.Principal{TenantID: "t", Kind: principal.KindAdmin,
-		AdminID: "a", Role: models.PlatformOwner}, policy.ConversationsList)
+		AdminID: "a", Assignments: principal.Held(models.PlatformOwner)}, policy.ConversationsList)
 }

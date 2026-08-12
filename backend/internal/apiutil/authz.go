@@ -141,25 +141,21 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, a policy.Action,
 	return true
 }
 
-// TranslationScope is the caller's own grant, for a collection that has to narrow
-// what it returns rather than answer yes or no about one project. Empty for
-// everyone but a translator — nobody else carries a scope.
-func TranslationScope(c *gin.Context, svc *domain.Service) (policy.TranslationAttrs, bool) {
-	p := middleware.Get(c)
-	if p == nil || p.Kind != principal.KindAdmin || p.Role != models.PlatformTranslator {
-		return policy.TranslationAttrs{}, true
-	}
-	attrs, err := svc.TranslationScope(c.Request.Context(), p.TenantID, p.AdminID)
-	if err != nil {
-		Fail(c, err)
-		return policy.TranslationAttrs{}, false
-	}
-	return attrs, true
+// TranslationNarrowing is the scope a collection filters by, and whether it
+// filters at all. The scope rides on the session, so this costs no query.
+func TranslationNarrowing(c *gin.Context, a policy.Action) (models.RoleScope, bool) {
+	return policy.TranslationNarrowing(middleware.Get(c), a)
+}
+
+// MayPublish reports whether the caller's own grant would let them publish this
+// project, so a write can decide whether auto-publish applies to them.
+func MayPublish(c *gin.Context, project string) bool {
+	return policy.MayPublish(middleware.Get(c), project)
 }
 
 // AuthorizeTranslation checks a translation action against a project and, when
-// the action names one, a locale. Only a translator carries a grant to load.
-func AuthorizeTranslation(c *gin.Context, svc *domain.Service, a policy.Action, project, locale string) bool {
+// the action names one, a locale.
+func AuthorizeTranslation(c *gin.Context, a policy.Action, project, locale string) bool {
 	if !declared(c, a) {
 		failUndeclared(c, a)
 		return false
@@ -169,11 +165,7 @@ func AuthorizeTranslation(c *gin.Context, svc *domain.Service, a policy.Action, 
 		httpx.Unauthorized(c, "authentication required")
 		return false
 	}
-	attrs, ok := TranslationScope(c, svc)
-	if !ok {
-		return false
-	}
-	if err := policy.AuthorizeTranslation(p, a, attrs, project, locale); err != nil {
+	if err := policy.AuthorizeTranslation(p, a, project, locale); err != nil {
 		failPolicy(c, err)
 		return false
 	}

@@ -13,6 +13,10 @@ import SildCore
 // network, so localhost works). Run locally with:
 //   (backend) make dev
 //   (sdk)     xcodebuild test -scheme SildSample -destination 'platform=iOS Simulator,name=…'
+
+// Without this the async test bodies run off the main thread, where a synthesized tap
+// can land without the field taking keyboard focus.
+@MainActor
 final class SildMessengerUITests: XCTestCase {
     private var app: XCUIApplication!
 

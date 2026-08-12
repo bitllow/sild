@@ -223,8 +223,14 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).listTeam},
 		{Method: "POST", Path: "/v1/team", Class: classAction,
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).inviteAgent, Success: http.StatusCreated},
-		{Method: "PATCH", Path: "/v1/team/:id", Class: classAction,
-			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).updateAgent, Success: http.StatusNoContent},
+		{Method: "GET", Path: "/v1/roles", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).listRoles},
+		{Method: "POST", Path: "/v1/team/:id/roles", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).assignRole, Success: http.StatusNoContent},
+		{Method: "PUT", Path: "/v1/team/:id/roles/:role", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).updateRoleScope, Success: http.StatusNoContent},
+		{Method: "DELETE", Path: "/v1/team/:id/roles/:role", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).removeRole, Success: http.StatusNoContent},
 		{Method: "POST", Path: "/v1/team/:id/password", Class: classAction,
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).setAgentPassword, Success: http.StatusNoContent},
 
@@ -259,10 +265,6 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.TranslationsPublish}, Principals: adminOnly, Handler: (*Handler).publishTranslations, Success: http.StatusCreated},
 		{Method: "POST", Path: "/v1/translations/projects/:project/releases/:version/rollback", Class: classAction,
 			Actions: []policy.Action{policy.TranslationsPublish}, Principals: adminOnly, Handler: (*Handler).rollbackTranslations, Success: http.StatusCreated},
-		{Method: "GET", Path: "/v1/translations/grants", Class: classAction,
-			Actions: []policy.Action{policy.TranslationsManage}, Principals: adminOnly, Handler: (*Handler).listTranslatorGrants},
-		{Method: "PUT", Path: "/v1/translations/grants/:id", Class: classAction,
-			Actions: []policy.Action{policy.TranslationsManage}, Principals: adminOnly, Handler: (*Handler).setTranslatorGrant, Success: http.StatusNoContent},
 	}
 }
 
