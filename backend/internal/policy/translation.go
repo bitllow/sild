@@ -7,20 +7,6 @@ import (
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
-// translationActions is the whole translation surface, so a credential can be
-// held to it. Listed rather than derived from the name: an action's capability is
-// never inferred from a string here.
-var translationActions = []Action{
-	TranslationsFetch, TranslationsRead, TranslationsWrite,
-	TranslationsPublish, TranslationsManage, TranslationsImport, TranslationsExport,
-	PrincipalRead,
-}
-
-// IsTranslationAction reports whether an action is part of that surface.
-// PrincipalRead is included: a credential that cannot ask who it is cannot report a
-// useful error.
-func IsTranslationAction(a Action) bool { return slices.Contains(translationActions, a) }
-
 // AuthorizeTranslation decides a translation action against one project and
 // locale. Locale is empty for project-wide actions. A translator's grant and a
 // scoped API key narrow here; every other role reaching the action is

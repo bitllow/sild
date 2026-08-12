@@ -1,10 +1,12 @@
 package i18n
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -38,19 +40,19 @@ type Row struct {
 	Value  string
 }
 
-// ParseFormats are the shapes a file may arrive in.
-var ParseFormats = []Format{FormatJSON, FormatCSV, FormatAndroid, FormatIOS, FormatIOSPlurals}
+// parseFormats are the shapes a file may arrive in.
+var parseFormats = []Format{FormatJSON, FormatCSV, FormatAndroid, FormatIOS, FormatIOSPlurals}
 
-// RenderFormats are the shapes a file may leave in.
-var RenderFormats = []Format{
+// renderFormats are the shapes a file may leave in.
+var renderFormats = []Format{
 	FormatJSON, FormatCSV, FormatSheet, FormatAndroid, FormatIOS, FormatIOSPlurals,
 }
 
 // KnownFormat reports whether a format may be parsed.
-func KnownFormat(f Format) bool { return slices.Contains(ParseFormats, f) }
+func KnownFormat(f Format) bool { return slices.Contains(parseFormats, f) }
 
 // RenderableFormat reports whether a format may be written.
-func RenderableFormat(f Format) bool { return slices.Contains(RenderFormats, f) }
+func RenderableFormat(f Format) bool { return slices.Contains(renderFormats, f) }
 
 // Parse reads a file into key → text, plural containers expanded into the sibling
 // keys Sild stores. Keys are returned as the file spells them; resolving an
@@ -180,7 +182,7 @@ func renderJSON(rows []Row) ([]byte, error) {
 // ── CSV and the spreadsheet ─────────────────────────────────────────────────
 
 func parseCSV(raw []byte) (map[string]string, error) {
-	recs, err := csv.NewReader(strings.NewReader(string(raw))).ReadAll()
+	recs, err := csv.NewReader(bytes.NewReader(raw)).ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("not readable as CSV: %w", err)
 	}
@@ -234,8 +236,9 @@ func renderCSV(rows []Row, withSource bool) ([]byte, error) {
 func AndroidName(key string) string { return strings.ReplaceAll(key, ".", "_") }
 
 // KeyMatcher resolves keys as a file spells them onto the keys a project actually
-// declares. An exact match always wins; the underscore form is an Android-only
-// alias, and an ambiguous one resolves to nothing rather than to a guess.
+// declares. An exact match always wins; a format that mangles keys supplies the
+// spellings it would have produced, and an ambiguous one resolves to nothing
+// rather than to a guess.
 type KeyMatcher struct {
 	exact   map[string]bool
 	aliases map[string]string
@@ -243,24 +246,23 @@ type KeyMatcher struct {
 	ambiguous map[string]bool
 }
 
-func NewKeyMatcher(declared []string) KeyMatcher {
+// NewKeyMatcher builds the matcher for one format. Only Android mangles a key —
+// its resource names cannot hold a dot — so only Android admits an alias, and a
+// JSON file naming `widget_home_cta` means that key or nothing.
+func NewKeyMatcher(format Format, declared []string) KeyMatcher {
 	m := KeyMatcher{
 		exact:     make(map[string]bool, len(declared)),
-		aliases:   make(map[string]string, len(declared)),
+		aliases:   map[string]string{},
 		ambiguous: map[string]bool{},
 	}
 	for _, key := range declared {
 		m.exact[key] = true
 	}
+	if format != FormatAndroid {
+		return m
+	}
 	for _, key := range declared {
-		// Two spellings can mean this key: the fully underscored resource name, and
-		// — for a plural sibling — the underscored base with its category still
-		// dotted, which is what reading a <plurals> element produces.
-		aliases := []string{AndroidName(key)}
-		if base, cat, ok := SplitPlural(key); ok {
-			aliases = append(aliases, PluralKey(AndroidName(base), cat))
-		}
-		for _, alias := range aliases {
+		for _, alias := range androidSpellings(key) {
 			if alias == key {
 				continue
 			}
@@ -274,13 +276,24 @@ func NewKeyMatcher(declared []string) KeyMatcher {
 	return m
 }
 
+// androidSpellings is how a key can come back from a strings.xml: the fully
+// underscored resource name, and — for a plural sibling — the underscored base
+// with its category still dotted, which is what reading a <plurals> produces.
+func androidSpellings(key string) []string {
+	out := []string{AndroidName(key)}
+	if base, cat, ok := SplitPlural(key); ok {
+		out = append(out, PluralKey(AndroidName(base), cat))
+	}
+	return out
+}
+
 // Resolve returns the declared key this name means, or false if none does.
 func (m KeyMatcher) Resolve(name string) (string, bool) {
 	if m.exact[name] {
 		return name, true
 	}
-	// A declared key spelled the Android way, unless another key wants that spelling
-	// too — in which case the file has to name one of them exactly.
+	// A key spelled the way this format would have written it, unless two declared
+	// keys want that spelling — then the file has to name one of them exactly.
 	if m.ambiguous[name] {
 		return name, false
 	}
@@ -333,6 +346,8 @@ func parseAndroid(raw []byte) (map[string]string, error) {
 }
 
 func renderAndroid(rows []Row) ([]byte, error) {
+	res := androidResources{}
+	byBase := map[string]*androidPlurals{}
 	// The dot-to-underscore transform is many-to-one, so two keys can want one
 	// resource name. Refused rather than emitted twice: a duplicate name is a file
 	// Android rejects, and importing it back would restore text onto one key.
@@ -345,22 +360,19 @@ func renderAndroid(rows []Row) ([]byte, error) {
 				first, r.Key, name)
 		}
 		taken[name] = r.Key
-	}
-	res := androidResources{}
-	byBase := map[string]*androidPlurals{}
-	for _, r := range rows {
+
 		base, cat, ok := SplitPlural(r.Key)
 		if !ok {
-			res.Strings = append(res.Strings, androidString{Name: AndroidName(r.Key), Text: r.Value})
+			res.Strings = append(res.Strings, androidString{Name: name, Text: r.Value})
 			continue
 		}
-		name := AndroidName(base)
-		if byBase[name] == nil {
-			byBase[name] = &androidPlurals{Name: name}
+		group := AndroidName(base)
+		if byBase[group] == nil {
+			byBase[group] = &androidPlurals{Name: group}
 		}
-		byBase[name].Items = append(byBase[name].Items, androidItem{Quantity: cat, Text: r.Value})
+		byBase[group].Items = append(byBase[group].Items, androidItem{Quantity: cat, Text: r.Value})
 	}
-	for _, name := range sortedKeys(byBase) {
+	for _, name := range slices.Sorted(maps.Keys(byBase)) {
 		res.Plurals = append(res.Plurals, *byBase[name])
 	}
 	out, err := xml.MarshalIndent(res, "", "    ")
@@ -446,10 +458,8 @@ func renderIOSStrings(rows []Row) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// A .stringsdict is a plist: one dict per plural key, holding a format string and
-// a nested dict of the categories. A plist dict is ORDERED — each <key> is followed
-// by its value — so the entries are emitted in order rather than as parallel lists,
-// which is the difference between a file Xcode reads and one it rejects.
+// A plist dict is ORDERED — each <key> is followed by its value — so entries are
+// emitted in order rather than as parallel lists. Xcode rejects the alternative.
 type plistEntry struct {
 	Key   string
 	Value string
@@ -575,7 +585,7 @@ func renderIOSPlurals(locale string, rows []Row) ([]byte, error) {
 		}
 	}
 	doc := plist{Version: "1.0"}
-	for _, base := range sortedKeys(byBase) {
+	for _, base := range slices.Sorted(maps.Keys(byBase)) {
 		// The spec dict names the rule and the value type, then one entry per
 		// category; "count" is what Sild's plural text interpolates.
 		spec := plistNode{Entries: []plistEntry{
@@ -600,13 +610,4 @@ func renderIOSPlurals(locale string, rows []Row) ([]byte, error) {
 		return nil, err
 	}
 	return append(append([]byte(xml.Header), out...), '\n'), nil
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
 }

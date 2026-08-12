@@ -47,15 +47,13 @@ func (p *Principal) TranslationScope() (models.RoleScope, bool) {
 		return models.RoleScope{}, false
 	}
 	if p.Kind == KindAPIKey {
-		return p.Scope, p.Scope.NarrowsTranslations()
+		return p.Scope, p.IsBuildToken()
 	}
 	return p.ScopeOf(models.PlatformTranslator)
 }
 
-// IsBuildToken reports an API key minted with a translation scope: a credential
-// that reaches translations and nothing else. Deliberately not "holds a
-// translation scope" — a member who is both an agent and a translator holds one
-// too, and roles only ever widen.
+// IsBuildToken reports an API key minted with a translation scope. Not "holds a
+// translation scope": a member who is also an agent holds one, and roles only widen.
 func (p *Principal) IsBuildToken() bool {
 	if p == nil || p.Kind != KindAPIKey {
 		return false

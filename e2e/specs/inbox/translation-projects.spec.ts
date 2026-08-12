@@ -1,6 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import { uid } from "../../support/env";
-import { gotoInbox, translationRow, translationRows } from "../../support/inbox";
+import {
+  gotoInbox,
+  selectTranslationLocale,
+  translationRow,
+  translationRows,
+} from "../../support/inbox";
 
 // One tenant: the projects this file creates are shared state, and the last test
 // removes what the first one made.
@@ -57,7 +62,7 @@ test.describe("translations · a tenant's own project", () => {
     await page
       .locator('[data-testid="translations-language"][data-locale="lv"] .sild-switch__track')
       .click();
-    await page.getByTestId("translations-locale").selectOption("lv");
+    await selectTranslationLocale(page, "lv");
     await expect(translationRow(page, KEY)).toBeVisible();
 
     await expect(page.locator('[data-testid="translations-completion"][data-locale="lv"]')).toHaveText("0%");
@@ -70,7 +75,7 @@ test.describe("translations · a tenant's own project", () => {
     await page.reload();
     await gotoTranslations(page);
     await selectProject(page);
-    await page.getByTestId("translations-locale").selectOption("lv");
+    await selectTranslationLocale(page, "lv");
     await expect(translationRow(page, KEY).getByTestId("translations-value")).toHaveValue(LATVIAN);
     await expect(page.locator('[data-testid="translations-completion"][data-locale="lv"]')).toHaveText("100%");
   });
@@ -78,7 +83,7 @@ test.describe("translations · a tenant's own project", () => {
   test("rewording the source flags the translation and it keeps rendering", async ({ page }) => {
     await gotoTranslations(page);
     await selectProject(page);
-    await page.getByTestId("translations-locale").selectOption("lv");
+    await selectTranslationLocale(page, "lv");
     await expect(translationRow(page, KEY)).toBeVisible();
 
     // Re-declaring the same key with new English is how a source is reworded.

@@ -100,11 +100,9 @@ func (h *Handler) authChain(r routeSpec) []gin.HandlerFunc {
 	if roles := r.roles(); len(roles) > 0 {
 		guard = append(guard, middleware.RequireRole(roles...))
 	}
-	// A scoped API key is a build token and reaches the translation surface only.
-	// Policy refuses it too, but a key-only route (minting a user token) takes the
-	// credential kind AS its authorization and asks policy nothing — so the bound
-	// is derived from the route's declaration here as well.
-	if !slices.ContainsFunc(r.Actions, policy.IsTranslationAction) {
+	// Half the action routes take the credential kind as their whole authorization
+	// and ask policy nothing, so the bound is derived from the table here too.
+	if !slices.ContainsFunc(r.Actions, policy.BuildTokenHolds) {
 		guard = append(guard, refuseBuildTokens)
 	}
 	return guard

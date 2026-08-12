@@ -43,15 +43,15 @@ func TestEveryFormatRoundTripsItsRows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s parse: %v\n%s", format, err, raw)
 		}
-		if !maps.Equal(resolve(got, want), want) {
+		if !maps.Equal(resolve(format, got, want), want) {
 			t.Errorf("%s round-trip: got %v want %v\n%s", format, got, want, raw)
 		}
 	}
 }
 
 // resolve maps parsed names onto declared keys the way import does.
-func resolve(got, declared map[string]string) map[string]string {
-	m := i18n.NewKeyMatcher(slices.Collect(maps.Keys(declared)))
+func resolve(format i18n.Format, got, declared map[string]string) map[string]string {
+	m := i18n.NewKeyMatcher(format, slices.Collect(maps.Keys(declared)))
 	out := map[string]string{}
 	for name, value := range got {
 		key, ok := m.Resolve(name)
@@ -239,5 +239,25 @@ func TestAndroidRefusesTwoKeysThatWantOneResourceName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "checkout_pay") {
 		t.Errorf("the error does not name the collision: %v", err)
+	}
+}
+
+// Only Android mangles a key, so only an Android file may name one the mangled
+// way. A JSON file naming widget_home_cta means that key or nothing.
+func TestOnlyAndroidAdmitsAMangledKey(t *testing.T) {
+	declared := []string{"widget.home.cta"}
+	if _, ok := i18n.NewKeyMatcher(i18n.FormatAndroid, declared).Resolve("widget_home_cta"); !ok {
+		t.Error("an Android file could not name its own resource")
+	}
+	if _, ok := i18n.NewKeyMatcher(i18n.FormatJSON, declared).Resolve("widget_home_cta"); ok {
+		t.Error("a JSON file resolved an underscore key onto a dotted one")
+	}
+	if _, ok := i18n.NewKeyMatcher(i18n.FormatJSON, declared).Resolve("widget.home.cta"); !ok {
+		t.Error("an exact key stopped resolving")
+	}
+	// Two declared keys wanting one resource name resolve to neither.
+	both := i18n.NewKeyMatcher(i18n.FormatAndroid, []string{"checkout.pay", "checkout_pay"})
+	if key, ok := both.Resolve("checkout_pay"); !ok || key != "checkout_pay" {
+		t.Errorf("the exactly-named key lost to its alias: %q %v", key, ok)
 	}
 }

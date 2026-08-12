@@ -621,11 +621,11 @@ export class TranslationsStore {
 
   setExportFormat = (format: TranslationFormat) => (this.exportFormat = format);
 
-  exportUrl = (): string | null => {
+  get exportUrl(): string | null {
     const project = this.project;
     if (!project || !this.locale) return null;
     return adminApi.translationExportUrl(project.id, this.locale, this.exportFormat);
-  };
+  }
 
   /** Read a picked file and ask the server what it would do — never a write. */
   previewImport = async (name: string, body: string) => {
@@ -644,7 +644,7 @@ export class TranslationsStore {
 
   /** Apply the file the report was taken from. */
   applyImport = async () => {
-    if (!this.importReport || this.importReport.dry_run === false) return;
+    if (!this.importReport?.dry_run) return;
     if (!(await this.runImport(false))) return;
     runInAction(() => (this.importFile = null));
     await Promise.all([this.reloadProject(), this.loadKeys(), this.loadDiff()]);

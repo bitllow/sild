@@ -37,10 +37,8 @@ var generatedPluralCases = []string{
 	"../../../sdks/swift/Tests/SildTests/PluralCases.generated.swift",
 }
 
-// Every locale carries exactly the keys it ought to: the same ordinary keys as
-// every other, and one plural sibling per category its own language has — no
-// more, so a form Latvian cannot select never ships, and no fewer, so a count
-// never renders in the wrong language.
+// The same ordinary keys as every other locale, and one plural sibling per category
+// its own language has — no form Latvian cannot select, none it needs missing.
 func TestEveryLocaleCoversItsOwnKeySet(t *testing.T) {
 	cat := i18n.Platform()
 	for _, locale := range cat.Locales() {
@@ -65,9 +63,8 @@ func TestEveryLocaleCoversItsOwnKeySet(t *testing.T) {
 	}
 }
 
-// A key the repo no longer declares must be gone from every generated artifact,
-// not merely outnumbered by the ones that are current: a stale accessor keeps
-// compiling and renders nothing.
+// A stale accessor keeps compiling and renders nothing, so a dropped key has to be
+// gone from every generated artifact rather than merely outnumbered.
 func TestNoGeneratedArtifactCarriesAKeyTheRepoDropped(t *testing.T) {
 	cat := i18n.Platform()
 	declared := map[string]bool{}
@@ -96,8 +93,8 @@ func TestNoGeneratedArtifactCarriesAKeyTheRepoDropped(t *testing.T) {
 	}
 }
 
-// A typed accessor per key, on every runtime that ships one: story 43's build
-// error rather than a blank label.
+// A typed accessor per key, on every runtime that ships one: a renamed key is a
+// build error rather than a blank label.
 func TestEveryKeyHasATypedAccessor(t *testing.T) {
 	cat := i18n.Platform()
 	for _, path := range generatedKeyLists {
@@ -203,10 +200,8 @@ func TestEstonianIsEtNotEe(t *testing.T) {
 	}
 }
 
-// A stale generated catalog would ship a client that renders a key Sild no longer
-// has, misses one it just added, or renders last week's wording of one it kept.
-// Compared per locale block rather than by searching the whole file, so two
-// locales' values swapped between them cannot pass either.
+// Compared per locale block rather than by searching the whole file, so a value
+// swapped between two locales cannot pass as current.
 func TestTheGeneratedClientCatalogsAreCurrent(t *testing.T) {
 	cat := i18n.Platform()
 	for _, path := range generatedCatalogs {
@@ -243,9 +238,8 @@ func TestTheGeneratedClientCatalogsAreCurrent(t *testing.T) {
 	}
 }
 
-// defaultsMap is the region of a generated catalog holding the per-locale strings,
-// which both outputs open with DEFAULTS and close at column zero (TS) or with a
-// bare `)` (Kotlin).
+// defaultsMap is the region holding the per-locale strings: the plural tables below
+// it pair a locale with a family name and would read as text for the last locale.
 func defaultsMap(src string) string {
 	open := strings.Index(src, "DEFAULTS")
 	if open < 0 {
@@ -260,9 +254,8 @@ func defaultsMap(src string) string {
 	return src
 }
 
-// generatedBlocks reads a generated catalog back into locale → key → text. Both
-// outputs nest one block per locale, so the parse is the same shape either way;
-// Kotlin escapes `$`, which starts a template otherwise.
+// generatedBlocks reads a generated catalog back into locale → key → text. Kotlin
+// escapes `$`, which starts a template otherwise.
 func generatedBlocks(path, src string) map[string]map[string]string {
 	entry := regexp.MustCompile(`"((?:[^"\\]|\\.)*)"\s*(?:to|:)\s*"((?:[^"\\]|\\.)*)"`)
 	unquote := func(s string) string {

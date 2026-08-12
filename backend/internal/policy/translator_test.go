@@ -37,6 +37,27 @@ func TestATranslatorHoldsExactlyTheTranslationCapabilities(t *testing.T) {
 	}
 }
 
+// A build token holds a column of its own, so a capability added without
+// considering one fails here rather than widening every CI key in the field.
+func TestABuildTokenHoldsExactlyTheBuildSurface(t *testing.T) {
+	want := []policy.Action{
+		policy.PrincipalRead,
+		policy.TranslationsExport,
+		policy.TranslationsFetch,
+		policy.TranslationsImport,
+		policy.TranslationsPublish,
+	}
+	if got := policy.BuildTokenActions(); !slices.Equal(got, want) {
+		t.Fatalf("build token capabilities = %v, want %v", got, want)
+	}
+	// And it can only ever hold what an API key holds.
+	for _, a := range policy.BuildTokenActions() {
+		if !policy.APIKeyHolds(a) {
+			t.Errorf("%s is granted to a build token but not to an API key", a)
+		}
+	}
+}
+
 func TestEveryOtherActionRefusesATranslator(t *testing.T) {
 	held := policy.TranslatorActions()
 	for _, a := range policy.Actions() {

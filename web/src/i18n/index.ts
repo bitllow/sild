@@ -238,16 +238,18 @@ export class I18n {
     return interpolate(text, { count, ...vars });
   };
 
-  // lookup walks the published bundle, then this language's bundled text, then
-  // the source language's. A key that resolves nowhere is a programming error:
-  // it is reported, and only a debug build puts it on screen.
-  private lookup(key: string, ...also: string[]): string {
-    for (const k of [key, ...also]) {
-      const text = this.strings[k] ?? DEFAULTS[this.locale]?.[k] ?? DEFAULTS[SOURCE_LOCALE][k];
-      if (text !== undefined) return text;
-    }
+  // lookup walks the published bundle, then this language's bundled text, then the
+  // source language's. A key that resolves nowhere is a programming error: it is
+  // reported, and only a debug build puts it on screen.
+  private lookup(key: string, alt?: string): string {
+    const text = this.text(key) ?? (alt !== undefined ? this.text(alt) : undefined);
+    if (text !== undefined) return text;
     this.onMissingKey?.(key);
     return this.debug ? key : "";
+  }
+
+  private text(key: string): string | undefined {
+    return this.strings[key] ?? DEFAULTS[this.locale]?.[key] ?? DEFAULTS[SOURCE_LOCALE][key];
   }
 
   subscribe(fn: () => void): () => void {

@@ -356,17 +356,20 @@ func (h *Handler) draftTranslations(c *gin.Context) {
 	if !apiutil.AuthorizeTranslation(c, policy.TranslationsRead, project, "") {
 		return
 	}
-	diff, err := h.svc.TranslationDraftDiff(c.Request.Context(), apiutil.Tenant(c), project)
+	// Narrowed before the diff is built, not after: a scoped translator's languages
+	// are the only ones worth reading a bundle for.
+	scope, narrows := apiutil.TranslationNarrowing(c, policy.TranslationsRead)
+	var only []string
+	if narrows && !models.Allows(scope.Locales, models.ScopeAll) {
+		only = scope.Locales
+	}
+	diff, err := h.svc.TranslationDraftDiff(c.Request.Context(), apiutil.Tenant(c), project, only)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	scope, narrows := apiutil.TranslationNarrowing(c, policy.TranslationsRead)
 	rows := make([]map[string]any, 0, len(diff.Rows))
 	for _, r := range diff.Rows {
-		if narrows && !models.Allows(scope.Locales, r.Locale) {
-			continue
-		}
 		rows = append(rows, map[string]any{
 			"locale": r.Locale, "key": r.Key, "live": r.Live, "draft": r.Draft,
 		})
