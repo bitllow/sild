@@ -44,6 +44,18 @@ type Row struct {
 	Key    string
 	Source string
 	Value  string
+	// Plural marks a category sibling of a key the project DECLARED plural. Two
+	// ordinary keys called status.one and status.other are not one (docs/adr/0004),
+	// so the renderers ask this rather than reading the suffix.
+	Plural bool
+}
+
+// pluralOf takes a row's base and category apart, for a row that is one.
+func pluralOf(r Row) (base, category string, ok bool) {
+	if !r.Plural {
+		return r.Key, "", false
+	}
+	return SplitPlural(r.Key)
 }
 
 // parseFormats are the shapes a file may arrive in.
@@ -386,7 +398,7 @@ func renderAndroid(rows []Row) ([]byte, error) {
 		}
 		taken[name] = r.Key
 
-		base, cat, ok := SplitPlural(r.Key)
+		base, cat, ok := pluralOf(r)
 		if !ok {
 			res.Strings = append(res.Strings, androidString{Name: name, Text: r.Value})
 			continue
@@ -475,7 +487,7 @@ func quoteIOS(s string) string {
 func renderIOSStrings(rows []Row) ([]byte, error) {
 	var b strings.Builder
 	for _, r := range rows {
-		if _, _, isPlural := SplitPlural(r.Key); isPlural {
+		if r.Plural {
 			continue // plurals travel in the stringsdict
 		}
 		fmt.Fprintf(&b, "%s = %s;\n", quoteIOS(r.Key), quoteIOS(r.Value))
@@ -605,7 +617,7 @@ func parseIOSPlurals(raw []byte) (map[string]string, error) {
 func renderIOSPlurals(locale string, rows []Row) ([]byte, error) {
 	byBase := map[string][]Row{}
 	for _, r := range rows {
-		if base, _, ok := SplitPlural(r.Key); ok {
+		if base, _, ok := pluralOf(r); ok {
 			byBase[base] = append(byBase[base], r)
 		}
 	}
@@ -618,7 +630,7 @@ func renderIOSPlurals(locale string, rows []Row) ([]byte, error) {
 			{Key: "NSStringFormatValueTypeKey", Value: "d"},
 		}}
 		for _, r := range byBase[base] {
-			_, cat, _ := SplitPlural(r.Key)
+			_, cat, _ := pluralOf(r)
 			spec.Entries = append(spec.Entries, plistEntry{Key: cat, Value: r.Value})
 		}
 		entry := plistNode{Entries: []plistEntry{
@@ -645,17 +657,16 @@ func renderIOSPlurals(locale string, rows []Row) ([]byte, error) {
 //
 // Plural siblings collapse to their base, which is what a count is addressed by.
 func renderAccessors(format Format, rows []Row) ([]byte, error) {
-	bases := PluralBases(keysOf(rows))
 	plain, plural := []string{}, []string{}
-	for _, key := range keysOf(rows) {
-		base, _, sibling := SplitPlural(key)
-		if sibling && bases[base] {
-			if !slices.Contains(plural, base) {
-				plural = append(plural, base)
-			}
+	for _, r := range rows {
+		base, _, ok := pluralOf(r)
+		if !ok {
+			plain = append(plain, r.Key)
 			continue
 		}
-		plain = append(plain, key)
+		if !slices.Contains(plural, base) {
+			plural = append(plural, base)
+		}
 	}
 	if err := uniqueIdents(append(slices.Clone(plain), plural...)); err != nil {
 		return nil, err

@@ -16,9 +16,9 @@ import (
 func rows() []i18n.Row {
 	return []i18n.Row{
 		{Key: "widget.home.cta", Source: "Send us a message", Value: `Sazinieties ar "mums"`},
-		{Key: "widget.home.agentsOnline.zero", Source: "{count} agents online", Value: "{count} aģentu tiešsaistē"},
-		{Key: "widget.home.agentsOnline.one", Source: "{count} agent online", Value: "{count} aģents tiešsaistē"},
-		{Key: "widget.home.agentsOnline.other", Source: "{count} agents online", Value: "{count} aģenti tiešsaistē"},
+		{Key: "widget.home.agentsOnline.zero", Source: "{count} agents online", Value: "{count} aģentu tiešsaistē", Plural: true},
+		{Key: "widget.home.agentsOnline.one", Source: "{count} agent online", Value: "{count} aģents tiešsaistē", Plural: true},
+		{Key: "widget.home.agentsOnline.other", Source: "{count} agents online", Value: "{count} aģenti tiešsaistē", Plural: true},
 	}
 }
 
@@ -320,12 +320,39 @@ func TestAccessorsAreValidIdentifiers(t *testing.T) {
 
 	// A project of only plural keys still writes a type that parses.
 	ts, err := i18n.Render(i18n.FormatTypeScript, "en", []i18n.Row{
-		{Key: "cart.items.one", Value: "a"}, {Key: "cart.items.other", Value: "b"},
+		{Key: "cart.items.one", Value: "a", Plural: true}, {Key: "cart.items.other", Value: "b", Plural: true},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(ts), "export type ProjectStringKey = never;") {
 		t.Errorf("an empty union did not parse:\n%s", ts)
+	}
+}
+
+// Two ordinary keys that happen to end in category words are not a plural: only
+// the project's declaration makes one (docs/adr/0004).
+func TestSuffixesAloneDoNotMakeAPlural(t *testing.T) {
+	ordinary := []i18n.Row{
+		{Key: "status.one", Value: "Active"},
+		{Key: "status.other", Value: "Archived"},
+	}
+	xml, err := i18n.Render(i18n.FormatAndroid, "en", ordinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(xml), "<plurals") {
+		t.Errorf("two ordinary keys were exported as a plural:\n%s", xml)
+	}
+	if _, err := i18n.Render(i18n.FormatIOSPlurals, "en", ordinary); err == nil {
+		t.Error("ordinary keys were written to a stringsdict")
+	}
+	// And each keeps its own accessor rather than collapsing to a base.
+	kt, err := i18n.Render(i18n.FormatKotlin, "en", ordinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(kt), "statusOne") || !strings.Contains(string(kt), "statusOther") {
+		t.Errorf("an ordinary key lost its accessor:\n%s", kt)
 	}
 }

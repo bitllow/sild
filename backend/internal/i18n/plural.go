@@ -85,9 +85,20 @@ func Category(locale string, n int) string {
 	case "other":
 		return CatOther
 
-	case "french":
+	case "hindi":
 		if n <= 1 {
 			return CatOne
+		}
+		return CatOther
+
+	case "romance", "romance_zero":
+		if n == 1 || (n == 0 && Family(locale) == "romance_zero") {
+			return CatOne
+		}
+		// CLDR gives Romance a "many" for round millions, which is what a compact
+		// "2 million" reads as.
+		if n != 0 && n%1_000_000 == 0 {
+			return CatMany
 		}
 		return CatOther
 
@@ -197,7 +208,9 @@ func Category(locale string, n int) string {
 		switch {
 		case n == 1:
 			return CatOne
-		case n == 0 || (mod100 >= 2 && mod100 <= 10):
+		case n == 2:
+			return CatTwo
+		case n == 0 || (mod100 >= 3 && mod100 <= 10):
 			return CatFew
 		case mod100 >= 11 && mod100 <= 19:
 			return CatMany
@@ -205,6 +218,7 @@ func Category(locale string, n int) string {
 		return CatOther
 
 	case "polish":
+		// Polish's one is exactly one, where Russian's is any number ending in it.
 		if n == 1 {
 			return CatOne
 		}
@@ -221,6 +235,15 @@ func Category(locale string, n int) string {
 			return CatFew
 		}
 		return CatMany
+
+	case "serbocroatian":
+		if mod10 == 1 && mod100 != 11 {
+			return CatOne
+		}
+		if mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) {
+			return CatFew
+		}
+		return CatOther
 	}
 	if n == 1 {
 		return CatOne
