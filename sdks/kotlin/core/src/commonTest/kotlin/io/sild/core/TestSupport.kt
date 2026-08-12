@@ -56,6 +56,11 @@ internal class Recorded<T> : List<T> {
     override fun contains(element: T): Boolean = now.contains(element)
     override fun containsAll(elements: Collection<T>): Boolean = now.containsAll(elements)
     override fun toString(): String = now.toString()
+
+    // A List that does not answer equality as a list is only equal to itself, and
+    // `assertEquals(listOf(...), recorded)` compares actual to expected.
+    override fun equals(other: Any?): Boolean = now == other
+    override fun hashCode(): Int = now.hashCode()
 }
 
 /** A unique id per call, so concurrent runs against one sild-dev don't collide. */

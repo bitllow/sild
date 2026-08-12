@@ -302,10 +302,13 @@ func (h *Handler) importTranslations(c *gin.Context) {
 		httpx.BadRequest(c, "the request body is the file to import, and it is empty")
 		return
 	}
-	// create_keys needs no capability beyond import: pushing the build's new source
-	// strings is what a pipeline is for. It is off unless asked, a dry run says what
-	// it would add, and only a source-language file may declare anything.
+	// Pushing the build's new source strings is what a pipeline is for, so a build
+	// token declares keys; anyone else needs the capability that manages them. Off
+	// unless asked, and only a source-language file may declare anything.
 	createKeys := httpx.QueryBool(c, "create_keys")
+	if createKeys && !apiutil.IsBuildToken(c) && !apiutil.Authorize(c, policy.TranslationsManage) {
+		return
+	}
 	report, err := h.svc.ImportTranslations(c.Request.Context(), apiutil.Tenant(c),
 		project, locale, format, raw, httpx.QueryBool(c, "dry_run"), createKeys,
 		apiutil.MayPublish(c, project))

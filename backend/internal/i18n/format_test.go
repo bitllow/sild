@@ -294,3 +294,38 @@ func TestTheAccessorExportsCarryEveryKeyOnce(t *testing.T) {
 		}
 	}
 }
+
+// Generated source has to compile: a key may start with a digit, spell a keyword,
+// or normalize onto another key's identifier.
+func TestAccessorsAreValidIdentifiers(t *testing.T) {
+	out, err := i18n.Render(i18n.FormatKotlin, "en", []i18n.Row{
+		{Key: "2fa.title", Value: "x"}, {Key: "class", Value: "y"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(out)
+	for _, bad := range []string{"const val 2fa", "const val class:"} {
+		if strings.Contains(src, bad) {
+			t.Errorf("emitted %q, which does not compile:\n%s", bad, src)
+		}
+	}
+
+	// Two keys, one constant: refused rather than emitted twice.
+	if _, err := i18n.Render(i18n.FormatSwift, "en", []i18n.Row{
+		{Key: "pay-now", Value: "a"}, {Key: "pay_now", Value: "b"},
+	}); err == nil {
+		t.Error("colliding accessors were exported")
+	}
+
+	// A project of only plural keys still writes a type that parses.
+	ts, err := i18n.Render(i18n.FormatTypeScript, "en", []i18n.Row{
+		{Key: "cart.items.one", Value: "a"}, {Key: "cart.items.other", Value: "b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ts), "export type ProjectStringKey = never;") {
+		t.Errorf("an empty union did not parse:\n%s", ts)
+	}
+}

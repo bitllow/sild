@@ -373,13 +373,17 @@ func keyScope(scope models.RoleScope) (models.RoleScope, error) {
 		}
 		return models.RoleScope{}, nil
 	}
-	for _, l := range scope.Locales {
+	// Stored the way authorization reads it: "lv-LV" in a scope would never match
+	// the normalized "lv" a request carries, and would grant nothing at all.
+	for i, l := range scope.Locales {
 		if l == models.ScopeAll {
 			continue
 		}
-		if n := i18n.Normalize(l); !i18n.ValidLanguage(n) {
+		n := i18n.Normalize(l)
+		if !i18n.ValidLanguage(n) {
 			return scope, invalid("locale must be a language tag")
 		}
+		scope.Locales[i] = n
 	}
 	if len(scope.Projects) == 0 {
 		scope.Projects = []string{models.ScopeAll}

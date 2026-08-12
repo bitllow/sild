@@ -30,7 +30,7 @@ core-library desugaring is required in your app.
 
 ## Quick start
 
-Call `Sild.init` from `Application.onCreate`, not from an Activity: the config holds a
+Call `Sild.init(context, config)` from `Application.onCreate`, not from an Activity: the config holds a
 `TokenProvider` (not parcelable), so it lives in memory rather than in saved state. If
 Android restarts your process while the messenger is in the back stack — a routine
 low-memory event — an `Application.onCreate` init is back in place before the messenger
@@ -39,7 +39,10 @@ is recreated, whereas an Activity-scoped one isn't and the messenger closes itse
 ```kotlin
 // Once, in Application.onCreate. The token provider mints a user JWT via YOUR
 // backend (which holds the Sild API key) — never ship the API key in the app.
+// The context is where translations the tenant published are kept between
+// launches; without it they are re-fetched on every cold start.
 Sild.init(
+    this,
     SildConfig(
         baseUrl = "https://sild.example.com",
         tokenProvider = { myBackend.mintSildToken(currentUserId) },

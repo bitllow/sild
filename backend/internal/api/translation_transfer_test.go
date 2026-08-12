@@ -695,3 +695,46 @@ func TestDeletingAProjectRevokesItsGrants(t *testing.T) {
 	}
 	_ = member
 }
+
+// Declaring keys is the tenant's act. A build token does it as the build's source
+// of truth; a translator uploading a file does not get there that way.
+func TestATranslatorCannotDeclareKeysByImporting(t *testing.T) {
+	f := newI18nFixture(t)
+	f.createProject(t, "shop", "Shop")
+	f.h.SeedAdminScoped(f.tenant.ID, "tr@test", models.PlatformTranslator, models.RoleScope{
+		Projects: []string{models.ScopeAll}, Locales: []string{models.ScopeAll},
+	})
+	session := loginAs(t, f.h, "tr@test")
+	as := func(r *testutil.Req) *testutil.Req { return r.Cookie("sild_admin", session) }
+
+	// Their own work — writing text for a key that exists — is untouched.
+	if w := importAs(t, f, as, "shop", "en", "json", `{"a.b": "x"}`, "").Do(); w.Code != http.StatusOK {
+		t.Fatalf("a translator importing text: %d %s", w.Code, w.Body)
+	}
+	w := importAs(t, f, as, "shop", "en", "json", `{"checkout.pay": "Pay"}`, "&create_keys=1").Do()
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("a translator declaring keys: %d %s", w.Code, w.Body)
+	}
+	if rows := f.projectKeys(t, "shop", "en", ""); len(rows) != 0 {
+		t.Errorf("%d keys were declared anyway: %v", len(rows), rows)
+	}
+}
+
+// A scope is stored the way authorization reads it, or it grants nothing at all.
+func TestAKeyScopeIsStoredNormalized(t *testing.T) {
+	f := newI18nFixture(t)
+	w := f.h.Request("POST", "/v1/api-keys").Cookie("sild_admin", f.owner).
+		JSON(map[string]any{"label": "ci", "projects": []string{"sild"}, "locales": []string{"LV", "et-EE"}}).Do()
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	var created struct {
+		Key string `json:"key"`
+	}
+	testutil.DecodeJSON(t, w, &created)
+	// The request carries "lv"; a scope holding "LV" would refuse it.
+	if w := importAs(t, f, func(r *testutil.Req) *testutil.Req { return r.Bearer(created.Key) },
+		"sild", "lv", "json", `{"`+titleKey+`": "Sveiki"}`, "").Do(); w.Code != http.StatusOK {
+		t.Errorf("a key scoped to LV cannot write lv: %d %s", w.Code, w.Body)
+	}
+}

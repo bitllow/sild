@@ -657,6 +657,9 @@ func renderAccessors(format Format, rows []Row) ([]byte, error) {
 		}
 		plain = append(plain, key)
 	}
+	if err := uniqueIdents(append(slices.Clone(plain), plural...)); err != nil {
+		return nil, err
+	}
 	switch format {
 	case FormatKotlin:
 		return accessorFile(kotlinAccessors, plain, plural), nil
@@ -666,6 +669,23 @@ func renderAccessors(format Format, rows []Row) ([]byte, error) {
 		return accessorFile(typeScriptAccessors, plain, plural), nil
 	}
 	return nil, fmt.Errorf("%q is not an accessor format", format)
+}
+
+// uniqueIdents refuses a key set whose accessors would collide: "pay-now" and
+// "pay_now" are different keys and one constant, and emitting both is source that
+// does not compile.
+func uniqueIdents(keys []string) error {
+	seen := map[string]string{}
+	for _, key := range keys {
+		name := ident(key)
+		if first, taken := seen[name]; taken {
+			return fmt.Errorf(
+				"%s and %s would both be the constant %s: rename one to export typed keys",
+				first, key, name)
+		}
+		seen[name] = key
+	}
+	return nil
 }
 
 func keysOf(rows []Row) []string {
@@ -708,24 +728,29 @@ func swiftAccessors(plain, plural []string) []string {
 	return append(out, "    }", "}")
 }
 
-func typeScriptAccessors(plain, plural []string) []string {
-	out := []string{"/** Every key this project declares: a typo or a renamed key is a type error. */",
-		"export type ProjectStringKey ="}
-	for _, key := range plain {
+// union writes a TypeScript string-literal union, or `never` for an empty one —
+// `type X = ;` does not parse.
+func union(name string, keys []string) []string {
+	if len(keys) == 0 {
+		return []string{fmt.Sprintf("export type %s = never;", name)}
+	}
+	out := []string{fmt.Sprintf("export type %s =", name)}
+	for _, key := range keys {
 		out = append(out, fmt.Sprintf("  | %q", key))
-	}
-	out = append(out, ";", "", "/** Keys addressed by a count. */", "export type ProjectPluralKey =")
-	if len(plural) == 0 {
-		out = append(out, "  never;")
-		return out
-	}
-	for _, base := range plural {
-		out = append(out, fmt.Sprintf("  | %q", base))
 	}
 	return append(out, ";")
 }
 
-// ident is a key as an identifier: "checkout.pay" → checkoutPay.
+func typeScriptAccessors(plain, plural []string) []string {
+	out := []string{"/** Every key this project declares: a typo or a renamed key is a type error. */"}
+	out = append(out, union("ProjectStringKey", plain)...)
+	out = append(out, "", "/** Keys addressed by a count. */")
+	return append(out, union("ProjectPluralKey", plural)...)
+}
+
+// ident is a key as an identifier: "checkout.pay" → checkoutPay. A key may start
+// with a digit or spell a language keyword, neither of which compiles, so the
+// result is prefixed where it would not stand on its own.
 func ident(key string) string {
 	var b strings.Builder
 	upper := false
@@ -740,5 +765,28 @@ func ident(key string) string {
 			b.WriteRune(r)
 		}
 	}
-	return b.String()
+	out := b.String()
+	if out == "" {
+		return "key"
+	}
+	if first := out[0]; first >= '0' && first <= '9' || reservedWords[out] {
+		return "key" + strings.ToUpper(out[:1]) + out[1:]
+	}
+	return out
+}
+
+// reservedWords are what a generated constant must not be called in any of the
+// three languages. One list: a name avoided everywhere reads the same everywhere.
+var reservedWords = map[string]bool{
+	"as": true, "break": true, "case": true, "catch": true, "class": true,
+	"const": true, "continue": true, "default": true, "defer": true, "do": true,
+	"else": true, "enum": true, "extension": true, "false": true, "final": true,
+	"for": true, "func": true, "fun": true, "guard": true, "if": true,
+	"import": true, "in": true, "init": true, "interface": true, "internal": true,
+	"is": true, "let": true, "new": true, "null": true, "nil": true,
+	"object": true, "operator": true, "package": true, "private": true,
+	"protocol": true, "public": true, "return": true, "self": true, "static": true,
+	"struct": true, "super": true, "switch": true, "this": true, "throw": true,
+	"true": true, "try": true, "typealias": true, "typeof": true, "val": true,
+	"var": true, "void": true, "when": true, "where": true, "while": true,
 }
