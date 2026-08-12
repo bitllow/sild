@@ -41,7 +41,7 @@ struct HomeScreen: View {
                         SildErrorLine(text: error)
                     }
                     if state.brand.poweredBy {
-                        Text("Powered by Sild")
+                        Text(t(SildKeys.widgetPoweredBy))
                             .font(style.font(11))
                             .foregroundStyle(style.colors.tertiary)
                             .frame(maxWidth: .infinity)

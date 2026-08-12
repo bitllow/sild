@@ -31,6 +31,7 @@ public enum SildKeys {
     public static let widgetLogoAlt = "widget.logoAlt"
     public static let widgetNotificationsDisable = "widget.notifications.disable"
     public static let widgetNotificationsEnable = "widget.notifications.enable"
+    public static let widgetPoweredBy = "widget.poweredBy"
     public static let widgetStatusConnecting = "widget.status.connecting"
     public static let widgetStatusLoading = "widget.status.loading"
     public static let widgetStatusReconnecting = "widget.status.reconnecting"

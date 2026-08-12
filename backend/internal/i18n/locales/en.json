@@ -29,6 +29,7 @@
   "widget.logoAlt": "Logo",
   "widget.notifications.disable": "Turn off reply notifications",
   "widget.notifications.enable": "Turn on reply notifications",
+  "widget.poweredBy": "Powered by Sild",
   "widget.status.connecting": "Connecting…",
   "widget.status.loading": "Loading…",
   "widget.status.reconnecting": "Reconnecting…",

@@ -50,6 +50,10 @@ internal class SildApi(
         return cfg.tokenProvider.token().also { token = it }
     }
 
+    /** The tenant this client speaks for, read off the token the host minted. Empty
+     *  until one has been. */
+    internal suspend fun tenant(): String = runCatching { tenantOf(bearer()) }.getOrDefault("")
+
     // api sends a request with a fresh-enough bearer token, retrying once on 401
     // with a forced token refresh (expired/rotated). Returns the raw body string
     // ("" on 204). Throws SildApiException on non-2xx.

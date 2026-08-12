@@ -50,6 +50,8 @@ type APIKeyRepo interface {
 	FindByPrefix(ctx context.Context, prefix string) (*models.APIKey, error)
 	ListByTenant(ctx context.Context, tenantID string) ([]models.APIKey, error)
 	Revoke(ctx context.Context, tenantID, id string) error
+	// Rescope narrows a key in place — what deleting one of its projects does.
+	Rescope(ctx context.Context, tenantID, id string, scope models.RoleScope) error
 }
 
 type AdminRepo interface {

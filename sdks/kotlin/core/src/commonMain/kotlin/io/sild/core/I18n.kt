@@ -3,6 +3,7 @@ package io.sild.core
 import kotlin.concurrent.Volatile
 import kotlin.time.TimeSource
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /** The reserved project Sild's own strings live in. */
 const val PLATFORM_PROJECT: String = "sild"
@@ -33,25 +34,55 @@ data class TranslationBundle(
 /** A manifest read and the validator that revalidates it; null body means 304. */
 internal class ManifestRead(val manifest: TranslationManifest?, val etag: String)
 
-// Downloaded bundles live for the process, not the session. A messenger closed and
-// reopened builds a new client, and without this its predecessor's download would
-// be thrown away — "activates at next start" would never activate anything.
-internal class I18nDownloads {
+/** A bundle as it is kept between sessions. */
+@Serializable
+internal data class HeldBundle(val version: Int, val strings: Map<String, String>)
+
+// Downloaded bundles outlive the session: a messenger closed and reopened builds a
+// new client, and without this its predecessor's download would be thrown away, so
+// "activates at next start" would never activate anything. Keyed by TENANT as well
+// as project and locale — two tenants in one process must not read each other's
+// wording — and written through to a platform store where there is one, so the next
+// cold start has it too.
+internal class I18nDownloads(internal val store: SildStringStore? = null) {
     // Replaced whole rather than mutated: this is read on the main thread and
     // written from whichever dispatcher the fetch ran on.
     @Volatile
-    private var byLocale: Map<String, Pair<Int, Map<String, String>>> = emptyMap()
+    private var byLocale: Map<String, HeldBundle> = emptyMap()
 
-    fun get(project: String, locale: String): Pair<Int, Map<String, String>>? =
-        byLocale["$project\n$locale"]
-
-    fun put(project: String, locale: String, ready: Pair<Int, Map<String, String>>) {
-        byLocale = byLocale + ("$project\n$locale" to ready)
+    fun get(tenant: String, project: String, locale: String): HeldBundle? {
+        val key = slot(tenant, project, locale)
+        byLocale[key]?.let { return it }
+        val raw = store?.read(key) ?: return null
+        val held = runCatching { Json.decodeFromString<HeldBundle>(raw) }.getOrNull() ?: return null
+        byLocale = byLocale + (key to held)
+        return held
     }
 
-    /** The process-wide one, which every client built from a config shares. */
+    fun put(tenant: String, project: String, locale: String, held: HeldBundle) {
+        val key = slot(tenant, project, locale)
+        byLocale = byLocale + (key to held)
+        // A tenant with no identity yet is held in memory only: a slot that cannot
+        // name whose text it is would be read by the next tenant along.
+        if (tenant.isEmpty()) return
+        runCatching { store?.write(key, Json.encodeToString(held)) }
+    }
+
+    private fun slot(tenant: String, project: String, locale: String) =
+        "sild_i18n_${tenant}_${project}_$locale"
+
     companion object {
-        val shared = I18nDownloads()
+        /** The process-wide one, which every client built from a config shares. */
+        val shared = I18nDownloads(platformStringStore())
+
+        // One per store, so two clients sharing a config share their downloads and a
+        // host that supplied its own place to write is honoured.
+        private val byStore = mutableMapOf<SildStringStore, I18nDownloads>()
+
+        fun forStore(store: SildStringStore?): I18nDownloads {
+            if (store == null || store === shared.store) return shared
+            return byStore.getOrPut(store) { I18nDownloads(store) }
+        }
     }
 }
 
@@ -201,6 +232,9 @@ class SildI18n internal constructor(
     private val project: String = PLATFORM_PROJECT,
     private val now: () -> Long = ::elapsedMillis,
     private val downloads: I18nDownloads = I18nDownloads.shared,
+    // Empty until the host's token names the tenant; a bundle keyed by nobody is
+    // nobody's to render.
+    private var tenant: String = "",
     // A key that resolves nowhere is a programming error: it is reported, and only
     // a debug build puts the key itself on screen.
     private val debug: Boolean = false,
@@ -245,12 +279,20 @@ class SildI18n internal constructor(
         adoptDownloaded()
     }
 
-    // What an earlier session in this process fetched is this session's starting
-    // text — the "activates at next SDK start" half of the delivery contract.
+    /** Name the tenant whose text this client renders, and take up what was kept for
+     *  them. Called once the host's token has been minted — which is the "activates
+     *  at next SDK start" half of the delivery contract. */
+    internal fun adopt(tenant: String) {
+        if (tenant.isEmpty() || tenant == this.tenant) return
+        this.tenant = tenant
+        adoptDownloaded()
+    }
+
+    // What an earlier session kept is this session's starting text.
     private fun adoptDownloaded() {
-        val ready = downloads.get(project, locale) ?: return
-        version = ready.first
-        strings = ready.second
+        val ready = downloads.get(tenant, project, locale) ?: return
+        version = ready.version
+        strings = ready.strings
     }
 
     /** The text for [key] in the active language, with `{name}` placeholders filled. */
@@ -341,7 +383,7 @@ class SildI18n internal constructor(
         val v = manifest.locales[want] ?: return null
         if (want == locale && v == version) return null
         val strings = src.fetchTranslationBundle(project, want, v).strings
-        downloads.put(project, want, v to strings)
+        downloads.put(tenant, project, want, HeldBundle(v, strings))
         // setLocale may have moved on while the bundle was in flight; it is held for
         // whoever asks for that language next, but it is not this language's text.
         if (at != locale) return null

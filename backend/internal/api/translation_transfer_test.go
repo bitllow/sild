@@ -658,3 +658,40 @@ func TestTheDraftDiffShowsARemovedKey(t *testing.T) {
 		t.Errorf("the removal is not in the preview: %+v", diff.Rows)
 	}
 }
+
+// A grant names a project by id, so deleting the project has to take the grant with
+// it — otherwise creating a project of the same name later hands it to whoever held
+// the old one.
+func TestDeletingAProjectRevokesItsGrants(t *testing.T) {
+	f := newI18nFixture(t)
+	f.createProject(t, "shop", "Shop")
+	member := f.h.SeedAdminScoped(f.tenant.ID, "shopkeeper@test", models.PlatformTranslator,
+		models.RoleScope{Projects: []string{"shop"}, Locales: []string{models.ScopeAll}})
+	key := f.h.SeedScopedAPIKey(f.tenant.ID, models.RoleScope{Projects: []string{"shop"}})
+	session := loginAs(t, f.h, "shopkeeper@test")
+
+	// Both reach it while it exists.
+	if w := f.h.Request("GET", "/v1/translations/projects/shop/export?locale=en").Bearer(key).Do(); w.Code != http.StatusOK {
+		t.Fatalf("the key cannot reach its project: %d %s", w.Code, w.Body)
+	}
+	w := f.h.Request("DELETE", "/v1/translations/projects/shop").Cookie("sild_admin", f.owner).Do()
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", w.Code, w.Body)
+	}
+
+	// A project of the same name, and neither grant follows it.
+	f.createProject(t, "shop", "Shop again")
+	if w := f.h.Request("GET", "/v1/translations/projects/shop/export?locale=en").Bearer(key).Do(); w.Code != http.StatusForbidden {
+		t.Errorf("the old key reached the new project: %d %s", w.Code, w.Body)
+	}
+	w = f.h.Request("GET", "/v1/translations/projects/shop/keys?locale=en").Cookie("sild_admin", session).Do()
+	if w.Code != http.StatusForbidden {
+		t.Errorf("the old grant reached the new project: %d %s", w.Code, w.Body)
+	}
+	// The member's assignment says so, rather than the screen showing a live grant.
+	w = f.h.Request("GET", "/v1/team").Cookie("sild_admin", f.owner).Do()
+	if strings.Contains(w.Body.String(), `"projects":["shop"]`) {
+		t.Errorf("the team screen still shows the deleted project as granted:\n%s", w.Body)
+	}
+	_ = member
+}

@@ -48,6 +48,14 @@ const EXPORT_FORMATS: { value: TranslationFormat; label: string }[] = [
   { value: "sheet", label: "Spreadsheet (key, source, translation)" },
 ];
 
+// Typed accessors for the tenant's own build: a key renamed here then fails their
+// compile rather than rendering blank. Sild's own keys already ship generated.
+const ACCESSOR_FORMATS: { value: TranslationFormat; label: string }[] = [
+  { value: "kotlin", label: "Kotlin keys" },
+  { value: "swift", label: "Swift keys" },
+  { value: "typescript", label: "TypeScript keys" },
+];
+
 // Panel is the card chrome every section on this screen shares: a titled header
 // with a line of explanation, and the section's own rows beneath it.
 function Panel({
@@ -805,7 +813,7 @@ const Transfer = observer(function Transfer() {
               aria-label="Export format"
               size="sm"
               value={t.exportFormat}
-              options={EXPORT_FORMATS}
+              options={t.ownProject ? [...EXPORT_FORMATS, ...ACCESSOR_FORMATS] : EXPORT_FORMATS}
               onChange={(e) => t.setExportFormat(e.target.value as TranslationFormat)}
             />
           </div>

@@ -261,3 +261,36 @@ func TestOnlyAndroidAdmitsAMangledKey(t *testing.T) {
 		t.Errorf("the exactly-named key lost to its alias: %q %v", key, ok)
 	}
 }
+
+// A tenant's own build looks its keys up through generated constants, so renaming a
+// key in the editor removes the member and the stale lookup fails the build.
+func TestTheAccessorExportsCarryEveryKeyOnce(t *testing.T) {
+	for _, tc := range []struct{ format, want, plural string }{
+		{"kotlin", `const val widgetHomeCta: String = "widget.home.cta"`, `const val widgetHomeAgentsOnline`},
+		{"swift", `public static let widgetHomeCta = "widget.home.cta"`, `public static let widgetHomeAgentsOnline`},
+		{"typescript", `  | "widget.home.cta"`, `  | "widget.home.agentsOnline"`},
+	} {
+		out, err := i18n.Render(i18n.Format(tc.format), "en", rows())
+		if err != nil {
+			t.Fatalf("%s: %v", tc.format, err)
+		}
+		src := string(out)
+		if !strings.Contains(src, tc.want) {
+			t.Errorf("%s has no accessor for widget.home.cta:\n%s", tc.format, src)
+		}
+		// A plural is addressed by its base and a count, so its siblings get none.
+		if !strings.Contains(src, tc.plural) {
+			t.Errorf("%s has no accessor for the plural base:\n%s", tc.format, src)
+		}
+		if strings.Contains(src, "agentsOnline.zero") || strings.Contains(src, "agentsOnlineZero") {
+			t.Errorf("%s carries a plural sibling as its own key:\n%s", tc.format, src)
+		}
+		if !i18n.SourceFormat(i18n.Format(tc.format)) {
+			t.Errorf("%s is not marked as generated source", tc.format)
+		}
+		// Generated code is not a file a translator fills in, so it never parses back.
+		if i18n.KnownFormat(i18n.Format(tc.format)) {
+			t.Errorf("%s was accepted as an import shape", tc.format)
+		}
+	}
+}

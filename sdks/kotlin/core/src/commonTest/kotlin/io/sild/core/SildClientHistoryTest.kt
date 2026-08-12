@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 
 class SildClientHistoryTest {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val cursors = mutableListOf<String?>()
+    private val cursors = Recorded<String?>()
 
     @AfterTest fun tearDown() {
         scope.cancel()
