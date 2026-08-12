@@ -157,7 +157,10 @@ class SildMessengerActivity : ComponentActivity() {
             val strings: SildStrings = remember(state.locale, state.stringsRevision) {
                 { key, vars -> client.i18n.t(key, vars) }
             }
-            CompositionLocalProvider(LocalSildStrings provides strings) {
+            val plurals: SildPlurals = remember(state.locale, state.stringsRevision) {
+                { base, count, vars -> client.i18n.tPlural(base, count, vars) }
+            }
+            CompositionLocalProvider(LocalSildStrings provides strings, LocalSildPlurals provides plurals) {
             SildTheme(state.brand) {
                 val close = { finish() }
                 when {

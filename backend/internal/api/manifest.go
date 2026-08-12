@@ -261,10 +261,24 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.TranslationsWrite}, Principals: adminOnly, Handler: (*Handler).deleteTranslationKey, Success: http.StatusNoContent},
 		{Method: "GET", Path: "/v1/translations/projects/:project/releases", Class: classAction,
 			Actions: []policy.Action{policy.TranslationsRead}, Principals: adminOnly, Handler: (*Handler).listTranslationReleases},
+		// What a publish would change: the preview before approving it, and the only
+		// view a draft-only translator has of their queue.
+		{Method: "GET", Path: "/v1/translations/projects/:project/drafts", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsRead}, Principals: adminOnly, Handler: (*Handler).draftTranslations},
+		// Publishing admits an API key, so CI can put what it pushed live; whether one
+		// may is its own scope's `publish`, off unless the key was minted with it.
 		{Method: "POST", Path: "/v1/translations/projects/:project/releases", Class: classAction,
-			Actions: []policy.Action{policy.TranslationsPublish}, Principals: adminOnly, Handler: (*Handler).publishTranslations, Success: http.StatusCreated},
+			Actions: []policy.Action{policy.TranslationsPublish}, Principals: anyPrincipal, Handler: (*Handler).publishTranslations, Success: http.StatusCreated},
 		{Method: "POST", Path: "/v1/translations/projects/:project/releases/:version/rollback", Class: classAction,
-			Actions: []policy.Action{policy.TranslationsPublish}, Principals: adminOnly, Handler: (*Handler).rollbackTranslations, Success: http.StatusCreated},
+			Actions: []policy.Action{policy.TranslationsPublish}, Principals: anyPrincipal, Handler: (*Handler).rollbackTranslations, Success: http.StatusCreated},
+		// Import and export are the file-shaped surface: a tenant adopting Sild, a
+		// translator with a spreadsheet, and a build pushing and pulling from CI. The
+		// body of an import IS the file, so it declares the larger cap.
+		{Method: "POST", Path: "/v1/translations/projects/:project/import", Class: classAction,
+			Actions:    []policy.Action{policy.TranslationsImport, policy.TranslationsManage},
+			Principals: anyPrincipal, Handler: (*Handler).importTranslations, BodyLimit: middleware.BodyLimitImport},
+		{Method: "GET", Path: "/v1/translations/projects/:project/export", Class: classAction,
+			Actions: []policy.Action{policy.TranslationsExport}, Principals: anyPrincipal, Handler: (*Handler).exportTranslations},
 	}
 }
 

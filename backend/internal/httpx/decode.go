@@ -11,6 +11,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// QueryBool reads a flag from the query string. Absent is false, and a present
+// parameter with no value ("?dry_run") is true — what a hand-written curl means
+// by it.
+func QueryBool(c *gin.Context, name string) bool {
+	raw, ok := c.GetQuery(name)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "1", "true", "yes":
+		return true
+	}
+	return false
+}
+
 // DecodeJSON is the one way a mutation reads its body.
 //
 // It rejects unknown fields rather than ignoring them: a client sending

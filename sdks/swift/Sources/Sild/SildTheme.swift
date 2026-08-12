@@ -118,15 +118,23 @@ private struct SildStyleKey: EnvironmentKey {
 
 /// Looks up one of Sild's own strings in the active language.
 public typealias SildStrings = (String, [String: Any]) -> String
+/// Looks up the text for a count, in the category the active language uses for it.
+public typealias SildPlurals = (String, Int32, [String: Any]) -> String
+
+// The bundled text, so a screen shown outside the messenger still renders words
+// rather than keys. Built once: every label on the screen goes through this on
+// each body pass.
+private let bundledStrings = I18nKt.bundledStrings(locale: nil)
 
 private struct SildStringsKey: EnvironmentKey {
-    // The bundled text, so a screen shown outside the messenger still renders words
-    // rather than keys. Built once: every label on the screen goes through this on
-    // each body pass.
-    private static let bundled = I18nKt.bundledStrings(locale: nil)
-
     static let defaultValue: SildStrings = { key, vars in
-        Self.bundled.t(key: key, vars: vars.isEmpty ? nil : vars)
+        bundledStrings.t(key: key, vars: vars.isEmpty ? nil : vars)
+    }
+}
+
+private struct SildPluralsKey: EnvironmentKey {
+    static let defaultValue: SildPlurals = { base, count, vars in
+        bundledStrings.tPlural(base: base, count: count, vars: vars.isEmpty ? nil : vars)
     }
 }
 
@@ -139,5 +147,10 @@ public extension EnvironmentValues {
     var sildStrings: SildStrings {
         get { self[SildStringsKey.self] }
         set { self[SildStringsKey.self] = newValue }
+    }
+
+    var sildPlurals: SildPlurals {
+        get { self[SildPluralsKey.self] }
+        set { self[SildPluralsKey.self] = newValue }
     }
 }

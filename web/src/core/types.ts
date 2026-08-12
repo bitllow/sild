@@ -53,6 +53,8 @@ export interface TranslationManifest {
   project: string;
   fallback_locale: string;
   locales: Record<string, number>;
+  /** The SDK line Sild's own key set belongs to; absent for a tenant's own project. */
+  sdk_version?: string;
 }
 
 /** GET /v1/translations/bundle — every key resolved for one locale. */

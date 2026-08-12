@@ -13,6 +13,8 @@
   "widget.composer.tooLarge": "That file is too large (max {mb} MB).",
   "widget.composer.unnamedFile": "attachment",
   "widget.composer.uploading": "Uploading…",
+  "widget.home.agentsOnline.one": "{count} agent online",
+  "widget.home.agentsOnline.other": "{count} agents online",
   "widget.home.cta": "Send us a message",
   "widget.home.directChat": "Direct chat",
   "widget.home.newConversation": "New conversation",

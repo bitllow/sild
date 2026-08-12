@@ -61,11 +61,12 @@ export const Settings = observer(function Settings() {
                     Server-side only. Shown once on creation — store it safely.
                   </div>
                 </div>
-                <Button size="sm" onClick={store.openKeyDialog}>
+                <Button size="sm" data-testid="new-key" onClick={() => void store.openKeyDialog()}>
                   <PlusInline />
                   New key
                 </Button>
               </div>
+              <BuildToken />
               {store.keys.map((k) => (
                 <div key={k.id} style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, borderBottom: rowBorder }}>
                   <div style={{ width: 34, height: 34, flex: "none", borderRadius: 8, background: "var(--brand-subtle)", color: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -75,6 +76,9 @@ export const Settings = observer(function Settings() {
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{k.label}</div>
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)", marginTop: 2 }}>
                       {k.masked}
+                    </div>
+                    <div data-testid="key-reach" style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 4 }}>
+                      Reaches {k.reach}
                     </div>
                   </div>
                   <span style={{ fontSize: 12, color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>{k.created}</span>
@@ -485,6 +489,78 @@ const TestPushRow = observer(function TestPushRow() {
           onClick={() => void store.sendTestPush(token)}
         >
           Send
+        </Button>
+      </div>
+    </div>
+  );
+});
+
+// BuildToken mints a key held to one translation project — what CI pushes and
+// pulls with. Publishing is a separate grant: a build that can rewrite text is not
+// automatically one that can put it live.
+const BuildToken = observer(function BuildToken() {
+  const store = useStore();
+  const t = store.translations;
+  const [open, setOpen] = useState(false);
+  const [project, setProject] = useState("");
+  const [publish, setPublish] = useState(false);
+
+  const start = () => {
+    setOpen(true);
+    // The project list is the translations screen's; loading it is idempotent.
+    void t.load();
+  };
+
+  const create = async () => {
+    await store.openKeyDialog({ projects: [project || t.projects[0]?.id || "sild"], publish });
+    setOpen(false);
+    setPublish(false);
+  };
+
+  if (!open) {
+    return (
+      <div style={{ padding: "12px 18px", borderBottom: rowBorder }}>
+        <Button size="sm" variant="secondary" data-testid="new-build-token" onClick={start}>
+          New build token
+        </Button>
+        <span style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginLeft: 10 }}>
+          Scoped to one translation project — for CI.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "14px 18px", borderBottom: rowBorder, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={fieldLabel}>Project</div>
+      <Select
+        data-testid="build-token-project"
+        aria-label="Project"
+        size="sm"
+        value={project || t.projects[0]?.id || ""}
+        options={t.projects.map((p) => ({ value: p.id, label: p.name }))}
+        onChange={(e) => setProject(e.target.value)}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
+          May publish a release
+          <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 2 }}>
+            Off means the build pushes drafts and a person publishes them.
+          </div>
+        </div>
+        <Switch
+          data-testid="build-token-publish"
+          aria-label="May publish a release"
+          checked={publish}
+          onChange={setPublish}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button size="sm" data-testid="build-token-create" onClick={() => void create()}>
+          Create
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Cancel
         </Button>
       </div>
     </div>

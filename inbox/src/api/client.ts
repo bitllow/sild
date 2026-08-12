@@ -73,8 +73,39 @@ async function requestWithETag<T>(
   return { data: payload as T, etag };
 }
 
+// A file upload whose body IS the file — a translation import. Separate from
+// `post` because the body is neither JSON nor re-serializable.
+async function postFile<T>(path: string, body: string, contentType: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`/v1${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": contentType },
+      body,
+    });
+  } catch {
+    throw new ApiError(0, "Network error — is the backend running on :8080?");
+  }
+  const text = await res.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+  if (!res.ok) {
+    const err = (payload as { error?: { code?: string; message?: string } })?.error;
+    throw new ApiError(res.status, err?.message || res.statusText || "Request failed", err?.code);
+  }
+  return payload as T;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
+  postFile,
   post: <T>(path: string, body?: Json) => request<T>("POST", path, body ?? {}),
   put: <T>(path: string, body?: Json) => request<T>("PUT", path, body ?? {}),
   patch: <T>(path: string, body?: Json) => request<T>("PATCH", path, body ?? {}),

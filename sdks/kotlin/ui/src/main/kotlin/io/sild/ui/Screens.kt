@@ -51,6 +51,7 @@ import coil.compose.AsyncImage
 import io.sild.core.Conversation
 import io.sild.core.PendingAttachment
 import io.sild.core.SildClient
+import io.sild.core.SildKeys
 import io.sild.core.SildState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -95,14 +96,14 @@ fun HomeScreen(state: SildState, onNew: () -> Unit, onOpen: (String) -> Unit, on
         // Body: New-conversation card, topics, Recent.
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(radii.card.dp)).background(colors.card).padding(16.dp)) {
-                Text(t("widget.home.cta"), color = colors.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text(t("widget.home.reassurance"), color = colors.sub, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                Text(t(SildKeys.widgetHomeCta), color = colors.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(t(SildKeys.widgetHomeReassurance), color = colors.sub, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
                 Row(
                     Modifier.fillMaxWidth().padding(top = 14.dp).clip(RoundedCornerShape(radii.btn.dp)).background(colors.brand).clickable(onClick = onNew).padding(vertical = 13.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(t("widget.home.newConversation"), color = colors.onBrand, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(t(SildKeys.widgetHomeNewConversation), color = colors.onBrand, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Spacer(Modifier.size(8.dp))
                     Icon(SildIcons.Arrow, contentDescription = null, tint = colors.onBrand, modifier = Modifier.size(16.dp))
                 }
@@ -117,8 +118,8 @@ fun HomeScreen(state: SildState, onNew: () -> Unit, onOpen: (String) -> Unit, on
                 }
             }
             if (state.conversations.isNotEmpty()) {
-                Text(t("widget.home.recent"), color = colors.tertiary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                val fallback = state.agentName ?: t("widget.home.support")
+                Text(t(SildKeys.widgetHomeRecent), color = colors.tertiary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                val fallback = state.agentName ?: t(SildKeys.widgetHomeSupport)
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(radii.card.dp)).background(colors.card)) {
                     state.conversations.forEachIndexed { i, c ->
                         if (i > 0) HorizontalDivider(color = colors.border)
@@ -134,7 +135,10 @@ fun HomeScreen(state: SildState, onNew: () -> Unit, onOpen: (String) -> Unit, on
     }
 }
 
-// TeamRow mirrors the web widget's "2 agents online" flourish (shown when showTeam).
+// TeamRow mirrors the web widget's "agents online" flourish (shown when showTeam).
+// The count matches the avatars beside it.
+private const val TEAM_ONLINE = 2
+
 @Composable
 private fun TeamRow() {
     val colors = LocalSildColors.current
@@ -144,7 +148,11 @@ private fun TeamRow() {
             TeamAvatar("M", Color(0xFFE58A6B), Modifier.offset(x = 16.dp))
         }
         Spacer(Modifier.size(24.dp))
-        Text("2 agents online", color = colors.onBrand.copy(alpha = 0.9f), fontSize = 13.sp)
+        Text(
+            tPlural(SildKeys.Plural.widgetHomeAgentsOnline, TEAM_ONLINE),
+            color = colors.onBrand.copy(alpha = 0.9f),
+            fontSize = 13.sp,
+        )
     }
 }
 
@@ -171,7 +179,7 @@ private fun ConversationRow(c: Conversation, fallback: String, onClick: () -> Un
                 if (c.time.isNotEmpty()) Text(c.time, color = colors.tertiary, fontSize = 11.sp)
             }
             Text(c.preview, color = colors.sub, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-            val sub = c.subtitle ?: (if (c.closed) t("widget.thread.closedShort") else null)
+            val sub = c.subtitle ?: (if (c.closed) t(SildKeys.widgetThreadClosedShort) else null)
             if (!sub.isNullOrEmpty()) {
                 Text(sub, color = colors.tertiary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
@@ -203,8 +211,8 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
     }
     // Resolved in composition: the error is set from a coroutine, where the strings
     // local cannot be read.
-    val tooLarge = t("widget.composer.tooLarge", mapOf("mb" to client.uploadSizeLimitBytes / (1024 * 1024)))
-    val attachFailed = t("widget.composer.attachFailed")
+    val tooLarge = t(SildKeys.widgetComposerTooLarge, mapOf("mb" to client.uploadSizeLimitBytes / (1024 * 1024)))
+    val attachFailed = t(SildKeys.widgetComposerAttachFailed)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         if (uris.isNotEmpty()) attachError = null
         uris.forEach { uri ->
@@ -229,12 +237,12 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
 
     val active = state.conversations.firstOrNull { it.id == state.activeId }
     val peer = active?.peer == true
-    val title = if (peer) active?.title ?: t("widget.home.directChat") else state.agentName ?: t("widget.home.support")
+    val title = if (peer) active?.title ?: t(SildKeys.widgetHomeDirectChat) else state.agentName ?: t(SildKeys.widgetHomeSupport)
     val subtitle = when {
-        peer -> active?.subtitle ?: t("widget.home.directChat")
-        draft -> t("widget.home.start")
-        state.connection.name == "CONNECTED" -> t("widget.home.subtitle")
-        else -> t("widget.status.connecting")
+        peer -> active?.subtitle ?: t(SildKeys.widgetHomeDirectChat)
+        draft -> t(SildKeys.widgetHomeStart)
+        state.connection.name == "CONNECTED" -> t(SildKeys.widgetHomeSubtitle)
+        else -> t(SildKeys.widgetStatusConnecting)
     }
     val closed = active?.closed == true
     val listState = rememberScrollState()
@@ -254,17 +262,17 @@ fun ThreadScreen(client: SildClient, state: SildState, draft: Boolean, onBack: (
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (state.loadingThread && state.messages.isEmpty()) {
-                Text(t("widget.status.loading"), color = colors.tertiary, fontSize = 13.sp)
+                Text(t(SildKeys.widgetStatusLoading), color = colors.tertiary, fontSize = 13.sp)
             }
             state.messages.forEach { m -> SildMessageBubble(m, onOpenUrl = openUrl) }
             if (!state.loadingThread && state.messages.isEmpty()) {
-                Text(t("widget.thread.empty"), color = colors.tertiary, fontSize = 13.sp)
+                Text(t(SildKeys.widgetThreadEmpty), color = colors.tertiary, fontSize = 13.sp)
             }
             Spacer(Modifier.height(4.dp))
         }
         if (closed) {
             Text(
-                t("widget.thread.closed"),
+                t(SildKeys.widgetThreadClosed),
                 color = colors.sub, fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth().background(colors.card).padding(14.dp),
             )

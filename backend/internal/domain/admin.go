@@ -342,19 +342,54 @@ func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]models.Adm
 }
 
 // CreateAPIKey mints a tenant API key; the secret is returned exactly once (§4.3).
-func (s *Service) CreateAPIKey(ctx context.Context, tenantID, label string) (full string, rec *models.APIKey, err error) {
+// A scope narrows what the key may reach — a build token held to one project.
+func (s *Service) CreateAPIKey(ctx context.Context, tenantID, label string, scope models.RoleScope) (full string, rec *models.APIKey, err error) {
 	gen, err := auth.GenerateAPIKey()
+	if err != nil {
+		return "", nil, err
+	}
+	scope, err = keyScope(scope)
 	if err != nil {
 		return "", nil, err
 	}
 	rec = &models.APIKey{
 		TenantID: tenantID, Prefix: gen.Prefix, Hash: gen.Hash,
-		Label: label, CreatedAt: s.now(),
+		Label: label, Scope: scope, CreatedAt: s.now(),
 	}
 	if err := s.store.APIKeys().Create(ctx, rec); err != nil {
 		return "", nil, err
 	}
 	return gen.Full, rec, nil
+}
+
+// keyScope validates a requested key scope and fills in the dimensions the caller
+// left open. A named project with no languages means every language of it — the
+// scope is a restriction, so an unstated dimension restricts nothing. A scope that
+// names nothing at all stays empty, which is a tenant-wide key.
+func keyScope(scope models.RoleScope) (models.RoleScope, error) {
+	if !scope.NarrowsTranslations() {
+		// An unscoped key reaches everything, so `publish` on it would decide
+		// nothing. Refused rather than stored and ignored.
+		if scope.Publish {
+			return scope, invalid("publish takes a scoped key: name at least one project or language")
+		}
+		return models.RoleScope{}, nil
+	}
+	for _, l := range scope.Locales {
+		if l == models.ScopeAll {
+			continue
+		}
+		if n := i18n.Normalize(l); !i18n.ValidLanguage(n) {
+			return scope, invalid("locale must be a language tag")
+		}
+	}
+	if len(scope.Projects) == 0 {
+		scope.Projects = []string{models.ScopeAll}
+	}
+	if len(scope.Locales) == 0 {
+		scope.Locales = []string{models.ScopeAll}
+	}
+	return scope, nil
 }
 
 func (s *Service) ListAPIKeys(ctx context.Context, tenantID string) ([]models.APIKey, error) {

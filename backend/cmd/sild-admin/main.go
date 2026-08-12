@@ -208,17 +208,35 @@ func agentPeerAccess(ctx context.Context, svc *domain.Service, args []string) er
 	return nil
 }
 
+// splitList reads a comma-separated flag, dropping the blanks an empty flag or a
+// trailing comma leaves behind.
+func splitList(raw string) []string {
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func apikeyCreate(ctx context.Context, svc *domain.Service, args []string) error {
 	fs := flag.NewFlagSet("apikey create", flag.ExitOnError)
 	tenant := fs.String("tenant", "", "tenant id")
 	label := fs.String("label", "default", "what this key is for")
+	projects := fs.String("projects", "", "hold the key to these translation projects (comma-separated)")
+	locales := fs.String("locales", "", "hold the key to these languages (comma-separated)")
+	publish := fs.Bool("publish", false, "let the key cut a release")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if err := need("tenant", tenant); err != nil {
 		return err
 	}
-	key, rec, err := svc.CreateAPIKey(ctx, *tenant, *label)
+	scope := models.RoleScope{
+		Projects: splitList(*projects), Locales: splitList(*locales), Publish: *publish,
+	}
+	key, rec, err := svc.CreateAPIKey(ctx, *tenant, *label, scope)
 	if err != nil {
 		return err
 	}
