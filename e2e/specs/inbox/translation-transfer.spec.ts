@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { uid } from "../../support/env";
-import { gotoTranslations, translationRow } from "../../support/inbox";
+import { gotoTranslations, selectTranslationLocale, translationRow } from "../../support/inbox";
 
 // One tenant, one platform project: overrides are shared state.
 test.describe.configure({ mode: "serial" });
@@ -39,6 +39,23 @@ test.describe("translations · import and export", () => {
     // Put it back: the tenant is shared with every other spec in this project.
     await row.getByTestId("translations-reset").click();
     await expect(row.getByTestId("translations-value")).toHaveValue(SHIPPED);
+  });
+
+  // A preview says what a file would do to the language it was taken against, so
+  // switching language has to take the approval with it.
+  test("switching language drops a preview rather than applying it elsewhere", async ({ page }) => {
+    await gotoTranslations(page, LOCALE);
+    await page.getByTestId("translations-import-file").setInputFiles({
+      name: "et.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ [KEY]: `Laadin ${uid("sw")}` })),
+    });
+    await expect(page.getByTestId("translations-import-report")).toContainText("1 new");
+    await expect(page.getByTestId("translations-import-apply")).toContainText("Apply to et");
+
+    await selectTranslationLocale(page, "lv");
+    await expect(page.getByTestId("translations-import-report")).toHaveCount(0);
+    await expect(page.getByTestId("translations-import-apply")).toHaveCount(0);
   });
 
   test("a key nobody declared is reported and skipped", async ({ page }) => {

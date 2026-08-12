@@ -787,7 +787,7 @@ const Transfer = observer(function Transfer() {
                     disabled={report.new + report.changed === 0}
                     onClick={() => void t.applyImport()}
                   >
-                    Apply as drafts
+                    Apply to {report.locale}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={t.clearImport}>
                     Cancel

@@ -62,11 +62,32 @@ internal class I18nDownloads(internal val store: SildStringStore? = null) {
     fun put(tenant: String, project: String, locale: String, held: HeldBundle) {
         val key = slot(tenant, project, locale)
         byLocale = byLocale + (key to held)
+        settled = settled + (settledSlot(tenant, project) to locale)
         // A tenant with no identity yet is held in memory only: a slot that cannot
         // name whose text it is would be read by the next tenant along.
         if (tenant.isEmpty()) return
-        runCatching { store?.write(key, Json.encodeToString(held)) }
+        runCatching {
+            store?.write(key, Json.encodeToString(held))
+            store?.write(settledSlot(tenant, project), locale)
+        }
     }
+
+    /** The language this tenant's offering settled on, if a fetch ever settled one.
+     *  A device asking for Finnish against a tenant that publishes Latvian negotiates
+     *  to Latvian; without this the next start would guess Finnish again and adopt
+     *  nothing. */
+    fun settledLocale(tenant: String, project: String): String? {
+        val key = settledSlot(tenant, project)
+        settled[key]?.let { return it }
+        val stored = store?.read(key) ?: return null
+        settled = settled + (key to stored)
+        return stored
+    }
+
+    @Volatile
+    private var settled: Map<String, String> = emptyMap()
+
+    private fun settledSlot(tenant: String, project: String) = "sild_i18n_${tenant}_${project}_@locale"
 
     private fun slot(tenant: String, project: String, locale: String) =
         "sild_i18n_${tenant}_${project}_$locale"
@@ -285,6 +306,11 @@ class SildI18n internal constructor(
     internal fun adopt(tenant: String) {
         if (tenant.isEmpty() || tenant == this.tenant) return
         this.tenant = tenant
+        // The language an earlier session negotiated against what this tenant
+        // publishes, unless the host named one — an instruction outranks a memory.
+        if (!explicit) {
+            downloads.settledLocale(tenant, project)?.let { locale = it }
+        }
         adoptDownloaded()
     }
 

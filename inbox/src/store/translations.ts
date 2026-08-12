@@ -250,6 +250,9 @@ export class TranslationsStore {
   setLocale = (locale: string) => {
     if (this.locale === locale) return;
     this.locale = locale;
+    // The report says what a file would do to the locale it was previewed against,
+    // so applying it to another one would write something nobody approved.
+    this.importReport = null;
     void this.loadKeys();
   };
 
@@ -637,6 +640,11 @@ export class TranslationsStore {
     await this.runImport(true);
   };
 
+  /** The language a pending report was taken against — what Apply writes to. */
+  get importLocale(): string {
+    return this.importReport?.locale ?? this.locale;
+  }
+
   clearImport = () => {
     this.importFile = null;
     this.importReport = null;
@@ -662,7 +670,9 @@ export class TranslationsStore {
       const report = await adminApi.importTranslations(
         project.id,
         {
-          locale: this.locale,
+          // An apply names the locale its report was taken in, not whatever the
+          // screen shows now.
+          locale: dryRun ? this.locale : this.importLocale,
           format: this.importFormat,
           dryRun,
           createKeys: this.importCreateKeys,

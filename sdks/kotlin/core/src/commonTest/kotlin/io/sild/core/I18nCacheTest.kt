@@ -85,6 +85,32 @@ class I18nCacheTest {
         assertNull(downloads.get("t_other", PLATFORM_PROJECT, "lv"))
     }
 
+    // A device asking for a language the tenant does not publish negotiates to one
+    // they do; the next cold start has to adopt that, not guess from the device again.
+    @Test
+    fun aColdStartAdoptsTheLanguageTheTenantSettledOn() {
+        val store = MemoryStore()
+        I18nDownloads(store).put("t_acme", PLATFORM_PROJECT, "lv", HeldBundle(2, mapOf("widget.home.cta" to "Latviski")))
+
+        // "fi" is what the device asks for and what Sild ships no text for.
+        val fresh = SildI18n(source = null, devicePrefs = listOf("fi"), downloads = I18nDownloads(store))
+        fresh.adopt("t_acme")
+        assertEquals("lv", fresh.locale)
+        assertEquals("Latviski", fresh.t("widget.home.cta"))
+    }
+
+    // A host that named the language is giving an instruction, not a preference: a
+    // remembered negotiation must not override it.
+    @Test
+    fun anExplicitLocaleOutranksWhatWasSettled() {
+        val store = MemoryStore()
+        I18nDownloads(store).put("t_acme", PLATFORM_PROJECT, "lv", HeldBundle(2, mapOf("widget.home.cta" to "Latviski")))
+
+        val named = SildI18n(source = null, explicitLocale = "et", downloads = I18nDownloads(store))
+        named.adopt("t_acme")
+        assertEquals("et", named.locale)
+    }
+
     // A bundle downloaded before the token landed is nobody's to keep: written to the
     // store it would be read by whichever tenant came next.
     @Test

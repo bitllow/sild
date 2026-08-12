@@ -766,11 +766,13 @@ func (s *Service) ImportTranslations(
 	}
 	matcher := i18n.NewKeyMatcher(format, cat.LocaleKeys(locale))
 	for _, name := range slices.Sorted(maps.Keys(incoming)) {
-		value := strings.TrimSpace(incoming[name])
+		// The text is what the file said: a translation may legitimately end in a
+		// space, and rewriting it would make the round trip lossy.
+		value := incoming[name]
 		key, declared := matcher.Resolve(name)
 		row := TranslationImportRow{Key: key, Value: value, declared: declared}
 		switch {
-		case value == "":
+		case strings.TrimSpace(value) == "":
 			row.Key, row.Status, row.Reason = name, ImportSkipped, "no text"
 		case !declared && !createKeys:
 			row.Key, row.Status, row.Reason = name, ImportSkipped, "unknown key"

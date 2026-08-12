@@ -90,19 +90,23 @@ func load() (*Catalog, error) {
 
 // NewCatalog builds a catalog whose only shipped locale is the source one — the
 // shape a tenant-owned project has, where the declared keys are the sources and
-// every other language arrives as an override. pluralBases are the keys the
-// tenant declared plural; with none given they are read off the key names.
+// every other language arrives as an override.
+//
+// pluralBases are the keys the tenant DECLARED plural, and they are the whole
+// answer: a project may have ordinary keys called `status.one` and `status.other`,
+// and reading pluralness off the names would collapse them into one count-addressed
+// key nobody asked for (docs/adr/0004).
 func NewCatalog(sources map[string]string, pluralBases ...string) *Catalog {
 	c := &Catalog{
-		byLocale: map[string]map[string]string{SourceLocale: sources},
-		locales:  []string{SourceLocale},
-		keys:     make([]string, 0, len(sources)),
+		byLocale:    map[string]map[string]string{SourceLocale: sources},
+		locales:     []string{SourceLocale},
+		keys:        make([]string, 0, len(sources)),
+		pluralBases: map[string]bool{},
 	}
 	for k := range sources {
 		c.keys = append(c.keys, k)
 	}
 	slices.Sort(c.keys)
-	c.pluralBases = PluralBases(c.keys)
 	for _, b := range pluralBases {
 		c.pluralBases[b] = true
 	}
