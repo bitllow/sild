@@ -20,6 +20,8 @@ import androidx.lifecycle.viewModelScope
 import io.sild.core.SildClient
 import io.sild.core.SildConfig
 import io.sild.core.SildHost
+import io.sild.core.SildStringStore
+import io.sild.core.installStringStore
 
 // SildRuntime holds the host-supplied config process-wide. The config carries a
 // TokenProvider (not parcelable), so the launcher stores it here and the messenger
@@ -42,6 +44,17 @@ object Sild {
     fun init(config: SildConfig): SildMessenger {
         SildRuntime.config = config
         return SildMessenger
+    }
+
+    /**
+     * Init with a Context, so the strings a tenant published survive the app being
+     * killed: Android's small-value store is behind a Context, which :core has no
+     * way to reach. Without it the messenger still works and renders the text
+     * bundled in the app until it has polled once.
+     */
+    fun init(context: Context, config: SildConfig): SildMessenger {
+        installStringStore(SildPreferences(context))
+        return init(config)
     }
 
     // Push (§5.5). The host owns its FCM registration (ADR 0001) and hands the token
@@ -83,6 +96,19 @@ object SildMessenger {
             .putExtra(EXTRA_TARGET, target)
         if (context !is ComponentActivity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
+    }
+}
+
+// SildPreferences keeps downloaded strings in the app's own SharedPreferences —
+// small values, written off the main thread by the fetch that produced them.
+private class SildPreferences(context: Context) : SildStringStore {
+    private val prefs = context.applicationContext
+        .getSharedPreferences("io.sild.strings", Context.MODE_PRIVATE)
+
+    override fun read(key: String): String? = prefs.getString(key, null)
+
+    override fun write(key: String, value: String) {
+        prefs.edit().putString(key, value).apply()
     }
 }
 
@@ -157,7 +183,10 @@ class SildMessengerActivity : ComponentActivity() {
             val strings: SildStrings = remember(state.locale, state.stringsRevision) {
                 { key, vars -> client.i18n.t(key, vars) }
             }
-            CompositionLocalProvider(LocalSildStrings provides strings) {
+            val plurals: SildPlurals = remember(state.locale, state.stringsRevision) {
+                { base, count, vars -> client.i18n.tPlural(base, count, vars) }
+            }
+            CompositionLocalProvider(LocalSildStrings provides strings, LocalSildPlurals provides plurals) {
             SildTheme(state.brand) {
                 val close = { finish() }
                 when {

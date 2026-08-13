@@ -36,11 +36,11 @@ struct SildHeaderControls: View {
                 SildIconView(soundOn ? .speaker : .speakerOff)
                     .foregroundStyle(style.colors.onBrand)
             }
-            .accessibilityLabel(t(soundOn ? "widget.notifications.disable" : "widget.notifications.enable"))
+            .accessibilityLabel(t(soundOn ? SildKeys.widgetNotificationsDisable : SildKeys.widgetNotificationsEnable))
             Button(action: onClose) {
                 SildIconView(.close).foregroundStyle(style.colors.onBrand)
             }
-            .accessibilityLabel(t("widget.launcher.close"))
+            .accessibilityLabel(t(SildKeys.widgetLauncherClose))
         }
     }
 }
@@ -64,7 +64,7 @@ struct SildHeader: View {
             Button(action: onBack) {
                 SildIconView(.back).foregroundStyle(style.colors.onBrand)
             }
-            .accessibilityLabel(t("widget.thread.back"))
+            .accessibilityLabel(t(SildKeys.widgetThreadBack))
             SildAvatar(name: title, size: 36)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -145,7 +145,7 @@ struct SildMessageBubble: View {
     // Author + time above the bubble (web parity); own messages are labelled "You".
     @ViewBuilder
     private func metaRow(out: Bool) -> some View {
-        let label = out ? t("widget.thread.you") : message.author
+        let label = out ? t(SildKeys.widgetThreadYou) : message.author
         if label != nil || !message.time.isEmpty {
             HStack(spacing: 7) {
                 if let label {
@@ -170,7 +170,7 @@ struct SildMessageBubble: View {
         } label: {
             HStack(spacing: 7) {
                 SildIconView(.clip, size: 16).foregroundStyle(style.colors.tertiary)
-                Text(att.filename.isEmpty ? t("widget.composer.unnamedFile") : att.filename)
+                Text(att.filename.isEmpty ? t(SildKeys.widgetComposerUnnamedFile) : att.filename)
                     .font(style.font(13))
                     .foregroundStyle(style.colors.text)
                     .lineLimit(1)

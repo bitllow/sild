@@ -1,10 +1,12 @@
 package i18n_test
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,19 +21,173 @@ var generatedCatalogs = []string{
 	"../../../sdks/kotlin/core/src/commonMain/kotlin/io/sild/core/I18nCatalog.generated.kt",
 }
 
-func TestEveryLocaleCoversTheSameKeys(t *testing.T) {
+// The generated files that carry a key per line rather than a catalog: the typed
+// constants each runtime looks strings up through.
+var generatedKeyLists = []string{
+	"../../../web/src/i18n/catalog.generated.ts",
+	"../../../sdks/kotlin/core/src/commonMain/kotlin/io/sild/core/I18nCatalog.generated.kt",
+	"../../../sdks/swift/Sources/Sild/SildKeys.generated.swift",
+}
+
+// The shared plural table, generated into each client's test fixture from the same
+// repo file the Go tests read.
+var generatedPluralCases = []string{
+	"../../../web/src/i18n/plural-cases.generated.ts",
+	"../../../sdks/kotlin/core/src/commonTest/kotlin/io/sild/core/PluralCases.generated.kt",
+	"../../../sdks/swift/Tests/SildTests/PluralCases.generated.swift",
+}
+
+// The same ordinary keys as every other locale, and one plural sibling per category
+// its own language has — no form Latvian cannot select, none it needs missing.
+func TestEveryLocaleCoversItsOwnKeySet(t *testing.T) {
 	cat := i18n.Platform()
 	for _, locale := range cat.Locales() {
-		for _, key := range cat.Keys() {
-			v, ok := cat.Default(locale, key)
-			if !ok {
-				t.Errorf("%s is missing %s", locale, key)
-				continue
+		want := cat.LocaleKeys(locale)
+		if got := cat.KeysIn(locale); !slices.Equal(got, want) {
+			for _, k := range want {
+				if !slices.Contains(got, k) {
+					t.Errorf("%s is missing %s", locale, k)
+				}
 			}
-			if strings.TrimSpace(v) == "" {
+			for _, k := range got {
+				if !slices.Contains(want, k) {
+					t.Errorf("%s declares %s, which that language has no category for", locale, k)
+				}
+			}
+		}
+		for _, key := range want {
+			if v, _ := cat.Default(locale, key); strings.TrimSpace(v) == "" {
 				t.Errorf("%s has %s but it is blank", locale, key)
 			}
 		}
+	}
+}
+
+// A stale accessor keeps compiling and renders nothing, so a dropped key has to be
+// gone from every generated artifact rather than merely outnumbered.
+func TestNoGeneratedArtifactCarriesAKeyTheRepoDropped(t *testing.T) {
+	cat := i18n.Platform()
+	declared := map[string]bool{}
+	for _, locale := range cat.Locales() {
+		for _, k := range cat.LocaleKeys(locale) {
+			declared[k] = true
+			// A plural's base is what an accessor names, so it counts as declared.
+			if base, _, ok := i18n.SplitPlural(k); ok && cat.IsPluralBase(base) {
+				declared[base] = true
+			}
+		}
+	}
+	// Dotted, quoted strings are how every one of these files spells a key.
+	quotedKey := regexp.MustCompile(`"([a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)+)"`)
+	for _, path := range generatedKeyLists {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("generated file not present: %v", err)
+		}
+		for _, m := range quotedKey.FindAllStringSubmatch(string(raw), -1) {
+			if !declared[m[1]] {
+				t.Errorf("%s still carries %s, which the repo no longer declares — run `make i18n`",
+					filepath.Base(path), m[1])
+			}
+		}
+	}
+}
+
+// A typed accessor per key, on every runtime that ships one: a renamed key is a
+// build error rather than a blank label.
+func TestEveryKeyHasATypedAccessor(t *testing.T) {
+	cat := i18n.Platform()
+	for _, path := range generatedKeyLists {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("generated file not present: %v", err)
+		}
+		src := string(raw)
+		for _, key := range cat.Keys() {
+			// A plural is addressed by its base and a count, so its siblings get no
+			// accessor of their own.
+			if base, _, ok := i18n.SplitPlural(key); ok && cat.IsPluralBase(base) {
+				key = base
+			}
+			if !strings.Contains(src, strconv.Quote(key)) {
+				t.Errorf("%s has no accessor for %s — run `make i18n`", filepath.Base(path), key)
+			}
+		}
+	}
+}
+
+// The clients' plural fixtures come from the same table the Go test reads, so a
+// case added to the repo has to reach all four suites or none.
+func TestThePluralFixturesMatchTheSharedTable(t *testing.T) {
+	want := cases(t)
+	for _, path := range generatedPluralCases {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("generated fixture not present: %v", err)
+		}
+		src := string(raw)
+		// Every runtime spells a row as (locale, count, category) in that order.
+		row := regexp.MustCompile(`"([a-z]{2})",\s*(\d+),\s*"([a-z]+)"`)
+		got := map[string]bool{}
+		for _, m := range row.FindAllStringSubmatch(src, -1) {
+			got[m[1]+"/"+m[2]+"/"+m[3]] = true
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s carries %d cases, the table has %d — run `make i18n`",
+				filepath.Base(path), len(got), len(want))
+		}
+		for _, c := range want {
+			key := fmt.Sprintf("%s/%d/%s", c.Locale, c.Count, c.Category)
+			if !got[key] {
+				t.Errorf("%s is missing %s — run `make i18n`", filepath.Base(path), key)
+			}
+		}
+	}
+}
+
+// The plural tables the clients pick categories from are generated from
+// plurals.json, so a language added there has to reach them — otherwise a locale
+// the editor offers zero for renders one/other on the device.
+func TestTheGeneratedPluralTablesMatchTheRepo(t *testing.T) {
+	for _, path := range generatedCatalogs {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("generated catalog not present: %v", err)
+		}
+		src := string(raw)
+		pair := regexp.MustCompile(`"([a-z]{2})"\s*(?:to|:)\s*"([a-z_]+)"`)
+		got := map[string]string{}
+		for _, m := range pair.FindAllStringSubmatch(src, -1) {
+			got[m[1]] = m[2]
+		}
+		for _, locale := range i18n.TableLocales() {
+			want := i18n.Family(locale)
+			if got[locale] != want {
+				t.Errorf("%s maps %s to %q, the repo says %q — run `make i18n`",
+					filepath.Base(path), locale, got[locale], want)
+			}
+			// And the family it names has to carry the categories the repo gives it.
+			for _, cat := range i18n.Categories(locale) {
+				if !strings.Contains(src, strconv.Quote(cat)) {
+					t.Errorf("%s is missing the %s category — run `make i18n`",
+						filepath.Base(path), cat)
+				}
+			}
+		}
+	}
+}
+
+// The manifest tells a tenant developer which SDK line a bundle targets, so the
+// number it reports has to be the SDK's own.
+func TestTheCatalogVersionIsTheShippedSDKVersion(t *testing.T) {
+	raw, err := os.ReadFile("../../../sdks/kotlin/core/src/commonMain/kotlin/io/sild/core/Version.kt")
+	if err != nil {
+		t.Skipf("native SDK not present: %v", err)
+	}
+	want := `SDK_VERSION = ` + strconv.Quote(i18n.CatalogVersion)
+	if !strings.Contains(string(raw), want) {
+		t.Errorf("i18n.CatalogVersion is %s; the Kotlin SDK declares something else — move both together",
+			i18n.CatalogVersion)
 	}
 }
 
@@ -44,8 +200,8 @@ func TestEstonianIsEtNotEe(t *testing.T) {
 	}
 }
 
-// A stale generated catalog would ship a client that renders a key Sild no longer
-// has, misses one it just added, or renders last week's wording of one it kept.
+// Compared per locale block rather than by searching the whole file, so a value
+// swapped between two locales cannot pass as current.
 func TestTheGeneratedClientCatalogsAreCurrent(t *testing.T) {
 	cat := i18n.Platform()
 	for _, path := range generatedCatalogs {
@@ -53,32 +209,86 @@ func TestTheGeneratedClientCatalogsAreCurrent(t *testing.T) {
 		if err != nil {
 			t.Skipf("generated catalog not present: %v", err)
 		}
-		src := string(raw)
+		blocks := generatedBlocks(path, string(raw))
 		for _, locale := range cat.Locales() {
-			if !strings.Contains(src, strconv.Quote(locale)) {
-				t.Errorf("%s is missing locale %s — run `make i18n`", path, locale)
+			got, ok := blocks[locale]
+			if !ok {
+				t.Errorf("%s is missing locale %s — run `make i18n`", filepath.Base(path), locale)
+				continue
 			}
-			for _, key := range cat.Keys() {
-				value, ok := cat.Default(locale, key)
-				if !ok {
-					continue
+			want := map[string]string{}
+			for _, key := range cat.LocaleKeys(locale) {
+				if v, has := cat.Default(locale, key); has {
+					want[key] = v
 				}
-				if !strings.Contains(src, generatedEntry(path, key, value)) {
-					t.Errorf("%s has stale or missing text for %s/%s — run `make i18n`", path, locale, key)
+			}
+			for key, value := range want {
+				if got[key] != value {
+					t.Errorf("%s has %s/%s as %q, the repo says %q — run `make i18n`",
+						filepath.Base(path), locale, key, got[key], value)
+				}
+			}
+			for key := range got {
+				if _, declared := want[key]; !declared {
+					t.Errorf("%s carries %s/%s, which the repo does not declare — run `make i18n`",
+						filepath.Base(path), locale, key)
 				}
 			}
 		}
 	}
 }
 
-// How codegen writes one entry, so a value edited without regenerating fails here
-// rather than shipping. Kotlin escapes `$`, which starts a template otherwise.
-func generatedEntry(path, key, value string) string {
-	if strings.HasSuffix(path, ".kt") {
-		esc := func(s string) string { return strings.ReplaceAll(strconv.Quote(s), "$", "\\$") }
-		return esc(key) + " to " + esc(value)
+// defaultsMap is the region holding the per-locale strings: the plural tables below
+// it pair a locale with a family name and would read as text for the last locale.
+func defaultsMap(src string) string {
+	open := strings.Index(src, "DEFAULTS")
+	if open < 0 {
+		return src
 	}
-	return strconv.Quote(key) + ": " + strconv.Quote(value)
+	src = src[open:]
+	for _, close := range []string{"\n};", "\n)"} {
+		if i := strings.Index(src, close); i > 0 {
+			src = src[:i]
+		}
+	}
+	return src
+}
+
+// generatedBlocks reads a generated catalog back into locale → key → text. Kotlin
+// escapes `$`, which starts a template otherwise.
+func generatedBlocks(path, src string) map[string]map[string]string {
+	entry := regexp.MustCompile(`"((?:[^"\\]|\\.)*)"\s*(?:to|:)\s*"((?:[^"\\]|\\.)*)"`)
+	unquote := func(s string) string {
+		if strings.HasSuffix(path, ".kt") {
+			s = strings.ReplaceAll(s, "\\$", "$")
+		}
+		if out, err := strconv.Unquote(`"` + s + `"`); err == nil {
+			return out
+		}
+		return s
+	}
+	out := map[string]map[string]string{}
+	// Only the defaults map: the plural tables further down pair a locale with a
+	// family name and would otherwise read as text for the last locale's block.
+	src = defaultsMap(src)
+	// A block opens with `"lv": {` (TS) or `"lv" to mapOf(` (Kotlin) and closes at
+	// the next such opening or the end of the map.
+	head := regexp.MustCompile(`"([a-z]{2})"\s*(?::\s*\{|to mapOf\()`)
+	heads := head.FindAllStringSubmatchIndex(src, -1)
+	for i, h := range heads {
+		end := len(src)
+		if i+1 < len(heads) {
+			end = heads[i+1][0]
+		}
+		locale := src[h[2]:h[3]]
+		body := src[h[1]:end]
+		strings := map[string]string{}
+		for _, m := range entry.FindAllStringSubmatch(body, -1) {
+			strings[unquote(m[1])] = unquote(m[2])
+		}
+		out[locale] = strings
+	}
+	return out
 }
 
 func TestResolveFallsThroughToTheSourceLanguage(t *testing.T) {
@@ -163,6 +373,54 @@ func TestNoSurfaceRendersAKeyTheCatalogDoesNotDeclare(t *testing.T) {
 		})
 		if err != nil {
 			t.Skipf("surface not present: %v", err)
+		}
+	}
+}
+
+// Sild's own plural keys are declared like a tenant's, so the one catalog nobody
+// can correct is not the one guessing from names.
+func TestSildsPluralKeysAreDeclaredAndReal(t *testing.T) {
+	cat := i18n.Platform()
+	// Every declared base carries the source language's categories.
+	for _, base := range i18n.DeclaredPluralKeys() {
+		if !cat.IsPluralBase(base) {
+			t.Errorf("%s is declared plural but the catalog does not hold it", base)
+		}
+		for _, c := range i18n.Categories(i18n.SourceLocale) {
+			if !cat.Declared(i18n.PluralKey(base, c)) {
+				t.Errorf("%s is declared plural but has no %s form", base, c)
+			}
+		}
+	}
+	// And nothing that merely looks plural was left undeclared.
+	for base := range i18n.PluralBasesInFile(cat.Keys()) {
+		if !cat.IsPluralBase(base) {
+			t.Errorf("%s has sibling keys but is not declared in plural-keys.json", base)
+		}
+	}
+}
+
+// A tenant's exported keys and Sild's own generated keys are named by one rule, or
+// the same key would be two identifiers depending on who generated it.
+func TestTheGeneratorNamesKeysTheWayGoDoes(t *testing.T) {
+	cat := i18n.Platform()
+	for _, path := range generatedKeyLists {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Skipf("generated file not present: %v", err)
+		}
+		src := string(raw)
+		if strings.HasSuffix(path, ".ts") {
+			continue // the TypeScript output is a union of key strings, not identifiers
+		}
+		for _, key := range cat.Keys() {
+			if base, _, ok := i18n.SplitPlural(key); ok && cat.IsPluralBase(base) {
+				key = base
+			}
+			if !strings.Contains(src, i18n.Ident(key)) {
+				t.Errorf("%s names %s something other than %s — the two ident rules disagree",
+					filepath.Base(path), key, i18n.Ident(key))
+			}
 		}
 	}
 }

@@ -24,7 +24,17 @@ type RoleScope struct {
 	Publish  bool     `json:"publish,omitempty"`
 }
 
-// Allows reports whether a set dimension admits one value.
+// NarrowsTranslations reports whether this scope limits translation work at all.
+// A scope naming neither projects nor locales narrows nothing, which is what an
+// API key minted before scopes existed carries.
+func (s RoleScope) NarrowsTranslations() bool {
+	return len(s.Projects) > 0 || len(s.Locales) > 0
+}
+
+// Allows reports whether a set dimension admits one value. An EMPTY set admits
+// nothing: a grant narrowed down to no projects is a grant that reaches none, which
+// is what revoking the last one has to mean. A scope that names no dimension at all
+// is a different thing — see NarrowsTranslations.
 func Allows(set []string, value string) bool {
 	for _, s := range set {
 		if s == ScopeAll || s == value {

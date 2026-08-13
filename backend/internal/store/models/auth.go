@@ -12,11 +12,15 @@ import (
 // never retrievable. Prefix is a public, indexed lookup component so verification
 // is O(1) (no scan): key string is sild_live_<prefix>_<secret>.
 type APIKey struct {
-	ID        string `gorm:"primaryKey;size:40"`
-	TenantID  string `gorm:"size:40;not null;index:idx_apikey_tenant"`
-	Prefix    string `gorm:"size:24;not null;uniqueIndex"` // lookup key
-	Hash      string `gorm:"size:128;not null"`            // sha256 hex of the secret part
-	Label     string `gorm:"size:255"`
+	ID       string `gorm:"primaryKey;size:40"`
+	TenantID string `gorm:"size:40;not null;index:idx_apikey_tenant"`
+	Prefix   string `gorm:"size:24;not null;uniqueIndex"` // lookup key
+	Hash     string `gorm:"size:128;not null"`            // sha256 hex of the secret part
+	Label    string `gorm:"size:255"`
+	// Scope limits what this key may reach, in the same document a role assignment
+	// carries. Empty is a tenant-wide key — what every key minted before scopes
+	// existed is, and still means.
+	Scope     RoleScope `gorm:"serializer:json"`
 	RevokedAt *time.Time
 	CreatedAt time.Time
 }

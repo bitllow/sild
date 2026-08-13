@@ -25,11 +25,13 @@ func (f *i18nFixture) createProject(t *testing.T, slug, name string) {
 	}
 }
 
-func (f *i18nFixture) declare(t *testing.T, project, key, source string) *http.Response {
+// declare posts a key. plurals gives the source language's forms instead of one
+// source, which is what makes the key a plural.
+func (f *i18nFixture) declare(t *testing.T, project, key, source string, plurals ...map[string]string) *http.Response {
 	t.Helper()
 	return f.h.Request("POST", "/v1/translations/projects/"+project+"/declarations").
 		Cookie("sild_admin", f.owner).
-		JSON(map[string]any{"key": key, "source": source}).Do().Result()
+		JSON(declaration(key, source, plurals...)).Do().Result()
 }
 
 // enable turns on the languages a project offers; the fallback must be one of them.
@@ -41,6 +43,14 @@ func (f *i18nFixture) enable(t *testing.T, project string, locales ...string) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("enable locales: %d %s", w.Code, w.Body)
 	}
+}
+
+func declaration(key, source string, plurals ...map[string]string) map[string]any {
+	body := map[string]any{"key": key, "source": source}
+	if len(plurals) > 0 {
+		body["plurals"] = plurals[0]
+	}
+	return body
 }
 
 func (f *i18nFixture) projects(t *testing.T) map[string]map[string]any {

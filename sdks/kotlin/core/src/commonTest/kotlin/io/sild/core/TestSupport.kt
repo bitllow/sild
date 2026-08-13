@@ -5,6 +5,8 @@ import io.ktor.client.statement.bodyAsText
 import kotlin.time.TimeSource
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
@@ -17,6 +19,32 @@ internal expect fun envVar(name: String): String?
 /** runBlocking, which lives in the concurrent (JVM + native) source set, not common.
  *  The tests await real callbacks on real threads, so a virtual-time runTest would race. */
 internal expect fun runBlockingTest(block: suspend CoroutineScope.() -> Unit)
+
+/**
+ * What a mock engine saw, collected safely. The client issues requests concurrently
+ * — a row fetch and its message page go out together — so two handler coroutines
+ * append at once and a plain list loses one, failing a test whose request was in
+ * fact made. Reads as an ordinary List everywhere else.
+ */
+@OptIn(ExperimentalAtomicApi::class)
+internal class Recorded<T> : AbstractList<T>() {
+    // Compare-and-set on a whole immutable list: an append that raced another
+    // retries, where `items += x` would silently drop one of them.
+    private val items = AtomicReference<List<T>>(emptyList())
+
+    operator fun plusAssign(item: T) {
+        while (true) {
+            val seen = items.load()
+            if (items.compareAndSet(seen, seen + item)) return
+        }
+    }
+
+    /** Forget what was recorded — a test asserting on the next call only. */
+    fun clear() = items.store(emptyList())
+
+    override val size: Int get() = items.load().size
+    override fun get(index: Int): T = items.load()[index]
+}
 
 /** A unique id per call, so concurrent runs against one sild-dev don't collide. */
 @OptIn(ExperimentalUuidApi::class)

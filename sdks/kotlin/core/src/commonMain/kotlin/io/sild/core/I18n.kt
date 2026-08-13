@@ -3,6 +3,7 @@ package io.sild.core
 import kotlin.concurrent.Volatile
 import kotlin.time.TimeSource
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /** The reserved project Sild's own strings live in. */
 const val PLATFORM_PROJECT: String = "sild"
@@ -16,6 +17,9 @@ data class TranslationManifest(
     val project: String = "",
     val fallback_locale: String = "",
     val locales: Map<String, Int> = emptyMap(),
+    /** The SDK line Sild's own key set belongs to, so a host can tell what the
+     *  bundles it is serving target. Empty for a tenant's own project. */
+    val sdk_version: String = "",
 )
 
 /** GET /v1/translations/bundle → one published locale in full. */
@@ -30,25 +34,72 @@ data class TranslationBundle(
 /** A manifest read and the validator that revalidates it; null body means 304. */
 internal class ManifestRead(val manifest: TranslationManifest?, val etag: String)
 
-// Downloaded bundles live for the process, not the session. A messenger closed and
-// reopened builds a new client, and without this its predecessor's download would
-// be thrown away — "activates at next start" would never activate anything.
-internal class I18nDownloads {
+/** A bundle as it is kept between sessions. */
+@Serializable
+internal data class HeldBundle(val version: Int, val strings: Map<String, String>)
+
+/** Everything one tenant kept for one project: the bundles, and the language their
+ *  offering settled on. One slot, so the pointer cannot name a bundle that is not
+ *  there. */
+@Serializable
+internal data class HeldProject(
+    val settled: String = "",
+    val bundles: Map<String, HeldBundle> = emptyMap(),
+)
+
+// Downloaded bundles outlive the session, or "activates at next start" would never
+// activate anything. Keyed by tenant: two tenants in one process must not read each
+// other's wording.
+internal class I18nDownloads(store: SildStringStore? = null) {
+    @Volatile
+    private var store: SildStringStore? = store
     // Replaced whole rather than mutated: this is read on the main thread and
     // written from whichever dispatcher the fetch ran on.
     @Volatile
-    private var byLocale: Map<String, Pair<Int, Map<String, String>>> = emptyMap()
+    private var byProject: Map<String, HeldProject> = emptyMap()
 
-    fun get(project: String, locale: String): Pair<Int, Map<String, String>>? =
-        byLocale["$project\n$locale"]
+    fun get(tenant: String, project: String, locale: String): HeldBundle? =
+        held(tenant, project).bundles[locale]
 
-    fun put(project: String, locale: String, ready: Pair<Int, Map<String, String>>) {
-        byLocale = byLocale + ("$project\n$locale" to ready)
+    /** The language this tenant's offering settled on, or "" if no fetch ever did.
+     *  A device asking for Finnish against a tenant publishing Latvian negotiates to
+     *  Latvian; without this the next start would guess Finnish and adopt nothing. */
+    fun settledLocale(tenant: String, project: String): String = held(tenant, project).settled
+
+    fun put(tenant: String, project: String, locale: String, bundle: HeldBundle) {
+        val key = slot(tenant, project)
+        val next = held(tenant, project).let {
+            it.copy(settled = locale, bundles = it.bundles + (locale to bundle))
+        }
+        byProject = byProject + (key to next)
+        // A tenant with no identity yet is held in memory only: a slot that cannot
+        // name whose text it is would be read by the next tenant along.
+        if (tenant.isEmpty()) return
+        runCatching { store?.write(key, Json.encodeToString(next)) }
     }
 
-    /** The process-wide one, which every client built from a config shares. */
+    // A miss is remembered as an empty one: the store is a platform call, and a
+    // device on a language nobody published would otherwise re-read it every time.
+    private fun held(tenant: String, project: String): HeldProject {
+        val key = slot(tenant, project)
+        byProject[key]?.let { return it }
+        val raw = if (tenant.isEmpty()) null else store?.read(key)
+        val held = raw?.let { runCatching { Json.decodeFromString<HeldProject>(it) }.getOrNull() }
+            ?: HeldProject()
+        byProject = byProject + (key to held)
+        return held
+    }
+
+    private fun slot(tenant: String, project: String) = "sild_i18n_${tenant}_$project"
+
     companion object {
-        val shared = I18nDownloads()
+        /** The process-wide downloads. The store is installed once — by the platform,
+         *  or by `Sild.init(context, config)` where only the host can reach one. */
+        val shared = I18nDownloads(platformStringStore())
+
+        fun install(store: SildStringStore) {
+            shared.store = store
+        }
     }
 }
 
@@ -66,6 +117,108 @@ fun normalizeLocale(tag: String?): String {
     val t = (tag ?: "").trim()
     val i = t.indexOfFirst { it == '-' || it == '_' }
     return (if (i > 0) t.substring(0, i) else t).lowercase()
+}
+
+/** The category every language has, and the last readable text before giving up. */
+private const val CAT_OTHER = "other"
+
+/** Which categories a language has — Latvian's zero, Estonian's lack of one. */
+fun pluralCategories(locale: String): List<String> {
+    val family = I18N_PLURAL_LOCALES[normalizeLocale(locale)] ?: I18N_PLURAL_DEFAULT_FAMILY
+    return I18N_PLURAL_FAMILIES[family] ?: I18N_PLURAL_FAMILIES.getValue(I18N_PLURAL_DEFAULT_FAMILY)
+}
+
+/** The plural category for a count. Integers only, per ADR 0004. The families here
+ *  are the ones backend/internal/i18n/plurals.json names. */
+fun pluralCategory(locale: String, count: Int): String {
+    val n = if (count < 0) -count else count
+    val m10 = n % 10
+    val m100 = n % 100
+    val family = I18N_PLURAL_LOCALES[normalizeLocale(locale)] ?: I18N_PLURAL_DEFAULT_FAMILY
+    return when (family) {
+        "other" -> CAT_OTHER
+        "hindi" -> if (n <= 1) "one" else CAT_OTHER
+        "romance", "romance_zero" -> when {
+            n == 1 -> "one"
+            n == 0 && family == "romance_zero" -> "one"
+            // CLDR gives Romance a "many" for round millions, which is what a
+            // compact "2 million" reads as.
+            n != 0 && n % 1_000_000 == 0 -> "many"
+            else -> CAT_OTHER
+        }
+        "czech" -> when {
+            n == 1 -> "one"
+            n in 2..4 -> "few"
+            else -> CAT_OTHER
+        }
+        "romanian" -> when {
+            n == 1 -> "one"
+            n == 0 || m100 in 1..19 -> "few"
+            else -> CAT_OTHER
+        }
+        "lithuanian" -> when {
+            m100 in 11..19 -> CAT_OTHER
+            m10 == 1 -> "one"
+            m10 in 2..9 -> "few"
+            else -> CAT_OTHER
+        }
+        "latvian" -> when {
+            m10 == 0 || m100 in 11..19 -> "zero"
+            m10 == 1 && m100 != 11 -> "one"
+            else -> CAT_OTHER
+        }
+        "hebrew" -> when {
+            n == 1 -> "one"
+            n == 2 -> "two"
+            else -> CAT_OTHER
+        }
+        "slovenian" -> when (m100) {
+            1 -> "one"
+            2 -> "two"
+            3, 4 -> "few"
+            else -> CAT_OTHER
+        }
+        "arabic" -> when {
+            n == 0 -> "zero"
+            n == 1 -> "one"
+            n == 2 -> "two"
+            m100 in 3..10 -> "few"
+            m100 in 11..99 -> "many"
+            else -> CAT_OTHER
+        }
+        "welsh" -> when (n) {
+            0 -> "zero"
+            1 -> "one"
+            2 -> "two"
+            3 -> "few"
+            6 -> "many"
+            else -> CAT_OTHER
+        }
+        "irish" -> when {
+            n == 1 -> "one"
+            n == 2 -> "two"
+            n in 3..6 -> "few"
+            n in 7..10 -> "many"
+            else -> CAT_OTHER
+        }
+        "maltese" -> when {
+            n == 1 -> "one"
+            n == 2 -> "two"
+            n == 0 || m100 in 3..10 -> "few"
+            m100 in 11..19 -> "many"
+            else -> CAT_OTHER
+        }
+        // Three families share the "few" test and differ only in what one is and what
+        // everything else is: Polish's one is exactly one where Russian's is any
+        // number ending in it, and Serbo-Croatian has no many.
+        "polish", "slavic", "serbocroatian" -> when {
+            if (family == "polish") n == 1 else m10 == 1 && m100 != 11 -> "one"
+            m10 in 2..4 && m100 !in 12..14 -> "few"
+            family == "serbocroatian" -> CAT_OTHER
+            else -> "many"
+        }
+        else -> if (n == 1) "one" else CAT_OTHER
+    }
 }
 
 /** The caller's most preferred locale that is actually offered, or "" if none. */
@@ -105,6 +258,13 @@ class SildI18n internal constructor(
     private val project: String = PLATFORM_PROJECT,
     private val now: () -> Long = ::elapsedMillis,
     private val downloads: I18nDownloads = I18nDownloads.shared,
+    // Empty until the host's token names the tenant; a bundle keyed by nobody is
+    // nobody's to render.
+    private var tenant: String = "",
+    // A key that resolves nowhere is a programming error: it is reported, and only
+    // a debug build puts the key itself on screen.
+    private val debug: Boolean = false,
+    private val onMissingKey: ((String) -> Unit)? = null,
 ) {
     /** The language being rendered. */
     @Volatile
@@ -145,22 +305,53 @@ class SildI18n internal constructor(
         adoptDownloaded()
     }
 
-    // What an earlier session in this process fetched is this session's starting
-    // text — the "activates at next SDK start" half of the delivery contract.
+    /** Name the tenant whose text this client renders, and take up what was kept for
+     *  them. Called once the host's token has been minted — which is the "activates
+     *  at next SDK start" half of the delivery contract. */
+    internal fun adopt(tenant: String): Boolean {
+        if (tenant.isEmpty() || tenant == this.tenant) return false
+        this.tenant = tenant
+        val before = locale to version
+        // The language an earlier session negotiated against what this tenant
+        // publishes, unless the host named one — an instruction outranks a memory.
+        if (!explicit) {
+            downloads.settledLocale(tenant, project).takeIf { it.isNotEmpty() }?.let { locale = it }
+        }
+        adoptDownloaded()
+        return before != locale to version
+    }
+
+    // What an earlier session kept is this session's starting text.
     private fun adoptDownloaded() {
-        val ready = downloads.get(project, locale) ?: return
-        version = ready.first
-        strings = ready.second
+        val ready = downloads.get(tenant, project, locale) ?: return
+        version = ready.version
+        strings = ready.strings
     }
 
     /** The text for [key] in the active language, with `{name}` placeholders filled. */
-    fun t(key: String, vars: Map<String, Any>? = null): String {
-        val text = strings[key]
+    fun t(key: String, vars: Map<String, Any>? = null): String = interpolate(lookup(key), vars)
+
+    /** The text for a count, from the category this language uses for it. `count`
+     *  is available to the text as `{count}`. */
+    fun tPlural(base: String, count: Int, vars: Map<String, Any>? = null): String {
+        val category = pluralCategory(locale, count)
+        val text = lookup("$base.$category", "$base.$CAT_OTHER")
+        return interpolate(text, mapOf("count" to count) + (vars ?: emptyMap()))
+    }
+
+    // lookup walks the published bundle, then this language's bundled text, then the
+    // source language's; alt is the plural's other form, where there is one.
+    private fun lookup(key: String, alt: String? = null): String {
+        val text = textFor(key) ?: alt?.let { textFor(it) }
+        if (text != null) return text
+        onMissingKey?.invoke(key)
+        return if (debug) key else ""
+    }
+
+    private fun textFor(key: String): String? =
+        strings[key]
             ?: I18N_DEFAULTS[locale]?.get(key)
             ?: I18N_DEFAULTS[I18N_SOURCE_LOCALE]?.get(key)
-            ?: key
-        return interpolate(text, vars)
-    }
 
     /** Render the language the host asks for, from this call on. Unknown tags are
      *  ignored, so a host may pass the device's setting through unchecked. */
@@ -225,7 +416,7 @@ class SildI18n internal constructor(
         val v = manifest.locales[want] ?: return null
         if (want == locale && v == version) return null
         val strings = src.fetchTranslationBundle(project, want, v).strings
-        downloads.put(project, want, v to strings)
+        downloads.put(tenant, project, want, HeldBundle(v, strings))
         // setLocale may have moved on while the bundle was in flight; it is held for
         // whoever asks for that language next, but it is not this language's text.
         if (at != locale) return null

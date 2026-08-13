@@ -72,7 +72,8 @@ func Tenant(ctx context.Context, svc *domain.Service, spec TenantSpec) (*Result,
 	if label == "" {
 		label = "default"
 	}
-	key, _, err := svc.CreateAPIKey(ctx, t.ID, label)
+	// A provisioned tenant's first key is the backend's own: tenant-wide.
+	key, _, err := svc.CreateAPIKey(ctx, t.ID, label, models.RoleScope{})
 	if err != nil {
 		return nil, fmt.Errorf("create api key: %w", err)
 	}

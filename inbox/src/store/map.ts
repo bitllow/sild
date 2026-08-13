@@ -199,7 +199,18 @@ export function mapApiKey(k: ApiKeyRecord): ApiKey {
     label: k.label || "API key",
     masked: `${k.prefix}………`,
     created: shortDate(k.created_at),
+    reach: keyReach(k),
   };
+}
+
+// A build token is only safe if its limits are readable after the fact.
+function keyReach(k: ApiKeyRecord): string {
+  const projects = k.projects ?? [];
+  const locales = k.locales ?? [];
+  if (projects.length === 0 && locales.length === 0) return "everything";
+  const named = (set: string[], all: string) => (set.includes("all") ? all : set.join(", "));
+  const parts = [named(projects, "all projects"), named(locales, "all languages")];
+  return parts.join(" · ") + (k.publish ? " · may publish" : "");
 }
 
 export function mapWebhook(w: ApiWebhook): Webhook {

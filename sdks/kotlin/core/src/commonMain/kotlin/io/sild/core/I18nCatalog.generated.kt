@@ -1,4 +1,4 @@
-// Generated from backend/internal/i18n/locales by scripts/gen-i18n.mjs — run `make i18n`. Do not edit.
+// Generated from backend/internal/i18n by scripts/gen-i18n.mjs — run `make i18n`. Do not edit.
 package io.sild.core
 
 internal const val I18N_SOURCE_LOCALE: String = "en"
@@ -21,6 +21,8 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.composer.tooLarge" to "That file is too large (max {mb} MB).",
         "widget.composer.unnamedFile" to "attachment",
         "widget.composer.uploading" to "Uploading…",
+        "widget.home.agentsOnline.one" to "{count} agent online",
+        "widget.home.agentsOnline.other" to "{count} agents online",
         "widget.home.cta" to "Send us a message",
         "widget.home.directChat" to "Direct chat",
         "widget.home.newConversation" to "New conversation",
@@ -35,6 +37,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logo",
         "widget.notifications.disable" to "Turn off reply notifications",
         "widget.notifications.enable" to "Turn on reply notifications",
+        "widget.poweredBy" to "Powered by Sild",
         "widget.status.connecting" to "Connecting…",
         "widget.status.loading" to "Loading…",
         "widget.status.reconnecting" to "Reconnecting…",
@@ -63,6 +66,9 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.composer.tooLarge" to "Ese archivo es demasiado grande (máximo {mb} MB).",
         "widget.composer.unnamedFile" to "adjunto",
         "widget.composer.uploading" to "Subiendo…",
+        "widget.home.agentsOnline.many" to "{count} agentes en línea",
+        "widget.home.agentsOnline.one" to "{count} agente en línea",
+        "widget.home.agentsOnline.other" to "{count} agentes en línea",
         "widget.home.cta" to "Envíanos un mensaje",
         "widget.home.directChat" to "Chat directo",
         "widget.home.newConversation" to "Nueva conversación",
@@ -77,6 +83,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logotipo",
         "widget.notifications.disable" to "Desactivar notificaciones de respuestas",
         "widget.notifications.enable" to "Activar notificaciones de respuestas",
+        "widget.poweredBy" to "Con tecnología de Sild",
         "widget.status.connecting" to "Conectando…",
         "widget.status.loading" to "Cargando…",
         "widget.status.reconnecting" to "Reconectando…",
@@ -105,6 +112,8 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.composer.tooLarge" to "Fail on liiga suur (kuni {mb} MB).",
         "widget.composer.unnamedFile" to "manus",
         "widget.composer.uploading" to "Üleslaadimine…",
+        "widget.home.agentsOnline.one" to "{count} agent võrgus",
+        "widget.home.agentsOnline.other" to "{count} agenti võrgus",
         "widget.home.cta" to "Saada meile sõnum",
         "widget.home.directChat" to "Otsevestlus",
         "widget.home.newConversation" to "Uus vestlus",
@@ -119,6 +128,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logo",
         "widget.notifications.disable" to "Lülita vastuste teavitused välja",
         "widget.notifications.enable" to "Lülita vastuste teavitused sisse",
+        "widget.poweredBy" to "Töötab Sildi abil",
         "widget.status.connecting" to "Ühendamine…",
         "widget.status.loading" to "Laadimine…",
         "widget.status.reconnecting" to "Taasühendamine…",
@@ -147,6 +157,9 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.composer.tooLarge" to "Failas per didelis (ne daugiau kaip {mb} MB).",
         "widget.composer.unnamedFile" to "priedas",
         "widget.composer.uploading" to "Įkeliamas failas…",
+        "widget.home.agentsOnline.few" to "{count} agentai prisijungę",
+        "widget.home.agentsOnline.one" to "{count} agentas prisijungęs",
+        "widget.home.agentsOnline.other" to "{count} agentų prisijungę",
         "widget.home.cta" to "Parašykite mums žinutę",
         "widget.home.directChat" to "Tiesioginis pokalbis",
         "widget.home.newConversation" to "Naujas pokalbis",
@@ -161,6 +174,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logotipas",
         "widget.notifications.disable" to "Išjungti pranešimus apie atsakymus",
         "widget.notifications.enable" to "Įjungti pranešimus apie atsakymus",
+        "widget.poweredBy" to "Veikia su Sild",
         "widget.status.connecting" to "Jungiamasi…",
         "widget.status.loading" to "Įkeliama…",
         "widget.status.reconnecting" to "Jungiamasi iš naujo…",
@@ -189,6 +203,9 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.composer.tooLarge" to "Fails ir pārāk liels (ne vairāk kā {mb} MB).",
         "widget.composer.unnamedFile" to "pielikums",
         "widget.composer.uploading" to "Notiek faila augšupielāde…",
+        "widget.home.agentsOnline.one" to "{count} aģents tiešsaistē",
+        "widget.home.agentsOnline.other" to "{count} aģenti tiešsaistē",
+        "widget.home.agentsOnline.zero" to "{count} aģentu tiešsaistē",
         "widget.home.cta" to "Sūtiet mums ziņu",
         "widget.home.directChat" to "Tiešā saruna",
         "widget.home.newConversation" to "Jauna saruna",
@@ -203,6 +220,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Logotips",
         "widget.notifications.disable" to "Izslēgt paziņojumus par atbildēm",
         "widget.notifications.enable" to "Ieslēgt paziņojumus par atbildēm",
+        "widget.poweredBy" to "Darbojas ar Sild",
         "widget.status.connecting" to "Notiek savienošana…",
         "widget.status.loading" to "Ielādē…",
         "widget.status.reconnecting" to "Atkārtoti savienojas…",
@@ -231,6 +249,10 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.composer.tooLarge" to "Файл слишком большой (максимум {mb} МБ).",
         "widget.composer.unnamedFile" to "вложение",
         "widget.composer.uploading" to "Загрузка файла…",
+        "widget.home.agentsOnline.few" to "{count} агента в сети",
+        "widget.home.agentsOnline.many" to "{count} агентов в сети",
+        "widget.home.agentsOnline.one" to "{count} агент в сети",
+        "widget.home.agentsOnline.other" to "{count} агента в сети",
         "widget.home.cta" to "Отправить сообщение",
         "widget.home.directChat" to "Личный чат",
         "widget.home.newConversation" to "Новый разговор",
@@ -245,6 +267,7 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.logoAlt" to "Логотип",
         "widget.notifications.disable" to "Отключить уведомления об ответах",
         "widget.notifications.enable" to "Включить уведомления об ответах",
+        "widget.poweredBy" to "Работает на Sild",
         "widget.status.connecting" to "Подключение…",
         "widget.status.loading" to "Загрузка…",
         "widget.status.reconnecting" to "Переподключение…",
@@ -259,3 +282,134 @@ internal val I18N_DEFAULTS: Map<String, Map<String, String>> = mapOf(
         "widget.thread.you" to "Вы",
     ),
 )
+
+internal const val I18N_PLURAL_DEFAULT_FAMILY: String = "one_other"
+
+internal val I18N_PLURAL_FAMILIES: Map<String, List<String>> = mapOf(
+    "arabic" to listOf("zero", "one", "two", "few", "many", "other"),
+    "czech" to listOf("one", "few", "other"),
+    "hebrew" to listOf("one", "two", "other"),
+    "hindi" to listOf("one", "other"),
+    "irish" to listOf("one", "two", "few", "many", "other"),
+    "latvian" to listOf("zero", "one", "other"),
+    "lithuanian" to listOf("one", "few", "other"),
+    "maltese" to listOf("one", "two", "few", "many", "other"),
+    "one_other" to listOf("one", "other"),
+    "other" to listOf("other"),
+    "polish" to listOf("one", "few", "many", "other"),
+    "romance" to listOf("one", "many", "other"),
+    "romance_zero" to listOf("one", "many", "other"),
+    "romanian" to listOf("one", "few", "other"),
+    "serbocroatian" to listOf("one", "few", "other"),
+    "slavic" to listOf("one", "few", "many", "other"),
+    "slovenian" to listOf("one", "two", "few", "other"),
+    "welsh" to listOf("zero", "one", "two", "few", "many", "other"),
+)
+
+internal val I18N_PLURAL_LOCALES: Map<String, String> = mapOf(
+    "af" to "one_other",
+    "ar" to "arabic",
+    "be" to "slavic",
+    "bg" to "one_other",
+    "bs" to "serbocroatian",
+    "ca" to "romance",
+    "cs" to "czech",
+    "cy" to "welsh",
+    "da" to "one_other",
+    "de" to "one_other",
+    "el" to "one_other",
+    "en" to "one_other",
+    "es" to "romance",
+    "et" to "one_other",
+    "eu" to "one_other",
+    "fi" to "one_other",
+    "fr" to "romance_zero",
+    "ga" to "irish",
+    "gl" to "one_other",
+    "he" to "hebrew",
+    "hi" to "hindi",
+    "hr" to "serbocroatian",
+    "hu" to "one_other",
+    "id" to "other",
+    "it" to "romance",
+    "iw" to "hebrew",
+    "ja" to "other",
+    "ka" to "one_other",
+    "km" to "other",
+    "ko" to "other",
+    "lo" to "other",
+    "lt" to "lithuanian",
+    "lv" to "latvian",
+    "ms" to "other",
+    "mt" to "maltese",
+    "my" to "other",
+    "nb" to "one_other",
+    "nl" to "one_other",
+    "no" to "one_other",
+    "pl" to "polish",
+    "pt" to "romance_zero",
+    "ro" to "romanian",
+    "ru" to "slavic",
+    "sk" to "czech",
+    "sl" to "slovenian",
+    "sq" to "one_other",
+    "sr" to "serbocroatian",
+    "sv" to "one_other",
+    "sw" to "one_other",
+    "th" to "other",
+    "tr" to "one_other",
+    "uk" to "slavic",
+    "vi" to "other",
+    "zh" to "other",
+)
+
+/** Every key Sild renders. A renamed key removes its member, so a stale lookup
+ *  fails the build instead of reaching a customer as a raw key. */
+object SildKeys {
+    const val emailAutoReplyBody: String = "email.autoReply.body"
+    const val emailAutoReplySubject: String = "email.autoReply.subject"
+    const val pushNewMessage: String = "push.newMessage"
+    const val widgetCommonCancel: String = "widget.common.cancel"
+    const val widgetComposerAttach: String = "widget.composer.attach"
+    const val widgetComposerAttachFailed: String = "widget.composer.attachFailed"
+    const val widgetComposerFile: String = "widget.composer.file"
+    const val widgetComposerPhotoOrVideo: String = "widget.composer.photoOrVideo"
+    const val widgetComposerPlaceholder: String = "widget.composer.placeholder"
+    const val widgetComposerRemove: String = "widget.composer.remove"
+    const val widgetComposerSend: String = "widget.composer.send"
+    const val widgetComposerTooLarge: String = "widget.composer.tooLarge"
+    const val widgetComposerUnnamedFile: String = "widget.composer.unnamedFile"
+    const val widgetComposerUploading: String = "widget.composer.uploading"
+    const val widgetHomeCta: String = "widget.home.cta"
+    const val widgetHomeDirectChat: String = "widget.home.directChat"
+    const val widgetHomeNewConversation: String = "widget.home.newConversation"
+    const val widgetHomeReassurance: String = "widget.home.reassurance"
+    const val widgetHomeRecent: String = "widget.home.recent"
+    const val widgetHomeStart: String = "widget.home.start"
+    const val widgetHomeSubtitle: String = "widget.home.subtitle"
+    const val widgetHomeSupport: String = "widget.home.support"
+    const val widgetHomeTitle: String = "widget.home.title"
+    const val widgetLauncherClose: String = "widget.launcher.close"
+    const val widgetLauncherOpen: String = "widget.launcher.open"
+    const val widgetLogoAlt: String = "widget.logoAlt"
+    const val widgetNotificationsDisable: String = "widget.notifications.disable"
+    const val widgetNotificationsEnable: String = "widget.notifications.enable"
+    const val widgetPoweredBy: String = "widget.poweredBy"
+    const val widgetStatusConnecting: String = "widget.status.connecting"
+    const val widgetStatusLoading: String = "widget.status.loading"
+    const val widgetStatusReconnecting: String = "widget.status.reconnecting"
+    const val widgetThreadBack: String = "widget.thread.back"
+    const val widgetThreadClosed: String = "widget.thread.closed"
+    const val widgetThreadClosedShort: String = "widget.thread.closedShort"
+    const val widgetThreadDirectRef: String = "widget.thread.directRef"
+    const val widgetThreadEmpty: String = "widget.thread.empty"
+    const val widgetThreadLoadingOlder: String = "widget.thread.loadingOlder"
+    const val widgetThreadScrollUp: String = "widget.thread.scrollUp"
+    const val widgetThreadSupport: String = "widget.thread.support"
+    const val widgetThreadYou: String = "widget.thread.you"
+
+    /** Keys addressed by a count — see [SildI18n.tPlural]. */
+    object Plural {
+        const val widgetHomeAgentsOnline: String = "widget.home.agentsOnline"
+    }
+}

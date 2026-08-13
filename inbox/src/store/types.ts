@@ -74,6 +74,8 @@ export interface ApiKey {
   label: string;
   masked: string;
   created: string;
+  /** What the key reaches, in words — "everything" for an unscoped one. */
+  reach: string;
 }
 
 export interface Webhook {

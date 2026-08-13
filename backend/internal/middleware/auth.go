@@ -38,7 +38,9 @@ func (a *Auth) resolveAPIKey(ctx context.Context, raw string) (*principal.Princi
 	if err != nil || !key.Active() || !auth.VerifySecret(secret, key.Hash) {
 		return nil, false
 	}
-	return &principal.Principal{TenantID: key.TenantID, Kind: principal.KindAPIKey}, true
+	return &principal.Principal{
+		TenantID: key.TenantID, Kind: principal.KindAPIKey, Scope: key.Scope,
+	}, true
 }
 
 func (a *Auth) resolveJWT(ctx context.Context, tok string) (*principal.Principal, bool) {

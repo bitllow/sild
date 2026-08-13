@@ -164,16 +164,25 @@ func (h *Handler) realtimeToken(c *gin.Context) {
 func (h *Handler) createAPIKey(c *gin.Context) {
 	var req struct {
 		Label string `json:"label"`
+		// A build token is held to these, in the same document a role assignment
+		// carries. Omit them for a tenant-wide key.
+		Projects []string `json:"projects"`
+		Locales  []string `json:"locales"`
+		Publish  bool     `json:"publish"`
 	}
 	if !httpx.DecodeJSONOptional(c, &req) {
 		return
 	}
-	full, rec, err := h.svc.CreateAPIKey(c.Request.Context(), apiutil.Tenant(c), req.Label)
+	scope := models.RoleScope{Projects: req.Projects, Locales: req.Locales, Publish: req.Publish}
+	full, rec, err := h.svc.CreateAPIKey(c.Request.Context(), apiutil.Tenant(c), req.Label, scope)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": rec.ID, "key": full, "label": rec.Label, "prefix": rec.Prefix})
+	c.JSON(http.StatusCreated, gin.H{
+		"id": rec.ID, "key": full, "label": rec.Label, "prefix": rec.Prefix,
+		"projects": rec.Scope.Projects, "locales": rec.Scope.Locales, "publish": rec.Scope.Publish,
+	})
 }
 
 func (h *Handler) listAPIKeys(c *gin.Context) {
@@ -191,6 +200,7 @@ func (h *Handler) listAPIKeys(c *gin.Context) {
 		out = append(out, map[string]any{
 			"id": k.ID, "label": k.Label, "prefix": k.Prefix,
 			"created_at": k.CreatedAt, "revoked_at": k.RevokedAt,
+			"projects": k.Scope.Projects, "locales": k.Scope.Locales, "publish": k.Scope.Publish,
 		})
 	}
 	apiutil.RespondPage(c, resourceAPIKeys, store.SlicePage(descByID(out), page, mapID))

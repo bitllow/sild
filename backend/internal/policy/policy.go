@@ -56,6 +56,12 @@ func holds(p *principal.Principal, a Action) bool {
 	}
 	switch p.Kind {
 	case principal.KindAPIKey:
+		// A key minted with a translation scope holds its own column: a credential
+		// advertised as held to one project must not also read the tenant's
+		// conversations. An unscoped key keeps every capability it had.
+		if p.IsBuildToken() {
+			return g.buildToken
+		}
 		return g.apiKey
 	case principal.KindUser:
 		return g.user

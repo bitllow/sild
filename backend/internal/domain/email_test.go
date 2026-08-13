@@ -430,3 +430,67 @@ func TestAutoReplyIsWrittenInTheTenantsFallbackLanguage(t *testing.T) {
 		t.Fatalf("subject = %q, want the Latvian one", sent[0].Subject)
 	}
 }
+
+// The language a person reads decides what an email says, the way it decides what
+// a nudge says: both are composed server-side, where no client is there to do it.
+func TestOutboundEmailFollowsTheRecipientsLanguage(t *testing.T) {
+	h := testutil.New(t)
+	tenantID := seedEmailTenant(t, h, "")
+	ctx := context.Background()
+
+	msg, err := h.Svc.HandleInbound(ctx, mail.InboundEmail{
+		Recipient: "help@support.test", From: "cust@x.com", Subject: "", TextBody: "hello",
+	})
+	if err != nil {
+		t.Fatalf("inbound create: %v", err)
+	}
+	// Recorded by the SDK the last time this person used a client.
+	if err := h.Svc.SetContactLocale(ctx, tenantID, "cust@x.com", "lv"); err != nil {
+		t.Fatalf("set locale: %v", err)
+	}
+
+	agentID := "agent_1"
+	if _, err := h.Svc.SendMessage(ctx, tenantID, msg.ConversationID, domain.SendInput{
+		SenderKind: models.SenderAgent, Internal: &agentID, Body: "How can I help?",
+		Visibility: models.VisibilityParticipants, AllowInternal: true,
+	}); err != nil {
+		t.Fatalf("agent reply: %v", err)
+	}
+	sent := h.Mailer.Messages()
+	if len(sent) != 1 {
+		t.Fatalf("expected one reply, got %+v", sent)
+	}
+	if sent[0].Subject != "Re: jūsu ziņojums" {
+		t.Fatalf("subject = %q, want the recipient's language", sent[0].Subject)
+	}
+}
+
+// An address Sild has only ever seen over mail has no recorded language, so the
+// tenant's fallback decides — never a language nobody chose.
+func TestOutboundEmailFallsBackWhenNoLanguageIsRecorded(t *testing.T) {
+	h := testutil.New(t)
+	tenantID := seedEmailTenant(t, h, "")
+	ctx := context.Background()
+	if err := h.Svc.SaveTranslationProject(ctx, tenantID, "sild", "", "lv", false,
+		[]string{"en", "lv"}); err != nil {
+		t.Fatalf("set the fallback language: %v", err)
+	}
+
+	msg, err := h.Svc.HandleInbound(ctx, mail.InboundEmail{
+		Recipient: "help@support.test", From: "stranger@x.com", Subject: "", TextBody: "hello",
+	})
+	if err != nil {
+		t.Fatalf("inbound create: %v", err)
+	}
+	agentID := "agent_1"
+	if _, err := h.Svc.SendMessage(ctx, tenantID, msg.ConversationID, domain.SendInput{
+		SenderKind: models.SenderAgent, Internal: &agentID, Body: "Hello",
+		Visibility: models.VisibilityParticipants, AllowInternal: true,
+	}); err != nil {
+		t.Fatalf("agent reply: %v", err)
+	}
+	sent := h.Mailer.Messages()
+	if len(sent) != 1 || sent[0].Subject != "Re: jūsu ziņojums" {
+		t.Fatalf("subject = %+v, want the tenant's fallback language", sent)
+	}
+}

@@ -22,7 +22,7 @@ class SildPushTest {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     // Method plus body: a release that reaches the endpoint without its token is
     // indistinguishable from a working one unless the body is checked.
-    private val calls = mutableListOf<Pair<String, String>>()
+    private val calls = Recorded<Pair<String, String>>()
 
     @AfterTest fun tearDown() {
         scope.cancel()

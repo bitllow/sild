@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -22,14 +23,28 @@ const PlatformProject = "sild"
 // fallback before the key itself.
 const SourceLocale = "en"
 
+// CatalogVersion is the SDK line this key set belongs to, reported by the manifest
+// so a tenant developer can tell what a bundle targets before upgrading. It moves
+// with the native SDK version — a contract test holds the two together.
+const CatalogVersion = "0.1.2"
+
 //go:embed locales/*.json
 var localeFS embed.FS
+
+//go:embed plural-keys.json
+var pluralKeysFS []byte
 
 // Catalog is the platform project's keys and their text per locale.
 type Catalog struct {
 	byLocale map[string]map[string]string
 	locales  []string
 	keys     []string
+	// pluralBases are the keys whose text is a set of category siblings. A
+	// language's own categories are then filled in per locale, so Latvian is asked
+	// for zero even though English never declares one.
+	pluralBases map[string]bool
+	// localeKeys caches that expansion per language: locale → []string.
+	localeKeys sync.Map
 }
 
 var platform = sync.OnceValue(func() *Catalog {
@@ -43,6 +58,17 @@ var platform = sync.OnceValue(func() *Catalog {
 
 // Platform returns the embedded catalog.
 func Platform() *Catalog { return platform() }
+
+// DeclaredPluralKeys is what plural-keys.json names, so a contract test can hold
+// the declaration and the locale files to each other.
+func DeclaredPluralKeys() []string {
+	out := make([]string, 0, len(platform().pluralBases))
+	for base := range platform().pluralBases {
+		out = append(out, base)
+	}
+	slices.Sort(out)
+	return out
+}
 
 func load() (*Catalog, error) {
 	entries, err := localeFS.ReadDir("locales")
@@ -72,23 +98,62 @@ func load() (*Catalog, error) {
 	}
 	slices.Sort(c.locales)
 	slices.Sort(c.keys)
+	var declared struct {
+		Keys []string `json:"keys"`
+	}
+	if err := json.Unmarshal(pluralKeysFS, &declared); err != nil {
+		return nil, fmt.Errorf("plural-keys.json: %w", err)
+	}
+	c.pluralBases = map[string]bool{}
+	for _, base := range declared.Keys {
+		c.pluralBases[base] = true
+	}
 	return c, nil
 }
 
 // NewCatalog builds a catalog whose only shipped locale is the source one — the
 // shape a tenant-owned project has, where the declared keys are the sources and
 // every other language arrives as an override.
-func NewCatalog(sources map[string]string) *Catalog {
+//
+// pluralBases are the keys the tenant declared plural: a project may have ordinary
+// keys called `status.one` and `status.other` (docs/adr/0004).
+func NewCatalog(sources map[string]string, pluralBases ...string) *Catalog {
 	c := &Catalog{
-		byLocale: map[string]map[string]string{SourceLocale: sources},
-		locales:  []string{SourceLocale},
-		keys:     make([]string, 0, len(sources)),
+		byLocale:    map[string]map[string]string{SourceLocale: sources},
+		locales:     []string{SourceLocale},
+		keys:        make([]string, 0, len(sources)),
+		pluralBases: map[string]bool{},
 	}
 	for k := range sources {
 		c.keys = append(c.keys, k)
 	}
 	slices.Sort(c.keys)
+	for _, b := range pluralBases {
+		c.pluralBases[b] = true
+	}
 	return c
+}
+
+// PluralBasesInFile reads plural keys off an imported file's key set: a base is
+// plural when the file carries more than one category for it.
+//
+// The only place inference is allowed. Everywhere else pluralness is declared
+// (docs/adr/0004) — but a file creating keys nobody has declared IS the
+// declaration, and two forms of one key is what a plural looks like there.
+func PluralBasesInFile(keys []string) map[string]bool {
+	seen := map[string][]string{}
+	for _, k := range keys {
+		if base, cat, ok := SplitPlural(k); ok && !slices.Contains(seen[base], cat) {
+			seen[base] = append(seen[base], cat)
+		}
+	}
+	out := map[string]bool{}
+	for base, cats := range seen {
+		if len(cats) > 1 {
+			out[base] = true
+		}
+	}
+	return out
 }
 
 // Locales returns every locale the platform ships, sorted.
@@ -96,6 +161,12 @@ func (c *Catalog) Locales() []string { return slices.Clone(c.locales) }
 
 // Keys returns every declared key, sorted.
 func (c *Catalog) Keys() []string { return slices.Clone(c.keys) }
+
+// KeysIn returns the keys one locale's file actually declares, sorted — what a
+// contract test compares against the keys that locale ought to carry.
+func (c *Catalog) KeysIn(locale string) []string {
+	return slices.Sorted(maps.Keys(c.byLocale[Normalize(locale)]))
+}
 
 // Namespaces returns every grouping prefix in use, sorted.
 func (c *Catalog) Namespaces() []string {
@@ -118,8 +189,18 @@ func Namespace(key string) string {
 	return ""
 }
 
-// Source returns the English a key was authored with.
-func (c *Catalog) Source(key string) string { return c.byLocale[SourceLocale][key] }
+// Source returns the English a key was authored with. A plural sibling English
+// does not have — Latvian's zero — sources from the base's other form, which is
+// what a translator is working from.
+func (c *Catalog) Source(key string) string {
+	if v, ok := c.byLocale[SourceLocale][key]; ok {
+		return v
+	}
+	if base, _, ok := SplitPlural(key); ok && c.pluralBases[base] {
+		return c.byLocale[SourceLocale][PluralKey(base, CatOther)]
+	}
+	return ""
+}
 
 // Declared reports whether the key exists in the platform project.
 func (c *Catalog) Declared(key string) bool {
@@ -127,11 +208,72 @@ func (c *Catalog) Declared(key string) bool {
 	return ok
 }
 
+// DeclaredFor reports whether a locale has this key to translate. It admits the
+// plural siblings the language itself needs: a Latvian zero form is writable
+// even though English declares no such key.
+func (c *Catalog) DeclaredFor(locale, key string) bool {
+	if c.Declared(key) {
+		return true
+	}
+	base, cat, ok := SplitPlural(key)
+	return ok && c.pluralBases[base] && slices.Contains(Categories(locale), cat)
+}
+
+// IsPluralBase reports whether a key's text is a set of category siblings.
+func (c *Catalog) IsPluralBase(base string) bool { return c.pluralBases[base] }
+
+// LocaleKeys is every key as it exists for one language: ordinary keys as
+// declared, and each plural base expanded into exactly that language's
+// categories. This is what the editor lists and what a bundle carries.
+//
+// Memoized: a catalog is immutable once built, and every publish, bundle read and
+// key listing asks for the same expansion.
+func (c *Catalog) LocaleKeys(locale string) []string {
+	locale = Normalize(locale)
+	if keys, ok := c.localeKeys.Load(locale); ok {
+		return keys.([]string)
+	}
+	keys := c.expandFor(locale)
+	c.localeKeys.Store(locale, keys)
+	return keys
+}
+
+func (c *Catalog) expandFor(locale string) []string {
+	cats := Categories(locale)
+	expanded := map[string]bool{}
+	out := make([]string, 0, len(c.keys))
+	for _, k := range c.keys {
+		base, _, ok := SplitPlural(k)
+		if !ok || !c.pluralBases[base] {
+			out = append(out, k)
+			continue
+		}
+		if expanded[base] {
+			continue
+		}
+		expanded[base] = true
+		for _, cat := range cats {
+			out = append(out, PluralKey(base, cat))
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // Default returns the shipped text for a key in a locale.
 func (c *Catalog) Default(locale, key string) (string, bool) {
 	v, ok := c.byLocale[Normalize(locale)][key]
 	return v, ok
 }
+
+// reserved keys render Sild's own text in every language and take no tenant
+// override: the attribution mark is translated so a Latvian visitor can read it,
+// not reworded so a tenant can put their own name on it. Hiding it entirely stays
+// a brand setting the tenant owns.
+var reserved = []string{"widget.poweredBy"}
+
+// Reserved reports whether a key's text is Sild's to write in every language.
+func Reserved(key string) bool { return slices.Contains(reserved, key) }
 
 // Overrides is a tenant's own text, by locale then key. A missing entry means
 // the tenant did not change that string.
@@ -142,27 +284,55 @@ type Overrides map[string]map[string]string
 // locale a tenant override beats the shipped default, so a fully translated
 // fallback never outranks the language actually asked for.
 func (c *Catalog) Resolve(ov Overrides, locale, fallback, key string) string {
-	for _, l := range []string{Normalize(locale), Normalize(fallback), SourceLocale} {
+	return c.resolve(ov, c.chain(locale, fallback), key)
+}
+
+// chain is the languages a lookup walks, normalized once for a whole bundle.
+func (c *Catalog) chain(locale, fallback string) [3]string {
+	return [3]string{Normalize(locale), Normalize(fallback), SourceLocale}
+}
+
+func (c *Catalog) resolve(ov Overrides, chain [3]string, key string) string {
+	// A category the language has but the text does not reads as the other form
+	// rather than falling out of the language: an untranslated Latvian zero is
+	// better Latvian than English.
+	alt := ""
+	if base, cat, ok := SplitPlural(key); ok && c.pluralBases[base] && cat != CatOther {
+		alt = PluralKey(base, CatOther)
+	}
+	for _, l := range chain {
 		if l == "" {
 			continue
 		}
-		if v, ok := ov[l][key]; ok && v != "" {
+		if v := c.textIn(ov, l, key); v != "" {
 			return v
 		}
-		if v, ok := c.Default(l, key); ok && v != "" {
-			return v
+		if alt != "" {
+			if v := c.textIn(ov, l, alt); v != "" {
+				return v
+			}
 		}
 	}
 	return key
+}
+
+// textIn is one language's text for a key: the tenant's own first, then Sild's.
+func (c *Catalog) textIn(ov Overrides, locale, key string) string {
+	if v := ov[locale][key]; v != "" && !Reserved(key) {
+		return v
+	}
+	return c.byLocale[locale][key]
 }
 
 // Bundle is every key resolved for one locale — what a client holds and renders
 // from. Keys missing in the locale resolve through the same chain, so a bundle
 // is always complete and a client never has to fall back on its own.
 func (c *Catalog) Bundle(ov Overrides, locale, fallback string) map[string]string {
-	out := make(map[string]string, len(c.keys))
-	for _, k := range c.keys {
-		out[k] = c.Resolve(ov, locale, fallback, k)
+	keys := c.LocaleKeys(locale)
+	chain := c.chain(locale, fallback)
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		out[k] = c.resolve(ov, chain, k)
 	}
 	return out
 }

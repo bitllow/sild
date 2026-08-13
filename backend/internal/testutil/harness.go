@@ -268,10 +268,15 @@ func (h *Harness) SeedContact(tenantID, externalUserID, metadata string) {
 	}
 }
 
-// SeedAPIKey mints an API key for a tenant and returns the full secret string.
+// SeedAPIKey mints a tenant-wide API key and returns the full secret string.
 func (h *Harness) SeedAPIKey(tenantID string) string {
+	return h.SeedScopedAPIKey(tenantID, models.RoleScope{})
+}
+
+// SeedScopedAPIKey mints an API key held to a scope — a build token.
+func (h *Harness) SeedScopedAPIKey(tenantID string, scope models.RoleScope) string {
 	h.T.Helper()
-	full, _, err := h.Svc.CreateAPIKey(context.Background(), tenantID, "test")
+	full, _, err := h.Svc.CreateAPIKey(context.Background(), tenantID, "test", scope)
 	if err != nil {
 		h.T.Fatalf("seed api key: %v", err)
 	}

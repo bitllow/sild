@@ -78,12 +78,20 @@ const (
 	TranslationsPublish Action = "translations.publish"
 	// TranslationsManage covers the project's locales and translator scopes.
 	TranslationsManage Action = "translations.manage"
+	// TranslationsImport and TranslationsExport are the file-shaped surface a build
+	// pipeline uses. Separate from the editor's read and write so a CI key can push
+	// and pull a project's strings without holding the editor.
+	TranslationsImport Action = "translations.import"
+	TranslationsExport Action = "translations.export"
 )
 
 // grant lists which principals hold an action — the only place roles map to
 // capabilities.
 type grant struct {
-	apiKey     bool
+	apiKey bool
+	// buildToken is an API key minted with a translation scope: it holds this
+	// subset of what apiKey holds and nothing else.
+	buildToken bool
 	user       bool
 	admin      bool // admin session: owner, admin or agent
 	adminPriv  bool // admin session, owner/admin only
@@ -124,7 +132,7 @@ var capabilities = map[Action]grant{
 
 	TokensMint:    {apiKey: true},
 	RealtimeToken: {admin: true},
-	PrincipalRead: {apiKey: true, user: true, admin: true, translator: true},
+	PrincipalRead: {apiKey: true, buildToken: true, user: true, admin: true, translator: true},
 
 	PushTokensManage:     {user: true},
 	PushConfigManage:     {owner: true},
@@ -142,19 +150,37 @@ var capabilities = map[Action]grant{
 	WebhooksReadDeliveries: {adminPriv: true},
 	TeamManage:             {adminPriv: true},
 
-	TranslationsFetch:   {apiKey: true, user: true, admin: true},
-	TranslationsRead:    {admin: true, translator: true},
-	TranslationsWrite:   {adminPriv: true, translator: true},
-	TranslationsPublish: {adminPriv: true, translator: true},
+	TranslationsFetch: {apiKey: true, buildToken: true, user: true, admin: true},
+	TranslationsRead:  {admin: true, translator: true},
+	TranslationsWrite: {adminPriv: true, translator: true},
+	// A build token publishes only when its own scope says so (`publish`), which is
+	// off unless the key was minted with it.
+	TranslationsPublish: {apiKey: true, buildToken: true, adminPriv: true, translator: true},
 	TranslationsManage:  {adminPriv: true},
+	TranslationsImport:  {apiKey: true, buildToken: true, adminPriv: true, translator: true},
+	TranslationsExport:  {apiKey: true, buildToken: true, admin: true, translator: true},
 }
 
 // TranslatorActions is the translator role's whole capability set, so a test can
 // assert it has not widened.
-func TranslatorActions() []Action {
+func TranslatorActions() []Action { return held(func(g grant) bool { return g.translator }) }
+
+// BuildTokenActions is the whole of what a scoped API key may reach, for the same
+// reason: a capability added without considering build tokens must not widen one.
+func BuildTokenActions() []Action { return held(func(g grant) bool { return g.buildToken }) }
+
+// BuildTokenHolds reports whether a build token may reach an action, so a route's
+// guard is derived from this table rather than from a second list beside it.
+func BuildTokenHolds(a Action) bool { return capabilities[a].buildToken }
+
+// APIKeyHolds is the same question for an unscoped key, so a test can hold the two
+// columns in the right order.
+func APIKeyHolds(a Action) bool { return capabilities[a].apiKey }
+
+func held(by func(grant) bool) []Action {
 	out := []Action{}
 	for a, g := range capabilities {
-		if g.translator {
+		if by(g) {
 			out = append(out, a)
 		}
 	}

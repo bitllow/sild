@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -171,11 +172,15 @@ func (h *Handler) declareTranslationKey(c *gin.Context) {
 	var req struct {
 		Key    string `json:"key"`
 		Source string `json:"source"`
+		// Plurals is the source text per category, for a key addressed by a count.
+		// Given instead of source, and what makes the key a plural.
+		Plurals map[string]string `json:"plurals"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
 	}
-	err := h.svc.DeclareTranslationKey(c.Request.Context(), apiutil.Tenant(c), project, req.Key, req.Source)
+	err := h.svc.DeclareTranslationKey(c.Request.Context(), apiutil.Tenant(c),
+		project, req.Key, req.Source, req.Plurals)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
@@ -220,6 +225,8 @@ func (h *Handler) listTranslationKeys(c *gin.Context) {
 		rows = append(rows, map[string]any{
 			"key": k.Key, "namespace": k.Namespace,
 			"source": k.Source, "value": k.Value, "state": k.State,
+			"plural_base": k.PluralBase, "plural_category": k.PluralCategory,
+			"placeholders": k.Placeholders,
 		})
 	}
 	apiutil.RespondPage(c, resourceTranslationKeys, store.Page[map[string]any]{
@@ -268,6 +275,112 @@ func (h *Handler) deleteTranslationKey(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// importTranslations takes the file as the request body — a build pipeline pipes
+// one in, and the raw-body shape is what the upload path already uses. Everything
+// else is a query parameter.
+func (h *Handler) importTranslations(c *gin.Context) {
+	project := translationProject(c)
+	locale, ok := requireLocale(c, c.Query("locale"))
+	if !ok {
+		return
+	}
+	if !apiutil.AuthorizeTranslation(c, policy.TranslationsImport, project, locale) {
+		return
+	}
+	format := i18n.Format(c.Query("format"))
+	if format == "" {
+		format = i18n.FormatJSON
+	}
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		httpx.BadRequest(c, "could not read the request body")
+		return
+	}
+	if len(raw) == 0 {
+		httpx.BadRequest(c, "the request body is the file to import, and it is empty")
+		return
+	}
+	// Pushing the build's new source strings is what a pipeline is for, so a build
+	// token declares keys; anyone else needs the capability that manages them. Off
+	// unless asked, and only a source-language file may declare anything.
+	createKeys := httpx.QueryBool(c, "create_keys")
+	if createKeys && !apiutil.IsBuildToken(c) && !apiutil.Authorize(c, policy.TranslationsManage) {
+		return
+	}
+	report, err := h.svc.ImportTranslations(c.Request.Context(), apiutil.Tenant(c),
+		project, locale, format, raw, httpx.QueryBool(c, "dry_run"), createKeys,
+		apiutil.MayPublish(c, project))
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	rows := make([]map[string]any, 0, len(report.Rows))
+	for _, r := range report.Rows {
+		rows = append(rows, map[string]any{
+			"key": r.Key, "status": r.Status, "value": r.Value, "reason": r.Reason,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"project": report.Project, "locale": report.Locale, "format": report.Format,
+		"dry_run": report.DryRun, "new": report.New, "changed": report.Changed,
+		"skipped": report.Skipped, "keys_created": report.KeysMade, "rows": rows,
+	})
+}
+
+func (h *Handler) exportTranslations(c *gin.Context) {
+	project := translationProject(c)
+	locale, ok := requireLocale(c, c.Query("locale"))
+	if !ok {
+		return
+	}
+	if !apiutil.AuthorizeTranslation(c, policy.TranslationsExport, project, locale) {
+		return
+	}
+	format := i18n.Format(c.Query("format"))
+	if format == "" {
+		format = i18n.FormatJSON
+	}
+	out, err := h.svc.ExportTranslations(c.Request.Context(), apiutil.Tenant(c), project, locale, format)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.Header("Content-Disposition",
+		fmt.Sprintf("attachment; filename=%q", i18n.Filename(format, project, locale)))
+	c.Data(http.StatusOK, i18n.ContentType(format), out)
+}
+
+// draftTranslations is what publishing would change — the preview an owner
+// approves, and the only thing a draft-only translator can see of their queue.
+func (h *Handler) draftTranslations(c *gin.Context) {
+	project := translationProject(c)
+	if !apiutil.AuthorizeTranslation(c, policy.TranslationsRead, project, "") {
+		return
+	}
+	// Narrowed before the diff is built, not after: a scoped translator's languages
+	// are the only ones worth reading a bundle for.
+	scope, narrows := apiutil.TranslationNarrowing(c, policy.TranslationsRead)
+	var only []string
+	if narrows && !models.Allows(scope.Locales, models.ScopeAll) {
+		only = scope.Locales
+	}
+	diff, err := h.svc.TranslationDraftDiff(c.Request.Context(), apiutil.Tenant(c), project, only)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	rows := make([]map[string]any, 0, len(diff.Rows))
+	for _, r := range diff.Rows {
+		rows = append(rows, map[string]any{
+			"locale": r.Locale, "key": r.Key, "live": r.Live, "draft": r.Draft,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"project": diff.Project, "version": diff.Version,
+		"next_version": diff.NextVersion, "rows": rows,
+	})
 }
 
 func (h *Handler) publishTranslations(c *gin.Context) {
@@ -334,7 +447,9 @@ func (h *Handler) listTranslationReleases(c *gin.Context) {
 
 func (h *Handler) translationManifest(c *gin.Context) {
 	project := translationProject(c)
-	if !apiutil.Authorize(c, policy.TranslationsFetch) {
+	// Held to the project like every other translation read: a build token scoped to
+	// one project must not learn what another publishes either.
+	if !apiutil.AuthorizeTranslation(c, policy.TranslationsFetch, project, "") {
 		return
 	}
 	m, err := h.svc.TranslationManifest(c.Request.Context(), apiutil.Tenant(c), project)
@@ -344,21 +459,27 @@ func (h *Handler) translationManifest(c *gin.Context) {
 	}
 	// Everything the body carries is in the validator, so a fallback changed on its
 	// own still reaches a client holding the previous one.
-	etag := fmt.Sprintf(`W/"%s-%s-%v"`, project, m.FallbackLocale, m.Locales)
+	etag := fmt.Sprintf(`W/"%s-%s-%s-%v"`, project, i18n.CatalogVersion, m.FallbackLocale, m.Locales)
 	if c.GetHeader("If-None-Match") == etag {
 		c.Status(http.StatusNotModified)
 		return
 	}
 	c.Header("ETag", etag)
-	c.JSON(http.StatusOK, gin.H{
+	body := gin.H{
 		"project": m.Project, "fallback_locale": m.FallbackLocale, "locales": m.Locales,
-	})
+	}
+	// Which SDK line these keys belong to, so upgrading is predictable. A tenant's
+	// own project has no such thing: its keys are the tenant's.
+	if project == i18n.PlatformProject {
+		body["sdk_version"] = i18n.CatalogVersion
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 func (h *Handler) translationBundle(c *gin.Context) {
 	project := translationProject(c)
-	locale := c.Query("locale")
-	if !apiutil.Authorize(c, policy.TranslationsFetch) {
+	locale := i18n.Normalize(c.Query("locale"))
+	if !apiutil.AuthorizeTranslation(c, policy.TranslationsFetch, project, locale) {
 		return
 	}
 	version, err := strconv.Atoi(c.Query("version"))

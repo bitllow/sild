@@ -147,6 +147,10 @@ func TranslationNarrowing(c *gin.Context, a policy.Action) (models.RoleScope, bo
 	return policy.TranslationNarrowing(middleware.Get(c), a)
 }
 
+// IsBuildToken reports an API key held to a translation scope — the credential a
+// tenant puts in CI, and the only one that declares keys by pushing a file.
+func IsBuildToken(c *gin.Context) bool { return middleware.Get(c).IsBuildToken() }
+
 // MayPublish reports whether the caller's own grant would let them publish this
 // project, so a write can decide whether auto-publish applies to them.
 func MayPublish(c *gin.Context, project string) bool {

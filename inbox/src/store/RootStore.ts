@@ -1475,9 +1475,12 @@ export class RootStore {
     }
   };
 
-  openKeyDialog = async () => {
+  /** Mint a key. A project makes it a build token: held to that project, and able
+   *  to publish only if asked. */
+  openKeyDialog = async (scope?: { projects?: string[]; publish?: boolean }) => {
     try {
-      const created = await adminApi.createApiKey("Server key");
+      const label = scope?.projects?.length ? `Build token · ${scope.projects[0]}` : "Server key";
+      const created = await adminApi.createApiKey(label, scope);
       runInAction(() => {
         this.revealedKey = created.key;
         this.keyDialog = true;

@@ -14,6 +14,7 @@ const (
 	BodyLimitJSON    int64 = 256 << 10 // 256 KiB
 	BodyLimitEmail   int64 = 25 << 20  // 25 MiB — inbound mail carries attachments
 	BodyLimitUpload  int64 = 50 << 20  // 50 MiB
+	BodyLimitImport  int64 = 8 << 20   // 8 MiB — a translation file is text, but a big project's is long
 	BodyLimitDefault int64 = 1 << 20   // 1 MiB
 )
 

@@ -17,7 +17,7 @@ import kotlin.test.assertEquals
 // driven directly rather than through a real socket.
 class SildClientReconnectTest {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val requests = mutableListOf<String>()
+    private val requests = Recorded<String>()
     private val routes = mutableMapOf<String, String>()
     private val fake = FakeTransport()
 

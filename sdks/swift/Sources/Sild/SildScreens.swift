@@ -10,8 +10,12 @@ import SildCore
 struct HomeScreen: View {
     @Environment(\.sildStyle) private var style
     @Environment(\.sildStrings) private var strings
+    @Environment(\.sildPlurals) private var plurals
 
     private func t(_ key: String, _ vars: [String: Any] = [:]) -> String { strings(key, vars) }
+
+    // The count matches the avatars beside it.
+    private let teamOnline: Int32 = 2
 
     let state: SildState
     let onNew: () -> Void
@@ -37,7 +41,7 @@ struct HomeScreen: View {
                         SildErrorLine(text: error)
                     }
                     if state.brand.poweredBy {
-                        Text("Powered by Sild")
+                        Text(t(SildKeys.widgetPoweredBy))
                             .font(style.font(11))
                             .foregroundStyle(style.colors.tertiary)
                             .frame(maxWidth: .infinity)
@@ -83,7 +87,7 @@ struct HomeScreen: View {
         .background(style.colors.brand)
     }
 
-    // Mirrors the web widget's "2 agents online" flourish (shown when showTeam).
+    // Mirrors the web widget's "agents online" flourish (shown when showTeam).
     private var teamRow: some View {
         HStack(spacing: 0) {
             ZStack(alignment: .leading) {
@@ -92,7 +96,7 @@ struct HomeScreen: View {
                     .offset(x: 16)
             }
             .frame(width: 40, alignment: .leading)
-            Text("2 agents online")
+            Text(plurals(SildKeys.Plural.widgetHomeAgentsOnline, teamOnline, [:]))
                 .font(style.font(13))
                 .foregroundStyle(style.colors.onBrand.opacity(0.9))
                 .padding(.leading, 24)
@@ -106,16 +110,16 @@ struct HomeScreen: View {
 
     private var newConversationCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(t("widget.home.cta"))
+            Text(t(SildKeys.widgetHomeCta))
                 .font(style.font(15, .bold))
                 .foregroundStyle(style.colors.text)
-            Text(t("widget.home.reassurance"))
+            Text(t(SildKeys.widgetHomeReassurance))
                 .font(style.font(13))
                 .foregroundStyle(style.colors.sub)
                 .padding(.top, 4)
             Button(action: onNew) {
                 HStack(spacing: 8) {
-                    Text(t("widget.home.newConversation")).font(style.font(15, .bold))
+                    Text(t(SildKeys.widgetHomeNewConversation)).font(style.font(15, .bold))
                     SildIconView(.arrow, size: 16)
                 }
                 .foregroundStyle(style.colors.onBrand)
@@ -149,7 +153,7 @@ struct HomeScreen: View {
 
     private var recentList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(t("widget.home.recent"))
+            Text(t(SildKeys.widgetHomeRecent))
                 .font(style.font(11, .semibold))
                 .foregroundStyle(style.colors.tertiary)
                 .padding(.top, 4)
@@ -168,7 +172,7 @@ struct HomeScreen: View {
     }
 
     private func conversationRow(_ c: Conversation) -> some View {
-        let title = c.title ?? c.agentName ?? (state.agentName ?? t("widget.home.support"))
+        let title = c.title ?? c.agentName ?? (state.agentName ?? t(SildKeys.widgetHomeSupport))
         return Button { onOpen(c.id) } label: {
             HStack(alignment: .top, spacing: 11) {
                 SildAvatar(name: title, size: 40, background: style.colors.brand)
@@ -188,7 +192,7 @@ struct HomeScreen: View {
                         .foregroundStyle(style.colors.sub)
                         .lineLimit(1)
                         .padding(.top, 2)
-                    if let sub = c.subtitle ?? (c.closed ? t("widget.thread.closedShort") : nil), !sub.isEmpty {
+                    if let sub = c.subtitle ?? (c.closed ? t(SildKeys.widgetThreadClosedShort) : nil), !sub.isEmpty {
                         Text(sub)
                             .font(style.font(11))
                             .foregroundStyle(style.colors.tertiary)
@@ -227,13 +231,13 @@ struct ThreadScreen: View {
     @State private var showFileImporter = false
 
     private func title(_ active: Conversation?) -> String {
-        active?.peer == true ? (active?.title ?? t("widget.home.directChat")) : (state.agentName ?? t("widget.home.support"))
+        active?.peer == true ? (active?.title ?? t(SildKeys.widgetHomeDirectChat)) : (state.agentName ?? t(SildKeys.widgetHomeSupport))
     }
 
     private func subtitle(_ active: Conversation?) -> String {
-        if active?.peer == true { return active?.subtitle ?? t("widget.home.directChat") }
-        if draft { return t("widget.home.start") }
-        return state.connection == .connected ? t("widget.home.subtitle") : t("widget.status.connecting")
+        if active?.peer == true { return active?.subtitle ?? t(SildKeys.widgetHomeDirectChat) }
+        if draft { return t(SildKeys.widgetHomeStart) }
+        return state.connection == .connected ? t(SildKeys.widgetHomeSubtitle) : t(SildKeys.widgetStatusConnecting)
     }
 
     private var state: SildState { model.state }
@@ -252,7 +256,7 @@ struct ThreadScreen: View {
             connectionBanner
             messages
             if active?.closed == true {
-                Text(t("widget.thread.closed"))
+                Text(t(SildKeys.widgetThreadClosed))
                     .font(style.font(13))
                     .foregroundStyle(style.colors.sub)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -286,9 +290,9 @@ struct ThreadScreen: View {
         }
         .background(style.colors.page)
         .confirmationDialog("Attach", isPresented: $showAttachMenu, titleVisibility: .hidden) {
-            Button(t("widget.composer.photoOrVideo")) { showPhotoPicker = true }
-            Button(t("widget.composer.file")) { showFileImporter = true }
-            Button(t("widget.common.cancel"), role: .cancel) {}
+            Button(t(SildKeys.widgetComposerPhotoOrVideo)) { showPhotoPicker = true }
+            Button(t(SildKeys.widgetComposerFile)) { showFileImporter = true }
+            Button(t(SildKeys.widgetCommonCancel), role: .cancel) {}
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $photoItems, matching: .any(of: [.images, .videos]))
         .onChange(of: photoItems) { _, items in
@@ -312,7 +316,7 @@ struct ThreadScreen: View {
     @ViewBuilder
     private var connectionBanner: some View {
         if state.connection != ConnectionState.connected {
-            Text(t(state.connection == ConnectionState.disconnected ? "widget.status.reconnecting" : "widget.status.connecting"))
+            Text(t(state.connection == ConnectionState.disconnected ? SildKeys.widgetStatusReconnecting : SildKeys.widgetStatusConnecting))
                 .font(style.font(12))
                 .foregroundStyle(style.colors.sub)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -331,7 +335,7 @@ struct ThreadScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if state.loadingThread && state.messages.isEmpty {
-                        Text(t("widget.status.loading")).font(style.font(13)).foregroundStyle(style.colors.tertiary)
+                        Text(t(SildKeys.widgetStatusLoading)).font(style.font(13)).foregroundStyle(style.colors.tertiary)
                     }
                     ForEach(state.messages, id: \.id) { m in
                         SildMessageBubble(message: m) { url in
@@ -343,7 +347,7 @@ struct ThreadScreen: View {
                         .id(m.id)
                     }
                     if !state.loadingThread && state.messages.isEmpty {
-                        Text(t("widget.thread.empty"))
+                        Text(t(SildKeys.widgetThreadEmpty))
                             .font(style.font(13))
                             .foregroundStyle(style.colors.tertiary)
                     }
@@ -368,7 +372,7 @@ struct ThreadScreen: View {
             } catch is SizeLimitExceeded {
                 attachError = tooLargeMessage
             } catch {
-                attachError = t("widget.composer.attachFailed")
+                attachError = t(SildKeys.widgetComposerAttachFailed)
             }
         }
     }
@@ -406,7 +410,7 @@ struct ThreadScreen: View {
     }
 
     private var tooLargeMessage: String {
-        t("widget.composer.tooLarge", ["mb": model.uploadSizeLimitBytes / (1024 * 1024)])
+        t(SildKeys.widgetComposerTooLarge, ["mb": model.uploadSizeLimitBytes / (1024 * 1024)])
     }
 }
 

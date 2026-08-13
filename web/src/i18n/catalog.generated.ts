@@ -1,8 +1,58 @@
-// Generated from backend/internal/i18n/locales by scripts/gen-i18n.mjs — run `make i18n`. Do not edit.
+// Generated from backend/internal/i18n by scripts/gen-i18n.mjs — run `make i18n`. Do not edit.
 
 export const SOURCE_LOCALE = "en";
 
 export const LOCALES: string[] = ["en", "es", "et", "lt", "lv", "ru"];
+
+/** Every key a surface may look up: a typo or a renamed key is a type error. */
+export type StringKey =
+  | "email.autoReply.body"
+  | "email.autoReply.subject"
+  | "push.newMessage"
+  | "widget.common.cancel"
+  | "widget.composer.attach"
+  | "widget.composer.attachFailed"
+  | "widget.composer.file"
+  | "widget.composer.photoOrVideo"
+  | "widget.composer.placeholder"
+  | "widget.composer.remove"
+  | "widget.composer.send"
+  | "widget.composer.tooLarge"
+  | "widget.composer.unnamedFile"
+  | "widget.composer.uploading"
+  | "widget.home.cta"
+  | "widget.home.directChat"
+  | "widget.home.newConversation"
+  | "widget.home.reassurance"
+  | "widget.home.recent"
+  | "widget.home.start"
+  | "widget.home.subtitle"
+  | "widget.home.support"
+  | "widget.home.title"
+  | "widget.launcher.close"
+  | "widget.launcher.open"
+  | "widget.logoAlt"
+  | "widget.notifications.disable"
+  | "widget.notifications.enable"
+  | "widget.poweredBy"
+  | "widget.status.connecting"
+  | "widget.status.loading"
+  | "widget.status.reconnecting"
+  | "widget.thread.back"
+  | "widget.thread.closed"
+  | "widget.thread.closedShort"
+  | "widget.thread.directRef"
+  | "widget.thread.empty"
+  | "widget.thread.loadingOlder"
+  | "widget.thread.scrollUp"
+  | "widget.thread.support"
+  | "widget.thread.you"
+;
+
+/** Keys addressed by a count, whose siblings carry the categories. */
+export type PluralKey =
+  | "widget.home.agentsOnline"
+;
 
 export const DEFAULTS: Record<string, Record<string, string>> = {
   "en": {
@@ -20,6 +70,8 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.composer.tooLarge": "That file is too large (max {mb} MB).",
     "widget.composer.unnamedFile": "attachment",
     "widget.composer.uploading": "Uploading…",
+    "widget.home.agentsOnline.one": "{count} agent online",
+    "widget.home.agentsOnline.other": "{count} agents online",
     "widget.home.cta": "Send us a message",
     "widget.home.directChat": "Direct chat",
     "widget.home.newConversation": "New conversation",
@@ -34,6 +86,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logo",
     "widget.notifications.disable": "Turn off reply notifications",
     "widget.notifications.enable": "Turn on reply notifications",
+    "widget.poweredBy": "Powered by Sild",
     "widget.status.connecting": "Connecting…",
     "widget.status.loading": "Loading…",
     "widget.status.reconnecting": "Reconnecting…",
@@ -62,6 +115,9 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.composer.tooLarge": "Ese archivo es demasiado grande (máximo {mb} MB).",
     "widget.composer.unnamedFile": "adjunto",
     "widget.composer.uploading": "Subiendo…",
+    "widget.home.agentsOnline.many": "{count} agentes en línea",
+    "widget.home.agentsOnline.one": "{count} agente en línea",
+    "widget.home.agentsOnline.other": "{count} agentes en línea",
     "widget.home.cta": "Envíanos un mensaje",
     "widget.home.directChat": "Chat directo",
     "widget.home.newConversation": "Nueva conversación",
@@ -76,6 +132,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logotipo",
     "widget.notifications.disable": "Desactivar notificaciones de respuestas",
     "widget.notifications.enable": "Activar notificaciones de respuestas",
+    "widget.poweredBy": "Con tecnología de Sild",
     "widget.status.connecting": "Conectando…",
     "widget.status.loading": "Cargando…",
     "widget.status.reconnecting": "Reconectando…",
@@ -104,6 +161,8 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.composer.tooLarge": "Fail on liiga suur (kuni {mb} MB).",
     "widget.composer.unnamedFile": "manus",
     "widget.composer.uploading": "Üleslaadimine…",
+    "widget.home.agentsOnline.one": "{count} agent võrgus",
+    "widget.home.agentsOnline.other": "{count} agenti võrgus",
     "widget.home.cta": "Saada meile sõnum",
     "widget.home.directChat": "Otsevestlus",
     "widget.home.newConversation": "Uus vestlus",
@@ -118,6 +177,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logo",
     "widget.notifications.disable": "Lülita vastuste teavitused välja",
     "widget.notifications.enable": "Lülita vastuste teavitused sisse",
+    "widget.poweredBy": "Töötab Sildi abil",
     "widget.status.connecting": "Ühendamine…",
     "widget.status.loading": "Laadimine…",
     "widget.status.reconnecting": "Taasühendamine…",
@@ -146,6 +206,9 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.composer.tooLarge": "Failas per didelis (ne daugiau kaip {mb} MB).",
     "widget.composer.unnamedFile": "priedas",
     "widget.composer.uploading": "Įkeliamas failas…",
+    "widget.home.agentsOnline.few": "{count} agentai prisijungę",
+    "widget.home.agentsOnline.one": "{count} agentas prisijungęs",
+    "widget.home.agentsOnline.other": "{count} agentų prisijungę",
     "widget.home.cta": "Parašykite mums žinutę",
     "widget.home.directChat": "Tiesioginis pokalbis",
     "widget.home.newConversation": "Naujas pokalbis",
@@ -160,6 +223,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logotipas",
     "widget.notifications.disable": "Išjungti pranešimus apie atsakymus",
     "widget.notifications.enable": "Įjungti pranešimus apie atsakymus",
+    "widget.poweredBy": "Veikia su Sild",
     "widget.status.connecting": "Jungiamasi…",
     "widget.status.loading": "Įkeliama…",
     "widget.status.reconnecting": "Jungiamasi iš naujo…",
@@ -188,6 +252,9 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.composer.tooLarge": "Fails ir pārāk liels (ne vairāk kā {mb} MB).",
     "widget.composer.unnamedFile": "pielikums",
     "widget.composer.uploading": "Notiek faila augšupielāde…",
+    "widget.home.agentsOnline.one": "{count} aģents tiešsaistē",
+    "widget.home.agentsOnline.other": "{count} aģenti tiešsaistē",
+    "widget.home.agentsOnline.zero": "{count} aģentu tiešsaistē",
     "widget.home.cta": "Sūtiet mums ziņu",
     "widget.home.directChat": "Tiešā saruna",
     "widget.home.newConversation": "Jauna saruna",
@@ -202,6 +269,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Logotips",
     "widget.notifications.disable": "Izslēgt paziņojumus par atbildēm",
     "widget.notifications.enable": "Ieslēgt paziņojumus par atbildēm",
+    "widget.poweredBy": "Darbojas ar Sild",
     "widget.status.connecting": "Notiek savienošana…",
     "widget.status.loading": "Ielādē…",
     "widget.status.reconnecting": "Atkārtoti savienojas…",
@@ -230,6 +298,10 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.composer.tooLarge": "Файл слишком большой (максимум {mb} МБ).",
     "widget.composer.unnamedFile": "вложение",
     "widget.composer.uploading": "Загрузка файла…",
+    "widget.home.agentsOnline.few": "{count} агента в сети",
+    "widget.home.agentsOnline.many": "{count} агентов в сети",
+    "widget.home.agentsOnline.one": "{count} агент в сети",
+    "widget.home.agentsOnline.other": "{count} агента в сети",
     "widget.home.cta": "Отправить сообщение",
     "widget.home.directChat": "Личный чат",
     "widget.home.newConversation": "Новый разговор",
@@ -244,6 +316,7 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.logoAlt": "Логотип",
     "widget.notifications.disable": "Отключить уведомления об ответах",
     "widget.notifications.enable": "Включить уведомления об ответах",
+    "widget.poweredBy": "Работает на Sild",
     "widget.status.connecting": "Подключение…",
     "widget.status.loading": "Загрузка…",
     "widget.status.reconnecting": "Переподключение…",
@@ -257,4 +330,84 @@ export const DEFAULTS: Record<string, Record<string, string>> = {
     "widget.thread.support": "Чат с поддержкой",
     "widget.thread.you": "Вы",
   },
+};
+
+export const PLURAL_DEFAULT_FAMILY = "one_other";
+
+export const PLURAL_FAMILIES: Record<string, string[]> = {
+  "arabic": ["zero", "one", "two", "few", "many", "other"],
+  "czech": ["one", "few", "other"],
+  "hebrew": ["one", "two", "other"],
+  "hindi": ["one", "other"],
+  "irish": ["one", "two", "few", "many", "other"],
+  "latvian": ["zero", "one", "other"],
+  "lithuanian": ["one", "few", "other"],
+  "maltese": ["one", "two", "few", "many", "other"],
+  "one_other": ["one", "other"],
+  "other": ["other"],
+  "polish": ["one", "few", "many", "other"],
+  "romance": ["one", "many", "other"],
+  "romance_zero": ["one", "many", "other"],
+  "romanian": ["one", "few", "other"],
+  "serbocroatian": ["one", "few", "other"],
+  "slavic": ["one", "few", "many", "other"],
+  "slovenian": ["one", "two", "few", "other"],
+  "welsh": ["zero", "one", "two", "few", "many", "other"],
+};
+
+export const PLURAL_LOCALES: Record<string, string> = {
+  "af": "one_other",
+  "ar": "arabic",
+  "be": "slavic",
+  "bg": "one_other",
+  "bs": "serbocroatian",
+  "ca": "romance",
+  "cs": "czech",
+  "cy": "welsh",
+  "da": "one_other",
+  "de": "one_other",
+  "el": "one_other",
+  "en": "one_other",
+  "es": "romance",
+  "et": "one_other",
+  "eu": "one_other",
+  "fi": "one_other",
+  "fr": "romance_zero",
+  "ga": "irish",
+  "gl": "one_other",
+  "he": "hebrew",
+  "hi": "hindi",
+  "hr": "serbocroatian",
+  "hu": "one_other",
+  "id": "other",
+  "it": "romance",
+  "iw": "hebrew",
+  "ja": "other",
+  "ka": "one_other",
+  "km": "other",
+  "ko": "other",
+  "lo": "other",
+  "lt": "lithuanian",
+  "lv": "latvian",
+  "ms": "other",
+  "mt": "maltese",
+  "my": "other",
+  "nb": "one_other",
+  "nl": "one_other",
+  "no": "one_other",
+  "pl": "polish",
+  "pt": "romance_zero",
+  "ro": "romanian",
+  "ru": "slavic",
+  "sk": "czech",
+  "sl": "slovenian",
+  "sq": "one_other",
+  "sr": "serbocroatian",
+  "sv": "one_other",
+  "sw": "one_other",
+  "th": "other",
+  "tr": "one_other",
+  "uk": "slavic",
+  "vi": "other",
+  "zh": "other",
 };

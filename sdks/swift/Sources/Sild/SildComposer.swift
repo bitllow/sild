@@ -48,7 +48,7 @@ struct SildComposer: View {
             HStack(spacing: 6) {
                 ForEach(Array(pending.enumerated()), id: \.offset) { i, att in
                     HStack(spacing: 4) {
-                        Text(att.filename.isEmpty ? t("widget.composer.unnamedFile") : att.filename)
+                        Text(att.filename.isEmpty ? t(SildKeys.widgetComposerUnnamedFile) : att.filename)
                             .font(style.font(12))
                             .foregroundStyle(style.colors.sub)
                             .lineLimit(1)
@@ -56,7 +56,7 @@ struct SildComposer: View {
                         Button { onRemove(i) } label: {
                             SildIconView(.close, size: 13).foregroundStyle(style.colors.tertiary)
                         }
-                        .accessibilityLabel(t("widget.composer.remove"))
+                        .accessibilityLabel(t(SildKeys.widgetComposerRemove))
                     }
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
@@ -69,7 +69,7 @@ struct SildComposer: View {
                     .clipShape(RoundedRectangle(cornerRadius: style.radii.btn))
                 }
                 if uploading > 0 {
-                    Text(t("widget.composer.uploading"))
+                    Text(t(SildKeys.widgetComposerUploading))
                         .font(style.font(12))
                         .foregroundStyle(style.colors.tertiary)
                 }
@@ -86,9 +86,9 @@ struct SildComposer: View {
                     .frame(width: 34, height: 34)
             }
             .disabled(!enabled)
-            .accessibilityLabel(t("widget.composer.attach"))
+            .accessibilityLabel(t(SildKeys.widgetComposerAttach))
 
-            TextField(t("widget.composer.placeholder"), text: $text, axis: .vertical)
+            TextField(t(SildKeys.widgetComposerPlaceholder), text: $text, axis: .vertical)
                 .font(style.font(14))
                 .foregroundStyle(style.colors.text)
                 .tint(style.colors.brand)
@@ -117,7 +117,7 @@ struct SildComposer: View {
             .buttonStyle(SildBrandButtonStyle(colors: style.colors, radius: style.radii.btn))
             .disabled(!canSend)
             .accessibilityIdentifier("sild.composer.send")
-            .accessibilityLabel(t("widget.composer.send"))
+            .accessibilityLabel(t(SildKeys.widgetComposerSend))
         }
         .padding(.leading, 8)
         .padding(.trailing, 6)

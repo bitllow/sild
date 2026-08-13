@@ -8,13 +8,14 @@ import (
 )
 
 // AuthorizeTranslation decides a translation action against one project and
-// locale. Locale is empty for project-wide actions. Only the translator role
-// carries a scope; every other role reaching the action is tenant-wide.
+// locale. Locale is empty for project-wide actions. A translator's grant and a
+// scoped API key narrow here; every other role reaching the action is
+// tenant-wide.
 func AuthorizeTranslation(p *principal.Principal, a Action, project, locale string) error {
 	if err := Authorize(p, a, ResourceAttrs{}); err != nil {
 		return err
 	}
-	scope, ok := p.ScopeOf(models.PlatformTranslator)
+	scope, ok := p.TranslationScope()
 	if !ok || holdsWithoutTranslator(p, a) {
 		return nil
 	}
@@ -47,7 +48,7 @@ func MayPublish(p *principal.Principal, project string) bool {
 // it filters at all — a translator granted one project must land on it and must
 // not learn the others exist.
 func TranslationNarrowing(p *principal.Principal, a Action) (models.RoleScope, bool) {
-	scope, ok := p.ScopeOf(models.PlatformTranslator)
+	scope, ok := p.TranslationScope()
 	if !ok || holdsWithoutTranslator(p, a) {
 		return models.RoleScope{}, false
 	}

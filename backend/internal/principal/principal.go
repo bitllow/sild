@@ -30,8 +30,35 @@ type Principal struct {
 	// capability is held when any of them carries it; nothing subtracts.
 	Assignments []Assignment
 
+	// apikey
+	// Scope is the key's own limits, in the document a role assignment carries.
+	// Empty is tenant-wide.
+	Scope models.RoleScope
+
 	// signed (upload capability)
 	ObjectKey string
+}
+
+// TranslationScope is the limits this caller's credential puts on translation
+// work, and whether there are any. A translator's grant and a build token's scope
+// are the same document, so one narrowing path serves both.
+func (p *Principal) TranslationScope() (models.RoleScope, bool) {
+	if p == nil {
+		return models.RoleScope{}, false
+	}
+	if p.Kind == KindAPIKey {
+		return p.Scope, p.IsBuildToken()
+	}
+	return p.ScopeOf(models.PlatformTranslator)
+}
+
+// IsBuildToken reports an API key minted with a translation scope. Not "holds a
+// translation scope": a member who is also an agent holds one, and roles only widen.
+func (p *Principal) IsBuildToken() bool {
+	if p == nil || p.Kind != KindAPIKey {
+		return false
+	}
+	return p.Scope.NarrowsTranslations()
 }
 
 // Assignment is one role the member holds, with the scope that role defines.
