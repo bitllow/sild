@@ -15,6 +15,13 @@ func (s *Service) IsMember(ctx context.Context, tenantID, convID, userID string)
 	return s.store.Members().IsActiveMember(ctx, tenantID, convID, userID)
 }
 
+// IsActorMember reports whether an admin id is an active member, for staff who
+// are members of their own conversations.
+func (s *Service) IsActorMember(ctx context.Context, tenantID, convID, actorID string) bool {
+	ok, err := s.store.Members().IsActiveActorMember(ctx, tenantID, convID, actorID)
+	return err == nil && ok
+}
+
 // ActiveConversationIDs returns the conversation ids a user currently belongs to
 // (drives server-side realtime subscriptions, §5.2).
 func (s *Service) ActiveConversationIDs(ctx context.Context, tenantID, userID string) ([]string, error) {

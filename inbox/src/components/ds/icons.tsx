@@ -53,6 +53,14 @@ export const TranslateIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const BotIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 8V4H8" />
+    <rect width="16" height="12" x="4" y="8" rx="2" />
+    <path d="M2 14h2M20 14h2M15 13v2M9 13v2" />
+  </Icon>
+);
+
 export const SearchIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="11" cy="11" r="8" />
@@ -128,3 +136,20 @@ export const GoogleMark = (p: React.SVGProps<SVGSVGElement>) => (
     <path fill="#EA4335" d="M12 5.4c1.6 0 3 .5 4.1 1.6l3.1-3.1A11 11 0 0 0 2.3 7.4l3.7 2.8c.9-2.6 3.2-4.8 6-4.8z" />
   </svg>
 );
+
+export const CheckIcon = (p: IconProps) => (
+  <Icon strokeWidth={2.4} {...p}>
+    <path d="M20 6 9 17l-5-5" />
+  </Icon>
+);
+
+export const AlertIcon = (p: IconProps) => (
+  <Icon strokeWidth={2.2} {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 8v4M12 16h.01" />
+  </Icon>
+);
+
+export function Spinner({ size = 14 }: { size?: number }) {
+  return <span className="sild-spinner" aria-hidden="true" style={{ width: size, height: size, borderWidth: 2 }} />;
+}

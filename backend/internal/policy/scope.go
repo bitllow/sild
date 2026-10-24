@@ -14,6 +14,13 @@ type ResourceScope struct {
 	kinds              []models.ConversationKind
 	participant        *string
 	requiresAssignment bool
+	// queues limits non-peer conversations to these queues; nil is unrestricted.
+	queues []string
+	// memberActor pins the collection to conversations this admin id is a member of.
+	memberActor *string
+	// own widens an operator's ceiling with their own requests, for a member who
+	// also holds the requester role.
+	own *ownRequests
 	// denyAll is a flag rather than an empty kinds list, because an empty list
 	// means "unrestricted".
 	denyAll bool
@@ -26,6 +33,32 @@ func (s ResourceScope) DenyAll() bool { return s.denyAll }
 // DenyAll first.
 func (s ResourceScope) AllowedKinds() []models.ConversationKind {
 	return slices.Clone(s.kinds)
+}
+
+// AllowedQueues returns the queues non-peer conversations are limited to. Nil
+// means unrestricted — check DenyAll first.
+func (s ResourceScope) AllowedQueues() []string { return slices.Clone(s.queues) }
+
+type ownRequests struct {
+	actor  string
+	queues []string // nil: every queue
+}
+
+// OwnRequests returns the requests an operator reaches as their requester, in
+// addition to the rest of the ceiling.
+func (s ResourceScope) OwnRequests() (actor string, queues []string, ok bool) {
+	if s.own == nil {
+		return "", nil, false
+	}
+	return s.own.actor, slices.Clone(s.own.queues), true
+}
+
+// MemberActor returns the admin id the scope is pinned to (requesters).
+func (s ResourceScope) MemberActor() (string, bool) {
+	if s.memberActor == nil {
+		return "", false
+	}
+	return *s.memberActor, true
 }
 
 // Participant returns the external user id the scope is pinned to (user JWTs).
@@ -66,6 +99,14 @@ func Scope(p *principal.Principal, a Action) ResourceScope {
 		return ResourceScope{participant: &sub}
 
 	case principal.KindAdmin:
+		if p.RequesterOnly() {
+			id := p.AdminID
+			queues, all := p.RequesterQueues()
+			if !all && len(queues) == 0 {
+				return ResourceScope{denyAll: true}
+			}
+			return ResourceScope{kinds: []models.ConversationKind{models.KindSupport}, memberActor: &id, queues: queues}
+		}
 		s := ResourceScope{}
 		if !p.PeerAccess() {
 			s.kinds = []models.ConversationKind{models.KindSupport}
@@ -73,6 +114,12 @@ func Scope(p *principal.Principal, a Action) ResourceScope {
 		// Agents need an assignment; owner/admin are tenant-wide.
 		if !p.Privileged() {
 			s.requiresAssignment = true
+		}
+		if queues, all := p.Queues(); !all {
+			s.queues = queues
+		}
+		if qs, all := p.RequesterQueues(); (all || len(qs) > 0) && !p.Privileged() {
+			s.own = &ownRequests{actor: p.AdminID, queues: qs}
 		}
 		return s
 	}
@@ -92,6 +139,11 @@ type GrantScope struct {
 	Kinds              []models.ConversationKind `json:"kinds,omitempty"`
 	RequiresAssignment bool                      `json:"requires_assignment,omitempty"`
 	Participant        string                    `json:"participant,omitempty"`
+	Queues             []string                  `json:"queues,omitempty"`
+	// MemberOnly pins the collection to the caller's own conversations.
+	MemberOnly bool `json:"member_only,omitempty"`
+	// OwnQueues are the queues the caller opens requests in, ["all"] for every one.
+	OwnQueues []string `json:"own_queues,omitempty"`
 }
 
 // Grants lists every action the principal holds, scoped where collection-shaped.
@@ -111,6 +163,7 @@ func Grants(p *principal.Principal) []Grant {
 		g := Grant{Action: a}
 		if a == ConversationsList || a == ContactsList {
 			g.Scope = scopeDTO(Scope(p, a))
+			g.Scope.OwnQueues = ownQueues(p)
 		}
 		out = append(out, g)
 	}
@@ -121,9 +174,19 @@ func scopeDTO(s ResourceScope) *GrantScope {
 	dto := &GrantScope{
 		Kinds:              s.AllowedKinds(),
 		RequiresAssignment: s.RequiresAssignment(),
+		Queues:             s.AllowedQueues(),
 	}
 	if pt, ok := s.Participant(); ok {
 		dto.Participant = pt
 	}
+	_, dto.MemberOnly = s.MemberActor()
 	return dto
+}
+
+func ownQueues(p *principal.Principal) []string {
+	qs, all := p.RequesterQueues()
+	if all {
+		return []string{models.ScopeAll}
+	}
+	return qs
 }

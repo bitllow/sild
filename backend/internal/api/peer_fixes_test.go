@@ -26,7 +26,7 @@ func TestArchivedPeerConversationStillGatedOnPeerAccess(t *testing.T) {
 	ctx := context.Background()
 
 	peer := mkPeer(t, h, tenant.ID, "trip_1")
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID, ""); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	// Archive it (idle clock far in the future so it's eligible) — purges the hot

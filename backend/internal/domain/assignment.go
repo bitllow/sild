@@ -27,8 +27,8 @@ func (s *Service) AddAssignment(ctx context.Context, tenantID, convID string) (*
 	if err := s.store.Assignments().Create(ctx, a); err != nil {
 		return nil, err
 	}
-	_ = s.fireWebhook(ctx, tenantID, convID, "assignment.created", views.Assignment(a))
-	s.emit(ctx, realtime.Target{Conversation: convID, Tenant: tenantID}, realtime.EventAssignmentUpdated, convID, views.Assignment(a))
+	_ = s.fireConvWebhook(ctx, conv, "assignment.created", views.Assignment(a))
+	s.emit(ctx, operators(realtime.Target{Conversation: convID}, conv), realtime.EventAssignmentUpdated, convID, views.Assignment(a))
 	return a, nil
 }
 
@@ -120,10 +120,13 @@ func (s *Service) transition(ctx context.Context, tenantID, assignmentID string,
 		return a, nil
 	}
 	data := views.Assignment(a)
-	// An assignment exists, so this is a support conversation: the agents channel
-	// without a lookup to rediscover it.
-	s.emit(ctx, realtime.Target{Conversation: a.ConversationID, Tenant: tenantID},
+	conv, err := s.store.Conversations().Get(ctx, tenantID, a.ConversationID)
+	if err != nil {
+		_ = s.fireWebhook(ctx, tenantID, a.ConversationID, "assignment.updated", data)
+		return a, nil
+	}
+	s.emit(ctx, operators(realtime.Target{Conversation: a.ConversationID}, conv),
 		realtime.EventAssignmentUpdated, a.ConversationID, data)
-	_ = s.fireWebhook(ctx, tenantID, a.ConversationID, "assignment.updated", data)
+	_ = s.fireConvWebhook(ctx, conv, "assignment.updated", data)
 	return a, nil
 }

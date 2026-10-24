@@ -1,16 +1,19 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import {
-  adminApi,
-  profilesOf,
-  type ApiMember,
-  type ApiMessage,
-  type ApiQueueConversation,
-  type ConversationParams,
-} from "@/api/admin";
-import type { RealtimeEnvelope } from "@/api/realtime";
+  getConversation,
+  listConversations,
+  listMessages,
+  sendMessage,
+  type ConversationQuery,
+  type ConversationRow,
+  type Envelope,
+  type Member,
+  type Message,
+} from "@sild/client";
+import { http, WITH_PROFILES } from "@/api/client";
 import type { MessageAttachment, Presence } from "@/components/ds";
 import { AttachmentQueue } from "./attachments";
-import { clockTime, mapAttachments, relativeTime, type Profiles } from "./map";
+import { clockTime, mapAttachments, profilesOf, relativeTime, type Profiles } from "./map";
 
 // Peer conversations are direct chats between end-user parties with no support
 // assignment. Everything role-related is DERIVED from the participants present —
@@ -63,13 +66,13 @@ export interface PeerRoot {
 
 const isAgentRole = (role: string) => role === "support" || role === "agent";
 
-function participantName(m: ApiMember): string {
+function participantName(m: Member): string {
   return m.name || m.external_user_id || m.internal_actor_id || "Member";
 }
 
 // profile is the person's blob from the response's contacts block; a member view
 // carries only the name.
-function mapParticipant(m: ApiMember, profile?: Record<string, unknown>): PeerParticipant {
+function mapParticipant(m: Member, profile?: Record<string, unknown>): PeerParticipant {
   const meta: Record<string, string> = {};
   for (const [k, v] of Object.entries(profile || {})) {
     if (k === "name" || k === "role") continue; // name is the title; role is its own pill
@@ -87,11 +90,11 @@ function mapParticipant(m: ApiMember, profile?: Record<string, unknown>): PeerPa
 }
 
 // mapParticipants pairs each member with its profile from the response's block.
-function mapParticipants(members: ApiMember[], profiles: Profiles): PeerParticipant[] {
+function mapParticipants(members: Member[], profiles: Profiles): PeerParticipant[] {
   return members.map((m) => mapParticipant(m, m.external_user_id ? profiles[m.external_user_id] : undefined));
 }
 
-function mapPeerMessage(m: ApiMessage, participants: PeerParticipant[], meId: string | null): PeerMessage {
+function mapPeerMessage(m: Message, participants: PeerParticipant[], meId: string | null): PeerMessage {
   const isAgent = m.sender_kind === "agent" || !!m.internal_actor_id;
   const joinNote = m.sender_kind === "system";
   const author = participants.find((p) => p.id && p.id === m.external_user_id);
@@ -174,9 +177,9 @@ export class PeerStore {
   // listParams is the filter set for the current mode. A cursor is bound to a
   // fingerprint of these, so the continuation MUST send exactly what the first
   // page sent — building both from here is what keeps them identical.
-  private listParams(): ConversationParams {
-    if (this.isSearching) return { kind: "peer", q: this.query.trim() };
-    return { kind: "peer", role: this.roleFilter || undefined };
+  private listParams(): ConversationQuery {
+    if (this.isSearching) return { kind: "peer", q: this.query.trim(), expand: WITH_PROFILES };
+    return { kind: "peer", role: this.roleFilter || undefined, expand: WITH_PROFILES };
   }
 
   // owns reports whether a conversation id belongs to the peer surface, so the
@@ -190,7 +193,7 @@ export class PeerStore {
   loadConversations = async () => {
     const seq = ++this.listSeq;
     try {
-      const { items, next_cursor, has_more, contacts } = await adminApi.listConversations(this.listParams());
+      const { items, next_cursor, has_more, contacts } = await listConversations(http, this.listParams());
       if (seq !== this.listSeq) return; // a newer load superseded this one
       const profiles = profilesOf(contacts);
       runInAction(() => {
@@ -215,7 +218,7 @@ export class PeerStore {
       this.loadingMore = true;
     });
     try {
-      const { items, next_cursor, has_more, contacts } = await adminApi.listConversations({
+      const { items, next_cursor, has_more, contacts } = await listConversations(http, {
         ...this.listParams(),
         cursor: this.cursor,
       });
@@ -249,7 +252,7 @@ export class PeerStore {
       this.searching = true;
     });
     try {
-      const { items, next_cursor, has_more, contacts } = await adminApi.listConversations({ kind: "peer", q });
+      const { items, next_cursor, has_more, contacts } = await listConversations(http, { kind: "peer", q, expand: WITH_PROFILES });
       if (seq !== this.searchSeq) return; // stale response
       const profiles = profilesOf(contacts);
       runInAction(() => {
@@ -270,7 +273,10 @@ export class PeerStore {
   // Used both by search hydration and by surface() for a single live arrival.
   private async fetchRow(id: string, snippet?: string): Promise<PeerConversation | null> {
     try {
-      const [conv, page] = await Promise.all([adminApi.getConversation(id), adminApi.listMessages(id)]);
+      const [conv, page] = await Promise.all([
+        getConversation(http, id, { expand: WITH_PROFILES }),
+        listMessages(http, id),
+      ]);
       const participants = mapParticipants(conv.members, profilesOf(conv.contacts));
       const messages = [...page.items]
         .sort((a, b) => a.id.localeCompare(b.id))
@@ -328,7 +334,7 @@ export class PeerStore {
   private refreshParticipants = async (id: string) => {
     if (!this.conversations.some((c) => c.id === id)) return;
     try {
-      const conv = await adminApi.getConversation(id);
+      const conv = await getConversation(http, id, { expand: WITH_PROFILES });
       const participants = mapParticipants(conv.members, profilesOf(conv.contacts));
       runInAction(() => {
         const row = this.conversations.find((c) => c.id === id);
@@ -348,7 +354,7 @@ export class PeerStore {
     return !!me && participants.some((p) => p.isAgent && p.id === me);
   }
 
-  private buildRow(c: ApiQueueConversation, profiles: Profiles, snippet?: string): PeerConversation {
+  private buildRow(c: ConversationRow, profiles: Profiles, snippet?: string): PeerConversation {
     const participants = mapParticipants(c.members, profiles);
     const joined = this.hasJoined(participants);
     const existing = this.conversations.find((x) => x.id === c.id);
@@ -387,7 +393,7 @@ export class PeerStore {
   loadMessages = async (id: string) => {
     this.loadingThread = true;
     try {
-      const page = await adminApi.listMessages(id);
+      const page = await listMessages(http, id);
       runInAction(() => {
         const conv = this.conversations.find((c) => c.id === id);
         if (conv) {
@@ -424,7 +430,7 @@ export class PeerStore {
     const refs = this.atts.refs();
     try {
       // The implicit join happens server-side, from operator + peer conversation.
-      const msg = await adminApi.postMessage(id, body, "participants", refs);
+      const msg = await sendMessage(http, id, { body, visibility: "participants", attachments: refs });
       runInAction(() => {
         this.composer = "";
         this.atts.clear();
@@ -449,7 +455,7 @@ export class PeerStore {
     }
   };
 
-  private appendMessage(conv: PeerConversation, m: ApiMessage) {
+  private appendMessage(conv: PeerConversation, m: Message) {
     if (conv.messages.some((x) => x.id === m.id)) return;
     conv.messages.push(mapPeerMessage(m, conv.participants, this.root.meId));
     conv.messages.sort((a, b) => a.id.localeCompare(b.id));
@@ -461,11 +467,11 @@ export class PeerStore {
   }
 
   // ── realtime (routed here by the root for peer conversation ids) ──────────
-  onRealtime = (env: RealtimeEnvelope) => {
+  onRealtime = (env: Envelope) => {
     const cid = env.conversation_id;
     if (!cid) return;
     if (env.type === "message.created") {
-      const m = env.data as ApiMessage;
+      const m = env.data as Message;
       const own = m.sender_kind === "agent" || !!m.internal_actor_id;
       const inbound = !own && m.sender_kind !== "system";
       const bumpUnread = inbound && cid !== this.activeId;
@@ -541,7 +547,7 @@ export class PeerStore {
     if (!this.loaded) return;
     const seq = this.listSeq;
     try {
-      const { items, contacts } = await adminApi.listConversations(this.listParams());
+      const { items, contacts } = await listConversations(http, this.listParams());
       if (seq !== this.listSeq) return; // the list moved under us
       const profiles = profilesOf(contacts);
       runInAction(() => {

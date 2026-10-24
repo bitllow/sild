@@ -2,7 +2,8 @@
 
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Avatar, InboxIcon, PeopleIcon, SettingsIcon, TranslateIcon } from "@/components/ds";
+import { isEmbedded } from "@/api/client";
+import { Avatar, BotIcon, InboxIcon, PeopleIcon, SettingsIcon, TranslateIcon } from "@/components/ds";
 import { navStyle } from "./styles";
 import { Translations } from "./Translations";
 import { ConversationList } from "./ConversationList";
@@ -12,6 +13,9 @@ import { PeerList } from "./PeerList";
 import { PeerView } from "./PeerView";
 import { PeerPanel } from "./PeerPanel";
 import { Settings } from "./Settings";
+import { TriageList } from "./TriageList";
+import { TriageThread } from "./TriageThread";
+import { TriagePanel } from "./TriagePanel";
 import { KeyDialog } from "./KeyDialog";
 
 export const Shell = observer(function Shell() {
@@ -37,6 +41,17 @@ export const Shell = observer(function Shell() {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/assets/sild-mark-tile.svg" width={34} alt="Sild" style={{ borderRadius: 10, marginBottom: 8 }} />
+        {nav.includes("triage") && (
+          <button
+            data-testid="triage-nav"
+            onClick={() => store.goView("triage")}
+            aria-label="Tech support"
+            title="Tech support"
+            style={navStyle(view === "triage")}
+          >
+            <BotIcon size={22} />
+          </button>
+        )}
         {nav.includes("inbox") && (
         <div style={{ position: "relative" }}>
           <button onClick={() => store.goView("inbox")} aria-label="Inbox" style={navStyle(view === "inbox")}>
@@ -123,17 +138,26 @@ export const Shell = observer(function Shell() {
           </button>
         )}
         <div style={{ flex: 1 }} />
-        <button
-          onClick={store.logout}
-          aria-label="Sign out"
-          style={{ border: 0, background: "transparent", cursor: "pointer", padding: 0, borderRadius: "50%" }}
-        >
-          <Avatar name="Agent" size={36} />
-        </button>
+        {/* Embedded, the host app owns sign-in and sign-out. */}
+        {!isEmbedded() && (
+          <button
+            onClick={store.logout}
+            aria-label="Sign out"
+            style={{ border: 0, background: "transparent", cursor: "pointer", padding: 0, borderRadius: "50%" }}
+          >
+            <Avatar name="Agent" size={36} />
+          </button>
+        )}
       </div>
 
       {/* Stage */}
-      {view === "inbox" ? (
+      {view === "triage" ? (
+        <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
+          <TriageList />
+          <TriageThread />
+          <TriagePanel />
+        </div>
+      ) : view === "inbox" ? (
         <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
           <ConversationList />
           <ConversationView />

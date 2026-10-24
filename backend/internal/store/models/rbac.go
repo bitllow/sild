@@ -18,6 +18,8 @@ const ScopeAll = "all"
 type RoleScope struct {
 	// agent
 	Peer bool `json:"peer,omitempty"`
+	// Queues the agent works. Absent means the built-in support queue only.
+	Queues []string `json:"queues,omitempty"`
 	// translator
 	Projects []string `json:"projects,omitempty"`
 	Locales  []string `json:"locales,omitempty"`

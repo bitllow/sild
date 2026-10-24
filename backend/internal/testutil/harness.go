@@ -432,3 +432,13 @@ func (h *Harness) SeedPushToken(tenantID, userID, token string, platform models.
 		h.T.Fatalf("seed push token: %v", err)
 	}
 }
+
+// MustJSON renders v as JSON for assertions on captured payloads.
+func MustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

@@ -40,7 +40,7 @@ func TestListAssignmentsScopeCounts(t *testing.T) {
 	// Close the `closed` CONVERSATION (the inbox "Close conversation" action) →
 	// counts toward "closed", never toward you/unassigned even though its
 	// assignment is still queued.
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, closed.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, closed.ID, ""); err != nil {
 		t.Fatalf("close conversation: %v", err)
 	}
 

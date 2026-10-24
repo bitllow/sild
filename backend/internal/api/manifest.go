@@ -104,6 +104,10 @@ func routeManifest() []routeSpec {
 			Enabled: (*Handler).devLoginAvailable},
 		{Method: "POST", Path: "/v1/admin/auth/password", Class: classPublic, Handler: (*Handler).adminPasswordLogin, Rate: rateAuth},
 		{Method: "POST", Path: "/v1/admin/auth/logout", Class: classPublic, Handler: (*Handler).adminLogout, Success: http.StatusNoContent},
+		// Embedded inbox: the host app's token in, a short-lived bearer out. The
+		// origins read is what the iframe may know before sign-in.
+		{Method: "POST", Path: "/v1/admin/auth/embedded", Class: classPublic, Handler: (*Handler).exchangeEmbedded, Rate: rateAuth},
+		{Method: "GET", Path: "/v1/admin/auth/embedded/:embed_key", Class: classPublic, Handler: (*Handler).embedOrigins},
 
 		// Signature-gated ingress and signed object access.
 		{Method: "POST", Path: "/v1/email/inbound", Class: classSignedIngress, Handler: (*Handler).emailInbound,
@@ -127,6 +131,8 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.MessagesRead}, Principals: anyPrincipal, Handler: (*Handler).listMessages},
 		{Method: "POST", Path: "/v1/conversations/:id/messages", Class: classAction,
 			Actions: []policy.Action{policy.MessagesSend}, Principals: anyPrincipal, Handler: (*Handler).postMessage, Success: http.StatusCreated, IdempotencyField: "client_msg_id"},
+		{Method: "PATCH", Path: "/v1/conversations/:id/messages/:mid", Class: classAction,
+			Actions: []policy.Action{policy.MessagesSend}, Principals: adminOnly, Handler: (*Handler).patchMessageParts},
 		{Method: "POST", Path: "/v1/conversations/:id/read", Class: classAction,
 			Actions: []policy.Action{policy.ReceiptsWrite}, Principals: anyPrincipal, Handler: (*Handler).markRead, Success: http.StatusNoContent},
 		{Method: "POST", Path: "/v1/conversations/:id/typing", Class: classAction,
@@ -231,8 +237,24 @@ func routeManifest() []routeSpec {
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).updateRoleScope, Success: http.StatusNoContent},
 		{Method: "DELETE", Path: "/v1/team/:id/roles/:role", Class: classAction,
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).removeRole, Success: http.StatusNoContent},
+		{Method: "GET", Path: "/v1/queues", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).listQueues},
+		{Method: "PUT", Path: "/v1/queues/:key", Class: classAction,
+			Actions: []policy.Action{policy.SettingsWrite}, Principals: adminOnly, Handler: (*Handler).putQueue},
+		{Method: "POST", Path: "/v1/service-accounts", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).createServiceAccount, Success: http.StatusCreated},
+		{Method: "POST", Path: "/v1/service-accounts/:id/keys", Class: classAction,
+			Actions: []policy.Action{policy.APIKeysManage}, Principals: adminOnly, Handler: (*Handler).createServiceKey, Success: http.StatusCreated},
 		{Method: "POST", Path: "/v1/team/:id/password", Class: classAction,
 			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).setAgentPassword, Success: http.StatusNoContent},
+		{Method: "PUT", Path: "/v1/team/:id/external-sub", Class: classAction,
+			Actions: []policy.Action{policy.TeamManage}, Principals: adminOnly, Handler: (*Handler).setExternalSub, Success: http.StatusNoContent},
+		{Method: "GET", Path: "/v1/identity-provider", Class: classAction,
+			Actions: []policy.Action{policy.IdentityManage}, Principals: adminOnly, Handler: (*Handler).getIdentityProvider},
+		{Method: "PUT", Path: "/v1/identity-provider", Class: classAction,
+			Actions: []policy.Action{policy.IdentityManage}, Principals: adminOnly, Handler: (*Handler).putIdentityProvider},
+		{Method: "DELETE", Path: "/v1/identity-provider", Class: classAction,
+			Actions: []policy.Action{policy.IdentityManage}, Principals: adminOnly, Handler: (*Handler).deleteIdentityProvider, Success: http.StatusNoContent},
 
 		// Translations. The manifest and bundle reads are what every client polls;
 		// the rest is the editor.

@@ -104,7 +104,7 @@ func (j *Job) archiveOne(ctx context.Context, conv *models.Conversation) error {
 		ser.Members = append(ser.Members, views.Member(&members[i], views.Profiles{}))
 	}
 	for i := range msgs {
-		ser.Messages = append(ser.Messages, views.Message(&msgs[i], nil))
+		ser.Messages = append(ser.Messages, views.MessageFull(&msgs[i], nil))
 	}
 
 	// 1) Write to the sink and VERIFY before deleting anything (§12).

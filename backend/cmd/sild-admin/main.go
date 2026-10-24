@@ -10,6 +10,8 @@
 //	sild-admin agent peer-access  --tenant <id> --email … --on
 //	sild-admin apikey create --tenant <id> --label ci
 //	sild-admin apikey revoke --tenant <id> --id <key id>
+//	sild-admin identity set  --tenant <id> --validator-url https://app.example/sild/validate --validator-token-file t.txt --origins https://app.example
+//	sild-admin agent link    --tenant <id> --email … --sub <integrator identity>
 package main
 
 import (
@@ -33,13 +35,19 @@ const usage = `sild-admin — operator commands
 
   tenant create --name NAME --admin-email EMAIL [--admin-name "First Last"] [--password -]
   tenant list
-  agent invite       --tenant ID --email EMAIL [--name "First Last"] [--role owner|admin|agent]
+  agent invite       --tenant ID --email EMAIL [--name "First Last"] [--role owner|admin|agent|requester] [--queues a,b]
   agent set-password --tenant ID --email EMAIL [--password -]
   agent peer-access  --tenant ID --email EMAIL [--on|--off]
   apikey create --tenant ID [--label LABEL]
   apikey revoke --tenant ID --id KEY_ID
+  queue set     --tenant ID --key KEY [--label L] [--requeue-on-reply] [--webhooks=false]
+  service create --tenant ID --name NAME [--display "Triage assistant"] --queues triage
+  identity set    --tenant ID --validator-url URL [--validator-token-file FILE] --origins URL[,URL]
+  identity show   --tenant ID
+  identity remove --tenant ID
+  agent link      --tenant ID --email EMAIL (--sub IDENTITY | --unlink)
 
-Passwords are read from a terminal prompt, or from stdin with --password -.
+Passwords and secrets are read from a terminal prompt, or from stdin with - .
 They are never taken from the command line, where they would land in shell
 history and in the process list.
 `
@@ -80,6 +88,60 @@ var commands = map[string]command{
 	"agent peer-access":  agentPeerAccess,
 	"apikey create":      apikeyCreate,
 	"apikey revoke":      apikeyRevoke,
+	"queue set":          queueSet,
+	"service create":     serviceCreate,
+	"identity set":       identitySet,
+	"identity show":      identityShow,
+	"identity remove":    identityRemove,
+	"agent link":         agentLink,
+}
+
+// serviceCreate adds a no-login agent limited to the given queues and prints its
+// key once; the key is the account's only credential.
+func serviceCreate(ctx context.Context, svc *domain.Service, args []string) error {
+	fs := flag.NewFlagSet("service create", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "tenant id")
+	name := fs.String("name", "", "unique account name, e.g. assistant")
+	display := fs.String("display", "", "name shown on its messages")
+	queues := fs.String("queues", "", "comma-separated queues it works")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := need("tenant", tenant, "name", name, "queues", queues); err != nil {
+		return err
+	}
+	scope := models.RoleScope{Queues: split(*queues)}
+	admin, err := svc.CreateServiceAccount(ctx, *tenant, *name, *display, models.PlatformAgent, scope)
+	if err != nil {
+		return err
+	}
+	key, _, err := svc.CreateServiceKey(ctx, *tenant, admin.ID, *name)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("service account %s (%s)\nkey: %s\n", *name, admin.ID, key)
+	return nil
+}
+
+func queueSet(ctx context.Context, svc *domain.Service, args []string) error {
+	fs := flag.NewFlagSet("queue set", flag.ExitOnError)
+	tenant := fs.String("tenant", "", "tenant id")
+	key := fs.String("key", "", "queue key, e.g. triage")
+	label := fs.String("label", "", "display name")
+	requeue := fs.Bool("requeue-on-reply", false, "re-queue when the client writes after the assignment closed")
+	webhooks := fs.Bool("webhooks", true, "send this queue's events to the tenant's webhooks")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := need("tenant", tenant, "key", key); err != nil {
+		return err
+	}
+	q := &models.Queue{TenantID: *tenant, Key: *key, Label: *label, RequeueOnReply: *requeue, Webhooks: *webhooks}
+	if err := svc.SetQueue(ctx, q); err != nil {
+		return err
+	}
+	fmt.Printf("queue %s set (requeue_on_reply=%v webhooks=%v)\n", *key, *requeue, *webhooks)
+	return nil
 }
 
 func tenantCreate(ctx context.Context, svc *domain.Service, args []string) error {
@@ -135,15 +197,17 @@ func agentInvite(ctx context.Context, svc *domain.Service, args []string) error 
 	tenant := fs.String("tenant", "", "tenant id")
 	email := fs.String("email", "", "operator email")
 	name := fs.String("name", "", `display name, e.g. "Eva Marleen"`)
-	role := fs.String("role", string(models.PlatformAgent), "owner|admin|agent|translator")
+	role := fs.String("role", string(models.PlatformAgent), "owner|admin|agent|translator|requester")
+	queues := fs.String("queues", "", "comma-separated queues an agent works or a requester uses")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if err := need("tenant", tenant, "email", email); err != nil {
 		return err
 	}
+	scope := models.RoleScope{Queues: split(*queues)}
 	first, last := provision.SplitName(*name)
-	admin, err := svc.InviteAgent(ctx, *tenant, *email, first, last, models.PlatformRole(*role), models.RoleScope{})
+	admin, err := svc.InviteAgent(ctx, *tenant, *email, first, last, models.PlatformRole(*role), scope)
 	if err != nil {
 		return err
 	}

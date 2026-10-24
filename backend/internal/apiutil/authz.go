@@ -19,11 +19,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// IsAgent reports whether the caller is privileged (API key or admin) — i.e. may
-// see internal notes and set visibility=internal (§4.2, §5.6). Users are not.
-func IsAgent(c *gin.Context) bool {
-	p := middleware.Get(c)
-	return p != nil && p.Kind != principal.KindUser
+// Can probes a capability without authorizing the route, for a handler that
+// decides what to show or accept (internal notes and fields).
+func Can(c *gin.Context, a policy.Action) bool {
+	return policy.Holds(middleware.Get(c), a)
 }
 
 // Subject returns the user-JWT subject ("" for non-user principals).
@@ -183,7 +182,10 @@ func conversationAttrs(c *gin.Context, svc *domain.Service, p *principal.Princip
 
 	case principal.KindAdmin:
 		access := svc.ClassifyAgentAccess(ctx, tenant, convID, !p.Privileged())
-		attrs := policy.ResourceAttrs{SupportReachable: access.SupportOK}
+		attrs := policy.ResourceAttrs{SupportReachable: access.SupportOK, Queue: access.Queue}
+		if p.HasRole(models.PlatformRequester) {
+			attrs.IsMember = svc.IsActorMember(ctx, tenant, convID, p.AdminID)
+		}
 		if access.Peer {
 			attrs.Kind = models.KindPeer
 		} else {

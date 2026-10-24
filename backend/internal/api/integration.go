@@ -58,6 +58,7 @@ func (h *Handler) createConversation(c *gin.Context) {
 		} `json:"members"`
 		OpenAssignment *bool  `json:"open_assignment"`
 		ExternalUserID string `json:"external_user_id"`
+		Queue          string `json:"queue"`
 	}
 	// Strict: kind is derived from the ABSENCE of open_assignment, so a misspelled
 	// field would silently mint a peer conversation under a 201.
@@ -86,10 +87,27 @@ func (h *Handler) createConversation(c *gin.Context) {
 		return
 	}
 
+	// A requester opens for themselves, in its own queues only.
+	queue := req.Queue
+	if queue == "" {
+		queue = models.QueueSupport
+	}
+	requesting := p.Kind == principal.KindAdmin && req.ExternalUserID == "" && p.RequesterReaches(queue)
+	if p.RequesterOnly() && !requesting {
+		httpx.Forbidden(c, "you may only open requests in your queues")
+		return
+	}
+	// Otherwise only a server key places a conversation in another queue.
+	if req.Queue != "" && req.Queue != models.QueueSupport && p.Kind != principal.KindAPIKey && !requesting {
+		httpx.Forbidden(c, "this credential may only open support conversations")
+		return
+	}
+
 	in := domain.CreateConversationInput{
 		Reference:      req.Reference,
 		Metadata:       req.Metadata,
 		OpenAssignment: openAssignment,
+		Queue:          req.Queue,
 	}
 
 	switch p.Kind {
@@ -102,8 +120,20 @@ func (h *Handler) createConversation(c *gin.Context) {
 		}
 
 	case principal.KindAdmin:
+		if requesting {
+			in.Members = []domain.MemberInput{
+				{UserID: p.AdminID, Kind: models.MemberAgent, ConvRole: models.RoleClient},
+			}
+			in.OpenLimitActor = p.AdminID
+			break
+		}
 		if req.ExternalUserID == "" {
 			httpx.BadRequest(c, "external_user_id is required")
+			return
+		}
+		// An operator opens only where they work, or they could not read what they opened.
+		if !p.ReachesQueue(models.QueueSupport) {
+			httpx.Forbidden(c, "you do not work the support queue")
 			return
 		}
 		in.Members = []domain.MemberInput{

@@ -13,9 +13,15 @@
 # BUILD platform (native, fast) — the esbuild output is portable JS.
 FROM --platform=$BUILDPLATFORM node:24-slim AS web
 WORKDIR /web
+# web depends on file:../packages/client, which resolves to /packages/client here.
+COPY packages/client/package.json packages/client/tsconfig.json /packages/client/
+COPY packages/client/src /packages/client/src
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+# `npm run build` regenerates the bundled strings from the backend's locales first.
+COPY scripts/gen-i18n.mjs /scripts/gen-i18n.mjs
+COPY backend/internal/i18n/locales /backend/internal/i18n/locales
 # build.mjs also syncs the bundle into ../backend/internal/webasset/dist; that
 # path doesn't exist in this isolated context, so create it to keep the copy happy.
 RUN mkdir -p /backend/internal/webasset/dist && npm run build

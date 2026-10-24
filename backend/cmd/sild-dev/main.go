@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -38,10 +39,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// devSecretsKey is a dev-only sealing key, used when SILD_SECRETS_KEY is unset.
+const devSecretsKey = "c2lsZC1kZXYtb25seS1zZWNyZXRzLWtleS0zMmJ5dGU="
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Embedded sign-in seals its validator token; a fixed key keeps dev zero-config.
+	if os.Getenv("SILD_SECRETS_KEY") == "" {
+		_ = os.Setenv("SILD_SECRETS_KEY", devSecretsKey)
+	}
 	c, err := di.New()
 	if err != nil {
 		log.Fatalf("di: %v", err)
@@ -179,6 +187,9 @@ func devSeed(ctx context.Context, st store.Store, svc *domain.Service, cfg *conf
 		log.Printf("dev seed: %v", err)
 		return
 	}
+	if os.Getenv("SILD_DEV_TRIAGE") == "1" {
+		defer devSeedTriage(ctx, st, svc)
+	}
 	if res == nil { // already seeded
 		if ids, err := st.Tenants().AllIDs(ctx); err == nil && len(ids) > 0 {
 			if ch, err := svc.GetEmailChannel(ctx, ids[0]); err == nil {
@@ -310,7 +321,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 		agent(past1.ID, "You're right — I've refunded the duplicate charge. It'll land in 3–5 days.")
 		user(past1.ID, "u_mari", "Perfect, thanks!", models.ChannelApp)
 		claim(past1)
-		_ = svc.CloseConversation(ctx, tenantID, past1.ID)
+		_ = svc.CloseConversation(ctx, tenantID, past1.ID, "")
 	}
 	past2 := create("trip_7640", nil, []domain.MemberInput{
 		{UserID: "u_mari", ConvRole: models.RoleClient},
@@ -319,7 +330,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 		user(past2.ID, "u_mari", "Can I get a receipt for my trip to the airport?", models.ChannelApp)
 		agent(past2.ID, "Sent it to your email just now.")
 		claim(past2)
-		_ = svc.CloseConversation(ctx, tenantID, past2.ID)
+		_ = svc.CloseConversation(ctx, tenantID, past2.ID, "")
 	}
 
 	// 1. Mari Tamm — claimed (assigned), client + driver, internal note.
@@ -368,7 +379,7 @@ func devSeedConversations(ctx context.Context, svc *domain.Service, tenantID, ad
 	})
 	if pille != nil {
 		user(pille.ID, "u_pille", "Driver was great, thank you", models.ChannelApp)
-		_ = svc.CloseConversation(ctx, tenantID, pille.ID)
+		_ = svc.CloseConversation(ctx, tenantID, pille.ID, "")
 	}
 }
 
@@ -437,4 +448,60 @@ func devSeedPeerConversations(ctx context.Context, svc *domain.Service, tenantID
 		_, _ = svc.PeerAgentSend(ctx, tenantID, c.ID, adminID,
 			"Andres, please mark it as a lost-item return so the detour is covered.", nil, "")
 	}
+}
+
+// devSeedTriage sets up the tech-support triage demo: the triage queue, a
+// requester, and the assistant's service account. The assistant gets a fresh
+// key each start, written to SILD_DEV_TRIAGE_KEY_FILE for the bridge to read.
+func devSeedTriage(ctx context.Context, st store.Store, svc *domain.Service) {
+	ids, err := st.Tenants().AllIDs(ctx)
+	if err != nil || len(ids) == 0 {
+		log.Printf("dev seed triage: no tenant")
+		return
+	}
+	tenantID := ids[0]
+	const queue = "triage"
+	if err := svc.SetQueue(ctx, &models.Queue{TenantID: tenantID, Key: queue, Label: "Tech support", RequeueOnReply: true}); err != nil {
+		log.Printf("dev seed triage queue: %v", err)
+		return
+	}
+	triage := models.RoleScope{Queues: []string{queue}}
+	if admins, _ := st.Admins().FindByEmail(ctx, "marko@sild.local"); len(admins) == 0 {
+		marko, err := svc.InviteAgent(ctx, tenantID, "marko@sild.local", "Marko", "Saar", models.PlatformRequester, triage)
+		if err != nil {
+			log.Printf("dev seed triage requester: %v", err)
+			return
+		}
+		_ = svc.SetAdminPassword(ctx, tenantID, marko.ID, "password123")
+	}
+	assistant, err := findOrCreateAssistant(ctx, svc, tenantID, triage)
+	if err != nil {
+		log.Printf("dev seed triage assistant: %v", err)
+		return
+	}
+	key, _, err := svc.CreateServiceKey(ctx, tenantID, assistant.ID, "local bridge")
+	if err != nil {
+		log.Printf("dev seed triage key: %v", err)
+		return
+	}
+	if path := os.Getenv("SILD_DEV_TRIAGE_KEY_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte(key+"\n"), 0o600); err != nil {
+			log.Printf("dev seed triage key file: %v", err)
+		}
+	}
+	log.Printf("┌─ triage demo ─────────────────────────────────────────")
+	log.Printf("│ requester : marko@sild.local / password123")
+	log.Printf("│ operator  : admin@sild.local / password123 (sees every triage chat)")
+	log.Printf("│ assistant : service account %s", assistant.ID)
+	devSeedEmbed(ctx, st, svc, tenantID, queue)
+	log.Printf("└───────────────────────────────────────────────────────")
+}
+
+func findOrCreateAssistant(ctx context.Context, svc *domain.Service, tenantID string, scope models.RoleScope) (*models.AdminUser, error) {
+	if a, err := svc.FindAdminByEmail(ctx, tenantID, "assistant"); err == nil {
+		return a, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	return svc.CreateServiceAccount(ctx, tenantID, "assistant", "Triage assistant", models.PlatformAgent, scope)
 }

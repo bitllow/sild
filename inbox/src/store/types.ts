@@ -1,11 +1,6 @@
 import type { MessageAttachment, Presence } from "@/components/ds";
-import type {
-  ApiBrandConfig,
-  ApiPlatformRole,
-  ApiRoleAssignment,
-  ApiRoleDefinition,
-  ApiRoleScope,
-} from "@/api/admin";
+import type * as wire from "@sild/client";
+import type { ApiRoleDefinition } from "@/api/admin";
 
 export type UiStatus = "queued" | "assigned" | "closed";
 export type Channel = "app" | "email";
@@ -74,6 +69,8 @@ export interface ApiKey {
   label: string;
   masked: string;
   created: string;
+  /** Set on a key that signs in as a service account. */
+  actorId?: string;
 }
 
 export interface Webhook {
@@ -83,17 +80,18 @@ export interface Webhook {
   active: boolean;
 }
 
-export type PlatformRole = ApiPlatformRole;
+export type PlatformRole = wire.PlatformRole;
 
 /** The limits one assignment carries, and the role catalogue that describes
  *  them. Identical on the wire, so the API types are these types. */
-export type RoleScope = ApiRoleScope;
-export type RoleAssignment = ApiRoleAssignment;
+export type RoleScope = wire.RoleScope;
+export type RoleAssignment = wire.RoleAssignment;
 export type RoleDefinition = ApiRoleDefinition;
 export type RoleDimension = ApiRoleDefinition["dimensions"][number];
 
 export interface TeamMember {
   id: string;
+  kind: "human" | "service";
   name: string;
   email: string;
   assignments: RoleAssignment[];
@@ -111,14 +109,14 @@ export interface EmailChannel {
 }
 
 /** One brand — a named messenger look edited in Settings → Appearance (§8). */
-export type BrandConfig = ApiBrandConfig;
+export type BrandConfig = wire.BrandConfig;
 export interface Brand {
   id: string;
   name: string;
   config: BrandConfig;
 }
 
-export type InboxView = "inbox" | "peer" | "settings" | "translations";
-export type SettingsTab = "installation" | "channels" | "appearance" | "keys" | "webhooks" | "team";
+export type InboxView = "triage" | "inbox" | "peer" | "settings" | "translations";
+export type SettingsTab = "installation" | "channels" | "appearance" | "keys" | "webhooks" | "team" | "queues";
 export type InboxFilter = "you" | "unassigned" | "all";
 export type SessionState = "loading" | "authed" | "anon";

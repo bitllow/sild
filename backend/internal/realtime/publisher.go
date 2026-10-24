@@ -8,6 +8,7 @@ import "context"
 // Event types (§5.3).
 const (
 	EventMessageCreated     = "message.created"
+	EventMessageUpdated     = "message.updated"
 	EventMessageRead        = "message.read"
 	EventMemberAdded        = "member.added"
 	EventMemberRemoved      = "member.removed"
@@ -38,6 +39,10 @@ func AgentsChannel(tenantID string) string { return "agents:" + tenantID }
 // no per-connection bookkeeping (§5.1).
 func PeerChannel(tenantID string) string { return "peer:" + tenantID }
 
+// QueueChannel is AgentsChannel for one tenant-defined queue. The support queue
+// keeps AgentsChannel; only operators whose scope reaches the queue subscribe.
+func QueueChannel(tenantID, queue string) string { return "queue:" + tenantID + ":" + queue }
+
 // Envelope is the wire format pushed to clients (§5.3).
 type Envelope struct {
 	Type           string `json:"type"`
@@ -52,8 +57,12 @@ type Target struct {
 	Internal     bool     // agents-only: suppresses every client channel (§5.6)
 	Users        []string // also push to user:<id> channels
 	Tenant       string   // also push to agents:<tenant> (queue-wide agent fan-out)
+	Queue        QueueRef // also push to queue:<tenant>:<queue> (a non-support queue's operators)
 	Peer         string   // also push to peer:<tenant> (peer-access operator fan-out)
 }
+
+// QueueRef names one tenant-defined queue's operator channel.
+type QueueRef struct{ Tenant, Key string }
 
 // Publisher pushes envelopes to the broker. REST handlers call it AFTER the
 // Postgres commit; delivery is best-effort (reconnect catch-up is the

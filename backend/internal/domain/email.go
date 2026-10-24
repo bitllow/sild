@@ -350,7 +350,7 @@ func (s *Service) createFromInbound(ctx context.Context, tenantID string, in mai
 		map[string]any{"id": conv.ID, "channel": "email"})
 	// Nudge the agents channel so the new email conversation surfaces in the inbox
 	// queue live, without a refresh (§8) — same fan-out as host-created requests.
-	s.emit(ctx, realtime.Target{Tenant: tenantID}, realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
+	s.emit(ctx, operators(realtime.Target{}, conv), realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
 	return msg, nil
 }
 

@@ -26,8 +26,11 @@ type ResourceAttrs struct {
 	// SupportReachable means an assignment exists (anyone's, not the caller's) or
 	// the conversation is archived formerly-support.
 	SupportReachable bool
-	// IsMember reports whether the user principal is an active or archived member.
+	// IsMember reports whether the principal is an active or archived member: a
+	// user by external id, a requester by admin id.
 	IsMember bool
+	// Queue is the conversation's queue; only non-peer conversations consult it.
+	Queue string
 }
 
 // Authorize decides one action. Actions with no resource dimension pass a zero
@@ -44,6 +47,10 @@ func Authorize(p *principal.Principal, a Action, r ResourceAttrs) error {
 	}
 	return authorizeConversation(p, r)
 }
+
+// Holds reports whether the principal carries an action at all, for a handler
+// that probes a capability rather than authorizing its route.
+func Holds(p *principal.Principal, a Action) bool { return holds(p, a) }
 
 // holds reports whether the principal's kind and role carry the action at all.
 func holds(p *principal.Principal, a Action) bool {
@@ -89,6 +96,18 @@ func authorizeConversation(p *principal.Principal, r ResourceAttrs) error {
 		return nil
 
 	case principal.KindAdmin:
+		// A requester reaches their own requests, whatever other role they hold.
+		ownRequest := p.HasRole(models.PlatformRequester) && r.Kind != models.KindPeer && r.IsMember &&
+			p.RequesterReaches(r.Queue)
+		if ownRequest {
+			return nil
+		}
+		if p.RequesterOnly() {
+			if r.Kind == models.KindPeer || !r.IsMember {
+				return denied("not_a_member", "not a member of this conversation")
+			}
+			return denied("queue_out_of_scope", "this conversation is in a queue you do not use")
+		}
 		// Peer takes precedence over every other role: it is the agent
 		// assignment's own grant, and no other role implies it.
 		if r.Kind == models.KindPeer {
@@ -99,6 +118,9 @@ func authorizeConversation(p *principal.Principal, r ResourceAttrs) error {
 		}
 		if p.Privileged() {
 			return nil
+		}
+		if !p.ReachesQueue(r.Queue) {
+			return denied("queue_out_of_scope", "this conversation is in a queue you do not work")
 		}
 		if r.SupportReachable {
 			return nil

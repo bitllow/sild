@@ -39,6 +39,20 @@ export function filterStyle(active: boolean): CSSProperties {
   };
 }
 
+/** A content-sized segment in the same segmented control. */
+export function segStyle(active: boolean): CSSProperties {
+  return { ...filterStyle(active), flex: "none", padding: "5px 12px", borderRadius: 7 };
+}
+
+/** The small uppercase heading over a panel section. */
+export const capsLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: ".04em",
+  textTransform: "uppercase",
+  color: "var(--text-tertiary)",
+};
+
 // Neutral count pill shown inline in the You/Unassigned scope tabs.
 export function tabCountStyle(): CSSProperties {
   return {

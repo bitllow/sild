@@ -32,6 +32,9 @@ func (s *Store) Tx(ctx context.Context, fn func(tx store.Store) error) error {
 func (s *Store) Tenants() store.TenantRepo { return &tenantRepo{s.db} }
 func (s *Store) APIKeys() store.APIKeyRepo { return &apiKeyRepo{s.db} }
 func (s *Store) Admins() store.AdminRepo   { return &adminRepo{s.db} }
+func (s *Store) Identity() store.IdentityRepo {
+	return &identityRepo{s.db}
+}
 func (s *Store) RoleAssignments() store.RoleAssignmentRepo {
 	return &roleAssignmentRepo{s.db}
 }
@@ -51,6 +54,7 @@ func (s *Store) Outbox() store.OutboxRepo              { return &outboxRepo{s.db
 func (s *Store) Email() store.EmailRepo                { return &emailRepo{s.db} }
 func (s *Store) Archives() store.ArchiveRepo           { return &archiveRepo{s.db} }
 func (s *Store) Brands() store.BrandRepo               { return &brandRepo{s.db} }
+func (s *Store) Queues() store.QueueRepo               { return &queueRepo{s.db} }
 func (s *Store) Leases() store.LeaseRepo               { return &leaseRepo{s.db} }
 func (s *Store) Translations() store.TranslationRepo   { return &translationRepo{s.db} }
 

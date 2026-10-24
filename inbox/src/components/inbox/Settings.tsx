@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Badge, Button, CopyIcon, Input, KeyIcon, Select, Switch, Tag, TrashIcon } from "@/components/ds";
+import { Badge, Button, CopyIcon, Input, Select, Switch, Tag, TrashIcon } from "@/components/ds";
 import { cardStyle as card, fieldLabel, rowBorder, tabStyle } from "./styles";
 import { Appearance } from "./Appearance";
 import { TeamRoles } from "./TeamRoles";
+import { Queues } from "./Queues";
+import { KeyRow } from "./KeyDialog";
 
 const PlusInline = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 5 }}>
@@ -41,6 +43,9 @@ export const Settings = observer(function Settings() {
           <button onClick={() => store.setSettingsTab("team")} style={tabStyle(tab === "team")}>
             Team
           </button>
+          <button onClick={() => store.setSettingsTab("queues")} style={tabStyle(tab === "queues")}>
+            Queues
+          </button>
         </div>
       </div>
 
@@ -66,22 +71,8 @@ export const Settings = observer(function Settings() {
                   New key
                 </Button>
               </div>
-              {store.keys.map((k) => (
-                <div key={k.id} style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, borderBottom: rowBorder }}>
-                  <div style={{ width: 34, height: 34, flex: "none", borderRadius: 8, background: "var(--brand-subtle)", color: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <KeyIcon size={18} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{k.label}</div>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)", marginTop: 2 }}>
-                      {k.masked}
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 12, color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>{k.created}</span>
-                  <Button size="sm" variant="danger" onClick={() => store.revokeKey(k.id)}>
-                    Revoke
-                  </Button>
-                </div>
+              {store.serverKeys.map((k) => (
+                <KeyRow key={k.id} k={k} />
               ))}
             </div>
           )}
@@ -126,6 +117,8 @@ export const Settings = observer(function Settings() {
               <TeamRoles />
             </div>
           )}
+
+          {tab === "queues" && <Queues />}
 
           {tab === "installation" && <Installation />}
 

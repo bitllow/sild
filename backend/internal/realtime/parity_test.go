@@ -47,7 +47,7 @@ func operator(role models.PlatformRole, peer bool) *principal.Principal {
 // canRead asks policy the REST question for the same conversation.
 func canRead(p *principal.Principal, kind models.ConversationKind, reachable bool) bool {
 	return policy.Authorize(p, policy.ConversationsRead, policy.ResourceAttrs{
-		Kind: kind, SupportReachable: reachable,
+		Kind: kind, SupportReachable: reachable, Queue: models.QueueSupport,
 	}) == nil
 }
 

@@ -57,10 +57,27 @@ func (r *adminRepo) Get(ctx context.Context, tenantID, id string) (*models.Admin
 	return &a, nil
 }
 
+func (r *adminRepo) ListByIDs(ctx context.Context, tenantID string, ids []string) ([]models.AdminUser, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var as []models.AdminUser
+	err := r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids).Find(&as).Error
+	return as, err
+}
+
 func (r *adminRepo) FindByEmail(ctx context.Context, email string) ([]models.AdminUser, error) {
 	var as []models.AdminUser
-	err := r.db.WithContext(ctx).Where("email = ?", email).Find(&as).Error
+	err := r.db.WithContext(ctx).Where("email = ? AND kind = ?", email, models.AdminHuman).Find(&as).Error
 	return as, err
+}
+
+func (r *adminRepo) GetByEmail(ctx context.Context, tenantID, email string) (*models.AdminUser, error) {
+	var a models.AdminUser
+	if err := r.db.WithContext(ctx).First(&a, "tenant_id = ? AND email = ?", tenantID, email).Error; err != nil {
+		return nil, translateErr(err)
+	}
+	return &a, nil
 }
 
 func (r *adminRepo) List(ctx context.Context, tenantID string) ([]models.AdminUser, error) {

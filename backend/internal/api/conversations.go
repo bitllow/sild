@@ -43,7 +43,7 @@ func (h *Handler) listConversations(c *gin.Context) {
 		Query:           q,
 		Search:          c.Query("q"),
 		CallerActorID:   adminIDOf(c),
-		IncludeInternal: apiutil.IsAgent(c),
+		IncludeInternal: apiutil.Can(c, policy.NotesRead),
 		WithProfiles:    wantsProfiles(expansion),
 	}
 	// Only messenger surfaces render unread counts; the queue shows assignment
@@ -86,6 +86,15 @@ func applyConversationFilters(c *gin.Context, q *store.ConversationQuery) bool {
 			return false
 		}
 		q.Kind = &k
+	}
+	// Absent means the support queue, so a caller that predates queues keeps its results.
+	q.Queue = models.QueueSupport
+	if raw := c.Query("queue"); raw != "" {
+		if !models.ValidQueueKey(raw) {
+			httpx.BadRequest(c, "queue is not a valid queue key")
+			return false
+		}
+		q.Queue = raw
 	}
 	if raw := c.Query("status"); raw != "" {
 		s := models.ConversationStatus(raw)
@@ -156,7 +165,7 @@ func (h *Handler) queueCounts(c *gin.Context, q *store.ConversationQuery) <-chan
 	if p == nil || p.Kind != principal.KindAdmin {
 		return nil
 	}
-	if q.Kind == nil || *q.Kind != models.KindSupport {
+	if q.Kind == nil || *q.Kind != models.KindSupport || q.Queue != models.QueueSupport {
 		return nil
 	}
 	ctx, tenant, actor := c.Request.Context(), apiutil.Tenant(c), p.AdminID

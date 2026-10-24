@@ -26,6 +26,10 @@ type CreateConversationInput struct {
 	Metadata       json.RawMessage
 	Members        []MemberInput
 	OpenAssignment bool
+	// Queue places a support conversation in a tenant-defined queue; "" is support.
+	Queue string
+	// OpenLimitActor allows this admin id one open conversation in Queue.
+	OpenLimitActor string
 }
 
 // CreateConversation creates an untyped conversation with members and an
@@ -40,7 +44,19 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	if in.OpenAssignment {
 		kind = models.KindSupport
 	}
+	queue := models.QueueSupport
+	if in.Queue != "" && in.Queue != models.QueueSupport {
+		if !in.OpenAssignment {
+			return nil, invalid("a queue applies to support conversations only")
+		}
+		queue = in.Queue
+	}
+	settings, err := s.QueueSettings(ctx, tenantID, queue)
+	if err != nil {
+		return nil, err
+	}
 	conv := &models.Conversation{
+		Queue:     queue,
 		TenantID:  tenantID,
 		Reference: in.Reference,
 		Metadata:  datatypes.JSON(in.Metadata),
@@ -51,7 +67,16 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	var members []models.ConversationMember
 	var assignment *models.Assignment
 
-	err := s.store.Tx(ctx, func(tx store.Store) error {
+	err = s.store.Tx(ctx, func(tx store.Store) error {
+		if in.OpenLimitActor != "" {
+			n, err := tx.Conversations().CountOpenForActor(ctx, tenantID, in.OpenLimitActor, queue)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				return conflict("open_request_exists", "close your open request before starting another")
+			}
+		}
 		if err := tx.Conversations().Create(ctx, conv); err != nil {
 			return err
 		}
@@ -75,16 +100,19 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 			}
 		}
 		// webhook events, atomic with the create (§6.1)
+		if !settings.Webhooks {
+			return nil
+		}
 		profiles, err := s.MemberProfiles(ctx, tenantID, members)
 		if err != nil {
 			return err
 		}
 		data := views.Conversation(conv, members, assignment, profiles)
-		if err := s.enqueueWebhook(ctx, tx, tenantID, conv.ID, "conversation.created", data); err != nil {
+		if err := s.writeWebhook(ctx, tx, tenantID, conv.ID, "conversation.created", data); err != nil {
 			return err
 		}
 		if assignment != nil {
-			if err := s.enqueueWebhook(ctx, tx, tenantID, conv.ID, "assignment.created", views.Assignment(assignment)); err != nil {
+			if err := s.writeWebhook(ctx, tx, tenantID, conv.ID, "assignment.created", views.Assignment(assignment)); err != nil {
 				return err
 			}
 		}
@@ -95,9 +123,15 @@ func (s *Service) CreateConversation(ctx context.Context, tenantID string, in Cr
 	}
 	conv.Members = members
 	conv.Assignment = assignment
+	// A requester's socket follows their own conversations only.
+	if in.OpenLimitActor != "" {
+		if sub, ok := s.pub.(realtime.Subscriber); ok {
+			_ = sub.Subscribe(in.OpenLimitActor, realtime.ConvChannel(conv.ID))
+		}
+	}
 	// surface host-created support requests in the inbox queue live (§8)
 	if assignment != nil {
-		s.emit(ctx, realtime.Target{Tenant: tenantID}, realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
+		s.emit(ctx, operators(realtime.Target{}, conv), realtime.EventAssignmentUpdated, conv.ID, views.Assignment(assignment))
 	} else {
 		// A peer conversation (no assignment): nudge the tenant PEER channel so any
 		// open peer inbox refreshes its list. Only peer_access operators observe
@@ -212,20 +246,24 @@ func (s *Service) RemoveMember(ctx context.Context, tenantID, convID, userID str
 }
 
 // CloseConversation transitions a conversation to closed (terminal, §1).
-func (s *Service) CloseConversation(ctx context.Context, tenantID, convID string) error {
+func (s *Service) CloseConversation(ctx context.Context, tenantID, convID, reason string) error {
+	if reason == "" {
+		reason = models.CloseClosed
+	}
+	if reason != models.CloseClosed && reason != models.CloseResolved {
+		return invalid("reason must be resolved or closed")
+	}
 	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
 	if err != nil {
 		return mapStoreErr(err)
 	}
-	if conv.Status == models.ConversationClosed {
-		return nil // idempotent
+	closed, err := s.store.Conversations().Close(ctx, tenantID, convID, reason)
+	if err != nil || !closed {
+		return err // already closed is idempotent
 	}
-	if err := s.store.Conversations().UpdateStatus(ctx, tenantID, convID, models.ConversationClosed); err != nil {
-		return err
-	}
-	s.emitObserved(ctx, realtime.Target{Conversation: convID}, tenantID, conv,
-		realtime.EventConversationClosed, map[string]any{})
-	_ = s.fireWebhook(ctx, tenantID, convID, "conversation.closed", map[string]any{})
+	data := map[string]any{"reason": reason}
+	s.emitObserved(ctx, realtime.Target{Conversation: convID}, tenantID, conv, realtime.EventConversationClosed, data)
+	_ = s.fireConvWebhook(ctx, conv, "conversation.closed", data)
 	return nil
 }
 

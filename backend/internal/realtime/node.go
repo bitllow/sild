@@ -129,9 +129,8 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 // The set is fixed per connection — it does not grow with the queue, so a
 // conversation created after connect needs no re-subscription.
 //
-// Visibility is decided by policy.Scope, not re-derived here. REST and the socket
-// therefore cannot disagree about what an operator may see — two implementations
-// of one policy is how a socket leaks what an endpoint refuses.
+// Peer reach comes from policy.Scope; the queue channels are derived here from
+// the principal's queue scope, the same one REST's ReachesQueue decides with.
 func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID string) (map[string]centrifuge.SubscribeOptions, error) {
 	admin, err := st.Admins().Get(ctx, tenantID, adminID)
 	if err != nil {
@@ -141,13 +140,48 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 	if err != nil {
 		return nil, err
 	}
-	scope := policy.Scope(principal.ForAdmin(admin, roles), policy.ConversationsList)
+	p := principal.ForAdmin(admin, roles)
+	scope := policy.Scope(p, policy.ConversationsList)
 	if scope.DenyAll() {
 		return nil, errNoScope
 	}
 	subs := map[string]centrifuge.SubscribeOptions{
-		UserChannel(adminID):    {},
-		AgentsChannel(tenantID): {},
+		UserChannel(adminID): {},
+	}
+	// A requester follows their own conversations in the queues they still use,
+	// like an end user; a requester-only member gets no operator channel.
+	if p.HasRole(models.PlatformRequester) {
+		convs, err := st.Members().ListActiveConversationsForActor(ctx, tenantID, adminID)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range convs {
+			// An operator of the queue already gets the full events on its channel.
+			if c.Kind != models.KindPeer && p.RequesterReaches(c.Queue) && !p.ReachesQueue(c.Queue) {
+				subs[ConvChannel(c.ConversationID)] = centrifuge.SubscribeOptions{}
+			}
+		}
+		if p.RequesterOnly() {
+			return subs, nil
+		}
+	}
+	if p.ReachesQueue(models.QueueSupport) {
+		subs[AgentsChannel(tenantID)] = centrifuge.SubscribeOptions{}
+	}
+	queues, all := p.Queues()
+	if all {
+		defined, err := st.Queues().List(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		for _, q := range defined {
+			queues = append(queues, q.Key)
+		}
+	}
+	for _, q := range queues {
+		if q != models.QueueSupport {
+			subs[QueueChannel(tenantID, q)] = centrifuge.SubscribeOptions{}
+		}
 	}
 	// Operators whose scope admits peer conversations observe the whole peer
 	// surface on the single tenant peer channel.

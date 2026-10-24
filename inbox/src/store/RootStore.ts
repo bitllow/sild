@@ -1,22 +1,36 @@
 import { makeAutoObservable, runInAction } from "mobx";
-import type { Centrifuge } from "centrifuge";
+import {
+  ApiError,
+  claimAssignment,
+  closeConversation,
+  getConversation,
+  listConversations,
+  listMessages,
+  messagesSincePage,
+  principal,
+  sendMessage,
+  sincePages,
+  type ConversationPage,
+  type ConversationQuery,
+  type ConversationRow,
+  type Envelope,
+  type Message,
+} from "@sild/client";
 import {
   adminApi,
-  type ApiAssignmentStatus,
-  type ApiMessage,
-  type ApiQueueConversation,
   type QueueOrder,
-  type ConversationParams,
-  type ApiQueuePage,
   type QueueSort,
   type ApiPushChannel,
   type PushSettingsPatch,
-  profilesOf,
+  type ApiQueue,
+  type QueueSettings,
 } from "@/api/admin";
-import { ApiError, errorText } from "@/api/client";
-import { createRealtime, type RealtimeEnvelope, type RealtimeState } from "@/api/realtime";
+import { errorText, http, WITH_PROFILES } from "@/api/client";
+import { createRealtime, type Realtime, type RealtimeState } from "@/api/realtime";
+import { putUpload } from "@/api/upload";
 import { AttachmentQueue } from "./attachments";
 import { PeerStore } from "./peer";
+import { TRIAGE_QUEUE, TriageStore } from "./triage";
 import { TranslationsStore } from "./translations";
 import {
   buildConversation,
@@ -26,6 +40,7 @@ import {
   mapRealtimeMessage,
   mapTeamMember,
   mapWebhook,
+  profilesOf,
   relativeTime,
   type Profiles,
 } from "./map";
@@ -206,6 +221,9 @@ export class RootStore {
   roleDefs: RoleDefinition[] = [];
   /** What a refused team write said, shown above the roster. */
   teamError: string | null = null;
+  /** Support first, then the tenant's own; also the options of a queues scope. */
+  queues: ApiQueue[] = [];
+  queueError: string | null = null;
   emailChannel: EmailChannel | null = null;
   pushChannel: ApiPushChannel | null = null;
   // Set while a credential upload or test send is in flight; pushMessage carries
@@ -236,7 +254,7 @@ export class RootStore {
   // --- realtime (§5) ---
   rtState: RealtimeState = "disconnected";
   typingConvId: string | null = null;
-  private rt: Centrifuge | null = null;
+  private rt: Realtime | null = null;
   private typingTimer: ReturnType<typeof setTimeout> | null = null;
   private safetyTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -254,14 +272,21 @@ export class RootStore {
   // Every nav entry and the landing route come from the grants the backend
   // returns, so a principal is never shown a surface it would be refused.
   canReadConversations = false;
+  // The support inbox and the tech support screen are gated separately: a
+  // requester lists conversations, but only their own triage ones.
+  supportAccess = false;
+  triageAccess = false;
+  // Sees only conversations it is a member of: its own requests.
+  memberOnly = false;
   private held = new Set<string>();
   peer = new PeerStore(this);
+  triage = new TriageStore(this);
   translations = new TranslationsStore();
 
   constructor() {
     // `can` stays unannotated: as an action it would read `held` untracked, and
     // observers would not re-render when the grants change.
-    makeAutoObservable<RootStore, "scopeWrites">(this, { peer: false, atts: false, translations: false, can: false, scopeWrites: false });
+    makeAutoObservable<RootStore, "scopeWrites">(this, { peer: false, triage: false, atts: false, translations: false, can: false, scopeWrites: false });
     if (typeof window !== "undefined") {
       this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
       installAudioUnlock(); // prime notification audio on the agent's first gesture
@@ -273,16 +298,38 @@ export class RootStore {
   // It is also the session probe: a translator holds no conversation capability,
   // so the queue cannot answer "am I signed in".
   loadMe = async () => {
-    const me = await adminApi.me();
+    const me = await principal(http);
+    const grants = me.grants ?? [];
     runInAction(() => {
       this.meId = me.subject?.id ?? "";
       this.appId = me.tenant_id;
-      this.held = new Set(me.grants.map((g) => g.action));
+      this.held = new Set(grants.map((g) => g.action));
       // Peer visibility is the scope of conversations.list, not a flag
       // re-interpreted here.
-      const list = me.grants.find((g) => g.action === "conversations.list");
-      const kinds = list?.scope?.kinds;
+      const list = grants.find((g) => g.action === "conversations.list");
+      const scope = list?.scope;
+      const kinds = scope?.kinds;
+      const queues = scope?.queues;
+      const reaches = (queue: string) => !!list && (!queues || queues.includes(queue));
+      let memberOnly: boolean;
+      let canStart: boolean;
+      if (scope && (scope.member_only !== undefined || scope.own_queues !== undefined)) {
+        memberOnly = !!scope.member_only;
+        const own = scope.own_queues ?? [];
+        canStart = own.includes(TRIAGE_QUEUE) || own.includes("all");
+      } else {
+        // A backend that predates member_only/own_queues: read the role names.
+        const roles = new Set((me.subject?.assignments ?? []).map((a) => a.role));
+        const operator = roles.has("owner") || roles.has("admin") || roles.has("agent");
+        memberOnly = !operator;
+        canStart = roles.has("requester");
+      }
+      const viewAll = !memberOnly && reaches(TRIAGE_QUEUE);
       this.canReadConversations = !!list;
+      this.memberOnly = !!list && memberOnly;
+      this.supportAccess = !memberOnly && reaches("support");
+      this.triageAccess = canStart || viewAll;
+      this.triage.configure(canStart, viewAll);
       this.peerAccess = !!list && (!kinds || kinds.includes("peer"));
     });
     // Load peer conversations up front (not lazily on first visit) so the nav
@@ -290,6 +337,8 @@ export class RootStore {
     // route to the peer store — otherwise, until the surface is opened once,
     // peer.owns() is false and peer arrivals are dropped into a queue refetch.
     if (this.peerAccess) void this.peer.loadConversations();
+    // Loaded up front so realtime events have rows to land on.
+    if (this.triageAccess) void this.triage.load();
   };
 
   /** Does this principal hold the grant for `action`? */
@@ -310,7 +359,7 @@ export class RootStore {
   // Open the surface this principal actually holds, and connect realtime only
   // when there are conversations to receive.
   private enterSession = async () => {
-    if (this.canReadConversations) await this.loadConversations();
+    if (this.supportAccess) await this.loadConversations();
     runInAction(() => {
       this.session = "authed";
     });
@@ -352,6 +401,16 @@ export class RootStore {
     } catch {
       /* best-effort */
     }
+    this.signedOut();
+  };
+
+  // The session ended under a live socket: show sign-in, not a dead connection.
+  private sessionEnded = () => {
+    this.dispose();
+    this.signedOut();
+  };
+
+  private signedOut = () => {
     runInAction(() => {
       this.session = "anon";
       this.convs = [];
@@ -359,11 +418,15 @@ export class RootStore {
       this.settingsLoaded = false;
       this.inboxView = "inbox";
       this.meId = null;
-    this.appId = "";
+      this.appId = "";
       this.peerAccess = false;
       this.canReadConversations = false;
+      this.supportAccess = false;
+      this.triageAccess = false;
+      this.memberOnly = false;
       this.held.clear();
       this.peer.reset();
+      this.triage.reset();
       this.translations.reset();
     });
   };
@@ -375,12 +438,13 @@ export class RootStore {
   // Two state machines, two parameters: `status` is the conversation lifecycle
   // (the inbox's "closed"), `assignment_status` the assignment's. Every scope
   // pins kind=support, or a peer_access operator's All tab would admit peer rows.
-  private get queueParams(): ConversationParams {
-    const base: ConversationParams = {
+  private get queueParams(): ConversationQuery {
+    const base: ConversationQuery = {
       kind: "support",
       sort: this.sortBy,
       order: this.sortDir,
       limit: PAGE_SIZE,
+      expand: WITH_PROFILES,
     };
     // Hide closed conversations server-side too whenever the client hides them —
     // otherwise a closed row would consume a page slot and then vanish
@@ -389,13 +453,13 @@ export class RootStore {
       case "unassigned":
         // A closed queued conversation isn't "unassigned" in the UI (its derived
         // status is closed), so it's always excluded here.
-        return { ...base, assignmentStatus: "queued", status: "open" };
+        return { ...base, assignment_status: "queued", status: "open" };
       case "you":
         // "You" = assigned to me (closing keeps assignee_actor_id set). Show
         // closed reveals my closed threads; otherwise they're excluded.
         return this.showClosed
-          ? { ...base, assignee: "me", assignmentStatus: "assigned" }
-          : { ...base, assignee: "me", assignmentStatus: "assigned", status: "open" };
+          ? { ...base, assignee: "me", assignment_status: "assigned" }
+          : { ...base, assignee: "me", assignment_status: "assigned", status: "open" };
       default:
         return this.showClosed ? base : { ...base, status: "open" };
     }
@@ -410,7 +474,7 @@ export class RootStore {
       this.convError = null;
     });
     try {
-      const page = await adminApi.listConversations(this.queueParams);
+      const page = await listConversations(http, this.queueParams);
       if (seq !== this.queueSeq) return; // a newer load superseded this one
       const profiles = profilesOf(page.contacts);
       const built = page.items.map((it) => buildQueueRow(it, profiles));
@@ -449,7 +513,7 @@ export class RootStore {
       this.loadingMore = true;
     });
     try {
-      const page = await adminApi.listConversations({ ...this.queueParams, cursor: this.nextCursor });
+      const page = await listConversations(http, { ...this.queueParams, cursor: this.nextCursor });
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop this page
       const profiles = profilesOf(page.contacts);
       runInAction(() => {
@@ -478,6 +542,8 @@ export class RootStore {
   // A drain, not a reload: replacing the thread with the newest 100 both caps the
   // gap it can recover and discards whatever the operator had scrolled back to.
   private catchUpOnReconnect = async () => {
+    this.triage.onReconnect();
+    if (!this.supportAccess) return;
     await this.syncQueue();
     const id = this.activeId;
     if (!id) return;
@@ -487,12 +553,8 @@ export class RootStore {
     // refreshed already carries the thread.
     if (!conv || !last) return;
 
-    let since = last.id;
     try {
-      for (;;) {
-        const page = await adminApi.catchUpMessages(id, since);
-        const items = page.items || [];
-        if (!items.length) return;
+      for await (const items of sincePages((after) => messagesSincePage(http, id, after), last.id)) {
         // The operator may have switched threads while this was in flight.
         if (this.activeId !== id) return;
         runInAction(() => {
@@ -508,8 +570,6 @@ export class RootStore {
             }
           }
         });
-        since = items[items.length - 1].id;
-        if (!page.has_more) return;
       }
     } catch {
       /* the next reconnect resumes from the same id */
@@ -533,7 +593,7 @@ export class RootStore {
       this.loadingOlder = true;
     });
     try {
-      const page = await adminApi.listMessages(id, cursor);
+      const page = await listMessages(http, id, { cursor });
       runInAction(() => {
         for (const list of this.threadLists) {
           // Skip a copy rebuilt while this was in flight — its cursor moved.
@@ -562,8 +622,8 @@ export class RootStore {
     if (!id) return;
     try {
       const [conv, page] = await Promise.all([
-        adminApi.getConversation(id),
-        adminApi.listMessages(id),
+        getConversation(http, id, { expand: WITH_PROFILES }),
+        listMessages(http, id),
       ]);
       const rebuilt = buildConversation(conv, page);
       runInAction(() => {
@@ -598,12 +658,12 @@ export class RootStore {
         runInAction(() => {
           this.rtState = s;
         });
-        // reconnect catch-up is the only correctness mechanism (§5.4)
-        if (s === "connected") void this.catchUpOnReconnect();
       },
+      // reconnect catch-up is the only correctness mechanism (§5.4)
+      onConnected: () => void this.catchUpOnReconnect(),
       onEvent: (channel, env) => this.handleEvent(channel, env),
+      onSignedOut: this.sessionEnded,
     });
-    this.rt.connect();
     // safety reconcile — the socket guarantees nothing (§5.4)
     if (!this.safetyTimer) {
       this.safetyTimer = setInterval(() => void this.refreshActiveMessages(), 30000);
@@ -620,11 +680,7 @@ export class RootStore {
       this.typingTimer = null;
     }
     if (this.rt) {
-      try {
-        this.rt.disconnect();
-      } catch {
-        /* ignore */
-      }
+      this.rt.close();
       this.rt = null;
     }
     runInAction(() => {
@@ -637,7 +693,7 @@ export class RootStore {
   private syncQueue = async () => {
     const seq = this.queueSeq; // merge belongs to the current filter generation
     try {
-      const page = await adminApi.listConversations(this.queueParams);
+      const page = await listConversations(http, this.queueParams);
       if (seq !== this.queueSeq) return; // filter changed mid-flight — drop the merge
       const profiles = profilesOf(page.contacts);
       runInAction(() => {
@@ -673,11 +729,18 @@ export class RootStore {
     }
   };
 
-  private handleEvent = (channel: string, env: RealtimeEnvelope) => {
+  private handleEvent = (channel: string, env: Envelope) => {
     // A profile changed somewhere in the tenant. The event names no one — a
     // profile is only readable through a conversation this operator's scope
     // admits — so re-read: the queue for the list, the open thread for the row
     // that may sit beyond page one.
+    // Triage events arrive on the queue channel (operators) or the requester's
+    // own conversation channels; a member-only principal receives nothing else.
+    const cid = env.conversation_id;
+    if (channel.startsWith("queue:") || (cid && this.triage.owns(cid)) || this.memberOnly) {
+      this.triage.onRealtime(env);
+      return;
+    }
     if (env.type === "contact.updated") {
       void this.syncQueue();
       void this.refreshActiveMessages();
@@ -723,7 +786,7 @@ export class RootStore {
     }
   };
 
-  private onMessageCreated = (env: RealtimeEnvelope) => {
+  private onMessageCreated = (env: Envelope) => {
     const cid = env.conversation_id;
     if (!cid) return;
     const conv = this.convs.find((c) => c.id === cid);
@@ -736,7 +799,7 @@ export class RootStore {
       if (this.peerAccess) this.peer.onTenantNudge(cid);
       return;
     }
-    const m = env.data as ApiMessage;
+    const m = env.data as Message;
     if (conv.messages.some((x) => x.id === m.id)) return; // dedupe own/echoed sends
     const msg = mapRealtimeMessage(m, conv);
     runInAction(() => {
@@ -755,7 +818,7 @@ export class RootStore {
     });
   };
 
-  private onAssignmentUpdated = (env: RealtimeEnvelope) => {
+  private onAssignmentUpdated = (env: Envelope) => {
     const cid = env.conversation_id;
     const conv = cid ? this.convs.find((c) => c.id === cid) : null;
     if (!conv) {
@@ -771,7 +834,7 @@ export class RootStore {
     }
   };
 
-  private onConversationClosed = (env: RealtimeEnvelope) => {
+  private onConversationClosed = (env: Envelope) => {
     const conv = env.conversation_id ? this.convs.find((c) => c.id === env.conversation_id) : null;
     if (!conv) return;
     runInAction(() => {
@@ -781,7 +844,7 @@ export class RootStore {
     });
   };
 
-  private onTyping = (env: RealtimeEnvelope) => {
+  private onTyping = (env: Envelope) => {
     if (env.conversation_id !== this.activeId) return;
     runInAction(() => {
       this.typingConvId = env.conversation_id ?? null;
@@ -800,20 +863,24 @@ export class RootStore {
   // no capability for, so it is neither offered nor reachable.
   get navViews(): InboxView[] {
     const views: InboxView[] = [];
-    if (this.canReadConversations) views.push("inbox");
+    if (this.triageAccess) views.push("triage");
+    if (this.supportAccess) views.push("inbox");
     if (this.peerAccess) views.push("peer");
     for (const [view, action] of NAV_ACTIONS) if (this.can(action)) views.push(view);
     return views;
   }
 
+  // Tech support leads the rail, but an operator still lands in the inbox.
   get landingView(): InboxView {
-    return this.navViews[0] ?? "inbox";
+    const nav = this.navViews;
+    return nav.includes("inbox") ? "inbox" : (nav[0] ?? "inbox");
   }
 
   goView = (view: InboxView) => {
     if (!this.navViews.includes(view)) return;
     this.inboxView = view;
     if (view === "peer" && !this.peer.loaded) void this.peer.loadConversations();
+    if (view === "triage" && !this.triage.loaded) void this.triage.load();
     if (view === "settings" && !this.settingsLoaded) void this.loadSettings();
     if (view === "translations") void this.translations.load();
   };
@@ -868,7 +935,7 @@ export class RootStore {
   };
 
   // Apply the tenant-wide badge counts from a queue page response.
-  private applyCounts = (page: ApiQueuePage) => {
+  private applyCounts = (page: ConversationPage) => {
     if (!page.counts) return; // emitted only for the support queue
     this.openCount = page.counts.open;
     this.youCount = page.counts.you;
@@ -1024,7 +1091,7 @@ export class RootStore {
       this.searching = true;
     });
     try {
-      const page = await adminApi.listConversations({ kind: "support", q });
+      const page = await listConversations(http, { kind: "support", q, expand: WITH_PROFILES });
       const built = await this.hydrateHits(page.items, profilesOf(page.contacts));
       if (seq !== this.searchSeq) return; // stale response
       runInAction(() => {
@@ -1053,10 +1120,11 @@ export class RootStore {
       this.loadingMore = true;
     });
     try {
-      const page = await adminApi.listConversations({
+      const page = await listConversations(http, {
         kind: "support",
         q: this.searchQuery.trim(),
         cursor: this.searchCursor,
+        expand: WITH_PROFILES,
       });
       const built = await this.hydrateHits(page.items, profilesOf(page.contacts));
       if (seq !== this.searchSeq) return; // query changed mid-flight
@@ -1077,10 +1145,10 @@ export class RootStore {
 
   // hydrateHits turns list rows into conversations. Rows arrive whole from the
   // list, so only the thread is fetched.
-  private hydrateHits = async (items: ApiQueueConversation[], profiles: Profiles): Promise<Conversation[]> =>
+  private hydrateHits = async (items: ConversationRow[], profiles: Profiles): Promise<Conversation[]> =>
     Promise.all(
       items.map(async (hit) => {
-        const page = await adminApi.listMessages(hit.id);
+        const page = await listMessages(http, hit.id);
         const c = buildConversation(hit, page, undefined, profiles);
         if (hit.snippet) c.preview = hit.snippet;
         return c;
@@ -1112,7 +1180,7 @@ export class RootStore {
     this.sending = true;
     const refs = this.atts.refs();
     try {
-      await adminApi.postMessage(conv.id, text, internal ? "internal" : "participants", refs);
+      await sendMessage(http, conv.id, { body: text, visibility: internal ? "internal" : "participants", attachments: refs });
       runInAction(() => {
         this.composer = "";
         this.atts.clear();
@@ -1134,7 +1202,7 @@ export class RootStore {
     if (!conv?.assignmentId || this.actionBusy) return;
     this.actionBusy = true;
     try {
-      await adminApi.claimAssignment(conv.assignmentId);
+      await claimAssignment(http, conv.assignmentId);
       runInAction(() => {
         const c = this.convs.find((x) => x.id === conv.id);
         if (c) {
@@ -1159,7 +1227,7 @@ export class RootStore {
     if (!conv || this.actionBusy) return;
     this.actionBusy = true;
     try {
-      await adminApi.closeConversation(conv.id);
+      await closeConversation(http, conv.id);
       runInAction(() => {
         const c = this.convs.find((x) => x.id === conv.id);
         if (c) {
@@ -1183,11 +1251,12 @@ export class RootStore {
   // ─────────────────────────── settings ───────────────────────────
   loadSettings = async () => {
     try {
-      const [keys, webhooks, team, roles, email, brands, pushCh] = await Promise.all([
+      const [keys, webhooks, team, roles, queues, email, brands, pushCh] = await Promise.all([
         adminApi.listApiKeys(),
         adminApi.listWebhooks(),
         adminApi.listTeam(),
         adminApi.listRoles(),
+        adminApi.listQueues(),
         adminApi.getEmailChannel(),
         adminApi.getBrands(),
         // The push credential is the owner's alone, so an admin is refused it —
@@ -1199,6 +1268,7 @@ export class RootStore {
         this.webhooks = webhooks.map(mapWebhook);
         this.team = team.map(mapTeamMember);
         this.roleDefs = roles.roles;
+        this.queues = queues;
         this.emailChannel = mapEmailChannel(email.data);
         this.emailChannelVersion = email.etag;
         this.pushChannel = pushCh;
@@ -1279,24 +1349,7 @@ export class RootStore {
   // Upload a logo/icon to the bucket via the shared signed-PUT flow (same as
   // message attachments) and return the object key to store on the config —
   // assets live in storage, not as base64 in the brand row.
-  uploadBrandAsset = async (file: File): Promise<string> => {
-    const mime = file.type || "application/octet-stream";
-    const grant = await adminApi.issueUpload(mime, file.size, file.name);
-    // Local backend returns an absolute public-origin URL; PUT to its relative
-    // /v1 path so it goes same-origin through the Next proxy. Cloud signed URLs
-    // (no local route) are used as-is.
-    const marker = "/v1/uploads/local/";
-    const at = grant.upload_url.indexOf(marker);
-    const putUrl = at >= 0 ? grant.upload_url.slice(at) : grant.upload_url;
-    const res = await fetch(putUrl, {
-      method: "PUT",
-      body: file,
-      headers: { "Content-Type": mime },
-      credentials: at >= 0 ? "include" : "omit",
-    });
-    if (!res.ok) throw new Error("upload failed");
-    return grant.object_key;
-  };
+  uploadBrandAsset = (file: File): Promise<string> => putUpload(file, file.type || "application/octet-stream");
 
   // New brand clones the active config (minus logo) and opens rename immediately.
   // The temp id (no br_ prefix) tells the backend to mint a real id on save.
@@ -1516,6 +1569,26 @@ export class RootStore {
       /* leave the key in place on failure */
     }
   };
+  // An actor key signs in as its service account, so it is listed there, not here.
+  get serverKeys(): ApiKey[] {
+    return this.keys.filter((k) => !k.actorId);
+  }
+  keysOf = (actorId: string): ApiKey[] => this.keys.filter((k) => k.actorId === actorId);
+  issueServiceKey = async (actorId: string, label: string) => {
+    runInAction(() => (this.teamError = null));
+    try {
+      const created = await adminApi.createServiceKey(actorId, label.trim() || "Service key");
+      runInAction(() => {
+        this.revealedKey = created.key;
+        this.keyDialog = true;
+      });
+    } catch (e) {
+      runInAction(() => (this.teamError = errorText(e)));
+      return false;
+    }
+    await this.reloadKeys().catch(() => undefined);
+    return true;
+  };
 
   toggleWebhook = async (id: string, v: boolean) => {
     const prev = this.webhooks.find((w) => w.id === id)?.active;
@@ -1555,7 +1628,14 @@ export class RootStore {
     if (source === "translation_locales") {
       return [...new Set(projects.flatMap((p) => p.locales))].sort();
     }
+    if (source === "queues") return this.queues.map((q) => q.key);
     return [];
+  };
+
+  /** How a scope value reads on screen; the stored value is the key. */
+  scopeOptionLabel = (source: string | undefined, value: string): string => {
+    if (source === "queues") return this.queues.find((q) => q.key === value)?.label || value;
+    return value;
   };
 
   memberName = (memberId: string): string =>
@@ -1591,6 +1671,41 @@ export class RootStore {
       runInAction(() => (this.teamError = errorText(e)));
       return null;
     }
+  };
+
+  /** A no-login member for an automated actor. Returns its id, or null with
+   *  teamError set. */
+  createServiceAccount = async (name: string, displayName: string, role: PlatformRole, scope: RoleScope) => {
+    runInAction(() => (this.teamError = null));
+    try {
+      const created = await adminApi.createServiceAccount({
+        name: name.trim(),
+        display_name: displayName.trim(),
+        role,
+        scope,
+      });
+      await this.reloadTeam();
+      return created.id;
+    } catch (e) {
+      runInAction(() => (this.teamError = errorText(e)));
+      return null;
+    }
+  };
+
+  saveQueue = async (key: string, settings: QueueSettings) => {
+    runInAction(() => (this.queueError = null));
+    try {
+      await adminApi.putQueue(key.trim(), settings);
+      const queues = await adminApi.listQueues();
+      runInAction(() => (this.queues = queues));
+      return true;
+    } catch (e) {
+      runInAction(() => (this.queueError = errorText(e)));
+      return false;
+    }
+  };
+  clearQueueError = () => {
+    this.queueError = null;
   };
 
   addRole = async (memberId: string, role: PlatformRole) => {

@@ -85,6 +85,25 @@ func (r *conversationRepo) List(ctx context.Context, scope policy.ResourceScope,
 // applyScope translates the policy ceiling into SQL, so nothing downstream sees
 // a row the caller may not.
 func applyScope(db *gorm.DB, scope policy.ResourceScope) *gorm.DB {
+	actor, queues, ok := scope.OwnRequests()
+	if !ok {
+		return applyCeiling(db, scope)
+	}
+	// An operator who is also a requester: their ceiling, or their own requests.
+	ceiling := applyCeiling(db.Session(&gorm.Session{NewDB: true}), scope)
+	own := db.Session(&gorm.Session{NewDB: true}).
+		Where("conversations.kind = ?", models.KindSupport).
+		Where(`EXISTS (SELECT 1 FROM conversation_members om
+			WHERE om.conversation_id = conversations.id AND om.left_at IS NULL
+			  AND om.internal_actor_id = ?)`, actor)
+	if queues != nil {
+		own = own.Where("conversations.queue IN ?", queues)
+	}
+	return db.Where(ceiling.Or(own))
+}
+
+func applyCeiling(db *gorm.DB, scope policy.ResourceScope) *gorm.DB {
+	db = db.Where("1 = 1")
 	if kinds := scope.AllowedKinds(); len(kinds) > 0 {
 		db = db.Where("conversations.kind IN ?", kinds)
 	}
@@ -92,6 +111,14 @@ func applyScope(db *gorm.DB, scope policy.ResourceScope) *gorm.DB {
 		db = db.Where(`EXISTS (SELECT 1 FROM conversation_members sm
 			WHERE sm.conversation_id = conversations.id AND sm.left_at IS NULL
 			  AND sm.external_user_id = ?)`, pt)
+	}
+	if actor, ok := scope.MemberActor(); ok {
+		db = db.Where(`EXISTS (SELECT 1 FROM conversation_members am
+			WHERE am.conversation_id = conversations.id AND am.left_at IS NULL
+			  AND am.internal_actor_id = ?)`, actor)
+	}
+	if queues := scope.AllowedQueues(); len(queues) > 0 {
+		db = db.Where("conversations.kind = ? OR conversations.queue IN ?", models.KindPeer, queues)
 	}
 	if scope.RequiresAssignment() {
 		// An assignment must EXIST — anyone's, not the caller's. Archived support is
@@ -108,6 +135,9 @@ func applyFilters(db *gorm.DB, q store.ConversationQuery) *gorm.DB {
 	}
 	if q.Status != nil {
 		db = db.Where("conversations.status = ?", *q.Status)
+	}
+	if q.Queue != "" {
+		db = db.Where("conversations.kind = ? OR conversations.queue = ?", models.KindPeer, q.Queue)
 	}
 	if q.AssignmentStatus != nil {
 		db = db.Where("a.status = ?", *q.AssignmentStatus)

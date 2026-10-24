@@ -1,5 +1,10 @@
 import { InboxApp } from "@/components/inbox/InboxApp";
+import { StoreProvider } from "@/store/StoreProvider";
 
 export default function Page() {
-  return <InboxApp />;
+  return (
+    <StoreProvider>
+      <InboxApp />
+    </StoreProvider>
+  );
 }

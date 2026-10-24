@@ -228,7 +228,7 @@ func TestForwardedThreadsBySenderSubject(t *testing.T) {
 
 	// Closed is terminal (§1): a later email with the same sender+subject starts a
 	// new conversation rather than reopening the closed one.
-	if err := h.Svc.CloseConversation(ctx, tenantID, a); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenantID, a, ""); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if got := send("cust@x.com", "Order 9001"); got == a {

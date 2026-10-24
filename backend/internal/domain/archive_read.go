@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/bitllow/sild/backend/internal/views"
 
 	"github.com/bitllow/sild/backend/internal/storage"
 
@@ -83,6 +84,7 @@ func (s *Service) ArchivedMessages(ctx context.Context, tenantID, convID string,
 			if v, _ := m["visibility"].(string); v == string(models.VisibilityInternal) {
 				continue // strip internal notes for non-agents (§5.6)
 			}
+			m, _ = views.WithoutInternalParts(m)
 		}
 		msgs = append(msgs, m)
 	}

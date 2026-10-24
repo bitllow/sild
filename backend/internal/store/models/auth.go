@@ -12,11 +12,14 @@ import (
 // never retrievable. Prefix is a public, indexed lookup component so verification
 // is O(1) (no scan): key string is sild_live_<prefix>_<secret>.
 type APIKey struct {
-	ID        string `gorm:"primaryKey;size:40"`
-	TenantID  string `gorm:"size:40;not null;index:idx_apikey_tenant"`
-	Prefix    string `gorm:"size:24;not null;uniqueIndex"` // lookup key
-	Hash      string `gorm:"size:128;not null"`            // sha256 hex of the secret part
-	Label     string `gorm:"size:255"`
+	ID       string `gorm:"primaryKey;size:40"`
+	TenantID string `gorm:"size:40;not null;index:idx_apikey_tenant"`
+	Prefix   string `gorm:"size:24;not null;uniqueIndex"` // lookup key
+	// ActorID binds the key to a service account: it then authenticates as that
+	// account with its roles, never as a tenant-wide server key.
+	ActorID   *string `gorm:"size:40;index"`
+	Hash      string  `gorm:"size:128;not null"` // sha256 hex of the secret part
+	Label     string  `gorm:"size:255"`
 	RevokedAt *time.Time
 	CreatedAt time.Time
 }
@@ -31,12 +34,22 @@ func (k *APIKey) BeforeCreate(*gorm.DB) error {
 // Active reports whether the key may still authenticate.
 func (k *APIKey) Active() bool { return k.RevokedAt == nil }
 
+// AdminKind tells a person from a service account, which has no login and
+// acts only through its API key.
+type AdminKind string
+
+const (
+	AdminHuman   AdminKind = "human"
+	AdminService AdminKind = "service"
+)
+
 // AdminUser is an inbox operator (§2.4, §7). Separate identity space from chat
 // end-users; authenticated via Google OIDC.
 type AdminUser struct {
-	ID       string `gorm:"primaryKey;size:40"`
-	TenantID string `gorm:"size:40;not null;uniqueIndex:idx_admin_tenant_email"`
-	Email    string `gorm:"size:320;not null;uniqueIndex:idx_admin_tenant_email"`
+	ID       string    `gorm:"primaryKey;size:40"`
+	Kind     AdminKind `gorm:"size:16;not null;default:'human'"`
+	TenantID string    `gorm:"size:40;not null;uniqueIndex:idx_admin_tenant_email;uniqueIndex:idx_admin_tenant_external_sub,priority:1"`
+	Email    string    `gorm:"size:320;not null;uniqueIndex:idx_admin_tenant_email"`
 	// FirstName/LastName are the operator's display name (Settings → Team). The
 	// first name is surfaced to end-users on the messenger surfaces (web widget +
 	// SDK) as the agent's reply name, in place of the generic "Support".
@@ -46,8 +59,11 @@ type AdminUser struct {
 	// alternative to Google OIDC); nil for OIDC-only admins.
 	PasswordHash *string `gorm:"size:255"`
 	// Locale is the language this operator reads. Empty means unknown.
-	Locale    string `gorm:"size:16"`
-	CreatedAt time.Time
+	Locale string `gorm:"size:16"`
+	// ExternalSub is this member's identity at the tenant's integrator, the only
+	// key embedded sign-in matches on. Set by an admin; never derived from email.
+	ExternalSub *string `gorm:"size:255;uniqueIndex:idx_admin_tenant_external_sub,priority:2"`
+	CreatedAt   time.Time
 }
 
 func (a *AdminUser) BeforeCreate(*gorm.DB) error {

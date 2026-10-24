@@ -1,8 +1,12 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures";
 import { gotoInbox, gotoSettings, switchAt } from "../../support/inbox";
 import { ADMIN } from "../../support/env";
 
 test.describe.configure({ mode: "serial" });
+
+// The dev seed has more members holding these roles; the specs speak about the admin's own row.
+const adminRow = (page: Page) => page.getByTestId("team-row").filter({ hasText: ADMIN.email });
 
 test.describe("settings · team", () => {
   test("a member's access reads as the roles they hold", async ({ page }) => {
@@ -12,15 +16,15 @@ test.describe("settings · team", () => {
     await expect(page.getByText(ADMIN.email)).toBeVisible();
     // The dev seed gives the first member owner plus the agent role that reaches
     // peer conversations — two chips, not one role in a dropdown.
-    await expect(page.getByTestId("assignment-owner")).toBeVisible();
-    await expect(page.getByTestId("assignment-agent")).toContainText("peer conversations");
+    await expect(adminRow(page).getByTestId("assignment-owner")).toBeVisible();
+    await expect(adminRow(page).getByTestId("assignment-agent")).toContainText("peer conversations");
   });
 
   test("the last owner cannot step down", async ({ page }) => {
     await gotoInbox(page);
     await gotoSettings(page, "Team");
 
-    await page.getByTestId("assignment-owner").click();
+    await adminRow(page).getByTestId("assignment-owner").click();
     await page.getByTestId("remove-role").click();
 
     // The server refuses and the dialog stays open with the reason on the page.
@@ -30,7 +34,7 @@ test.describe("settings · team", () => {
 
     await page.reload();
     await gotoSettings(page, "Team");
-    await expect(page.getByTestId("assignment-owner")).toBeVisible();
+    await expect(adminRow(page).getByTestId("assignment-owner")).toBeVisible();
   });
 
   test("peer access is a dimension of the agent role, and losing it hides the surface", async ({ page }) => {
@@ -40,20 +44,20 @@ test.describe("settings · team", () => {
     const peerNav = page.getByRole("button", { name: "Peer conversations", exact: true });
     await expect(peerNav).toHaveCount(1);
 
-    await page.getByTestId("assignment-agent").click();
+    await adminRow(page).getByTestId("assignment-agent").click();
     const peer = switchAt(page, 0);
     await expect(peer.input).toBeChecked();
     await peer.label.click();
     await page.getByRole("button", { name: "Done" }).click();
 
-    await expect(page.getByTestId("assignment-agent")).toContainText("no peer conversations");
+    await expect(adminRow(page).getByTestId("assignment-agent")).not.toContainText("peer conversations");
     await expect(peerNav).toHaveCount(0);
 
     // Restore it, so the surface is there for the specs that follow.
-    await page.getByTestId("assignment-agent").click();
+    await adminRow(page).getByTestId("assignment-agent").click();
     await switchAt(page, 0).label.click();
     await page.getByRole("button", { name: "Done" }).click();
-    await expect(page.getByTestId("assignment-agent")).not.toContainText("no peer");
+    await expect(adminRow(page).getByTestId("assignment-agent")).toContainText("peer conversations");
     await expect(peerNav).toHaveCount(1);
   });
 

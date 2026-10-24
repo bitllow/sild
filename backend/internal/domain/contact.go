@@ -82,7 +82,8 @@ func (s *Service) MemberNames(ctx context.Context, tenantID string, members []mo
 	if err != nil {
 		return views.Profiles{}, err
 	}
-	return views.Profiles{Names: names, Agents: s.agentNames(ctx, tenantID, actors)}, nil
+	agents, subs := s.agentIdentities(ctx, tenantID, actors)
+	return views.Profiles{Names: names, Agents: agents, ExternalSubs: subs}, nil
 }
 
 // MemberProfiles is MemberNames plus the profile blobs, for a caller that asked

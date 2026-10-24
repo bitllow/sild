@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
@@ -87,6 +88,7 @@ func (h *Handler) postMessage(c *gin.Context) {
 			ObjectKey   string             `json:"object_key"`
 			Disposition models.Disposition `json:"disposition"`
 		} `json:"attachments"`
+		Parts json.RawMessage `json:"parts"`
 	}
 	if !httpx.DecodeJSON(c, &req) {
 		return
@@ -106,7 +108,7 @@ func (h *Handler) postMessage(c *gin.Context) {
 
 	in := domain.SendInput{
 		Body: req.Body, Visibility: req.Visibility, Channel: req.Channel,
-		AllowInternal: apiutil.IsAgent(c), Conv: conv,
+		AllowInternal: apiutil.Can(c, policy.NotesWrite), Conv: conv, Parts: req.Parts,
 	}
 	if req.ClientMsgID != "" {
 		in.ClientMsgID = &req.ClientMsgID
@@ -119,6 +121,9 @@ func (h *Handler) postMessage(c *gin.Context) {
 		in.External = &uid
 	case principal.KindAdmin:
 		in.SenderKind = models.SenderAgent
+		if p.Service {
+			in.SenderKind = models.SenderBot
+		}
 		aid := p.AdminID
 		in.Internal = &aid
 	default: // API key ingress — sender comes from the body
@@ -147,7 +152,8 @@ func (h *Handler) postMessage(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	out := views.Message(msg, h.attachmentURL(c))
+	// Only an assistant sends parts, so the full form reaches only their author.
+	out := views.MessageFull(msg, h.attachmentURL(c))
 	if msg.InternalActorID != nil {
 		if name := h.svc.AgentDisplayName(c.Request.Context(), apiutil.Tenant(c), *msg.InternalActorID); name != "" {
 			out["author_name"] = name
@@ -168,7 +174,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesRead, convID) {
 		return
 	}
-	includeInternal := apiutil.IsAgent(c)
+	includeInternal := apiutil.Can(c, policy.NotesRead)
 	urlFn := h.attachmentURL(c)
 	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
 
@@ -316,15 +322,16 @@ func (h *Handler) typing(c *gin.Context) {
 
 // closeConversation: POST /v1/conversations/:id/close. Agent/key only (§1).
 func (h *Handler) closeConversation(c *gin.Context) {
-	if !apiutil.IsAgent(c) {
-		httpx.Forbidden(c, "only agents may close a conversation")
-		return
-	}
-	// Being an agent isn't enough — closing needs the same scope check as reading.
 	if !apiutil.AuthorizeConversation(c, h.svc, policy.ConversationsClose, c.Param("id")) {
 		return
 	}
-	if err := h.svc.CloseConversation(c.Request.Context(), apiutil.Tenant(c), c.Param("id")); err != nil {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if !httpx.DecodeJSONOptional(c, &req) {
+		return
+	}
+	if err := h.svc.CloseConversation(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), req.Reason); err != nil {
 		apiutil.Fail(c, err)
 		return
 	}
@@ -368,20 +375,19 @@ func (h *Handler) attachmentURL(c *gin.Context) views.URLFunc {
 	}
 }
 
-func renderMessages(msgs []models.Message, urlFn views.URLFunc) []map[string]any {
-	out := make([]map[string]any, 0, len(msgs))
-	for i := range msgs {
-		out = append(out, views.Message(&msgs[i], urlFn))
-	}
-	return out
-}
-
 // renderMessagesAuthored renders a page of messages and stamps agent-authored
 // ones with the operator's display name (author_name), so the web widget shows a
 // real first name in place of "Support". Names are resolved once per distinct
 // actor per page.
 func (h *Handler) renderMessagesAuthored(c *gin.Context, msgs []models.Message, urlFn views.URLFunc) []map[string]any {
-	out := renderMessages(msgs, urlFn)
+	render := views.Message
+	if apiutil.Can(c, policy.NotesRead) {
+		render = views.MessageFull
+	}
+	out := make([]map[string]any, 0, len(msgs))
+	for i := range msgs {
+		out = append(out, render(&msgs[i], urlFn))
+	}
 	tenant := apiutil.Tenant(c)
 	cache := make(map[string]string)
 	for i := range msgs {
@@ -399,4 +405,30 @@ func (h *Handler) renderMessagesAuthored(c *gin.Context, msgs []models.Message, 
 		}
 	}
 	return out
+}
+
+// patchMessageParts: PATCH /v1/conversations/:id/messages/:mid. The assistant
+// edits the parts of its own message, e.g. a step finishing.
+func (h *Handler) patchMessageParts(c *gin.Context) {
+	convID := c.Param("id")
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesSend, convID) {
+		return
+	}
+	var req struct {
+		Parts json.RawMessage `json:"parts"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	p := middleware.Get(c)
+	if !p.Service {
+		httpx.Forbidden(c, "only an assistant edits message parts")
+		return
+	}
+	out, err := h.svc.UpdateMessageParts(c.Request.Context(), apiutil.Tenant(c), convID, c.Param("mid"), p.AdminID, req.Parts)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
 }

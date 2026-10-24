@@ -1,6 +1,6 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { uploadFile } from "@/api/upload";
-import type { AttachmentRef } from "@/api/admin";
+import type { AttachmentRef } from "@sild/client";
 import type { PendingAttachment } from "./types";
 
 // AttachmentQueue owns the "files queued for the next message" state that every

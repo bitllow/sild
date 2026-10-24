@@ -36,6 +36,13 @@ type Query struct {
 	// RequiresAssignment restricts support conversations to those carrying an
 	// assignment — the plain-agent ceiling.
 	RequiresAssignment bool
+	// MemberActor restricts to conversations this admin id is a member of — the
+	// requester ceiling.
+	MemberActor string
+	// Queues is the scope's queue ceiling and Queue the caller's queue filter;
+	// both leave peer conversations alone, as the list does.
+	Queues []string
+	Queue  string
 
 	Before string
 	Limit  int

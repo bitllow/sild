@@ -7,6 +7,7 @@ import {
   type TranslationKeyParams,
   type TranslationStateFilter,
 } from "@/api/admin";
+import type { FetchPage } from "@sild/client";
 import { errorText } from "@/api/client";
 
 const PAGE_SIZE = 50;
@@ -15,9 +16,6 @@ const PAGE_SIZE = 50;
 const SAVE_DELAY = 500;
 
 export type SaveState = "saving" | "saved" | "failed";
-
-type PageOf<T> = { items: T[]; next_cursor: string | null; has_more: boolean };
-type FetchPage<T> = (cursor: string | null) => Promise<PageOf<T>>;
 
 /** One cursor-paged list: page one replaces, further pages append. */
 class Paged<T> {

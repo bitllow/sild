@@ -2,6 +2,8 @@ package gormstore
 
 import (
 	"context"
+	"gorm.io/datatypes"
+	"time"
 
 	"github.com/bitllow/sild/backend/internal/store"
 	"github.com/bitllow/sild/backend/internal/store/models"
@@ -12,6 +14,19 @@ type messageRepo struct{ db *gorm.DB }
 
 func (r *messageRepo) Create(ctx context.Context, m *models.Message) error {
 	return r.db.WithContext(ctx).Create(m).Error
+}
+
+func (r *messageRepo) UpdateParts(ctx context.Context, tenantID, id string, parts []byte, at time.Time) error {
+	res := r.db.WithContext(ctx).Model(&models.Message{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Updates(map[string]any{"parts": datatypes.JSON(parts), "updated_at": at})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func (r *messageRepo) Get(ctx context.Context, tenantID, id string) (*models.Message, error) {

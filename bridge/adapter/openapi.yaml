@@ -1,0 +1,366 @@
+openapi: 3.1.0
+info:
+  title: Sild adapter contract
+  version: 1.0.0
+  summary: What a data provider's adapter serves to a Sild bridge.
+  description: |
+    A provider ships an adapter: a service, hosted by the provider, that answers
+    a Sild bridge's information requests from the provider's own systems. The
+    bridge only ever receives data; nothing in this contract lets it call the
+    provider's systems directly.
+
+    Paths below are relative to the adapter's registered base URL. One base URL
+    and one secret per Sild tenant; an adapter serving several tenants mounts
+    each under its own base URL.
+
+    ## Bridge → adapter: request signing
+
+    Every request (including file downloads) carries:
+
+    | header             | value                                                    |
+    |--------------------|----------------------------------------------------------|
+    | `X-Sild-Timestamp` | Unix seconds                                             |
+    | `X-Sild-Nonce`     | 16–64 chars of `[A-Za-z0-9_-]`, unique per request       |
+    | `X-Sild-Signature` | base64url(HMAC-SHA256(tenant secret, canonical string))  |
+
+    The canonical string is these six lines joined by `\n`:
+
+    ```
+    SILD-HMAC-SHA256
+    <METHOD, upper case>
+    <path + query exactly as received, e.g. /deliveries?cursor=12&wait=30>
+    <hex sha256 of the raw body; of the empty string when there is none>
+    <X-Sild-Timestamp>
+    <X-Sild-Nonce>
+    ```
+
+    The adapter refuses (401) a timestamp more than 300 s from its clock, a bad
+    signature, and a nonce it has seen within the last 600 s. A nonce is
+    recorded only after the signature checks out. A proxy in front of the
+    adapter must not rewrite the path or query.
+
+    ## Adapter → bridge: delivery signing
+
+    A delivery travels as a compact JWS (RFC 7515), `alg` `EdDSA` over Ed25519,
+    header `{"alg":"EdDSA","typ":"sild-delivery+jws"}`. Its payload is
+    `DeliveryClaims`. The bridge pins the adapter's public key (the raw 32-byte
+    key, base64url — the JWK `x`), accepts no other algorithm, and rejects a
+    delivery that is expired, whose `delivery.id` differs from `request_id`, or
+    that does not answer a request the bridge has outstanding for exactly that
+    `conversation_ref`. A delivery is accepted once.
+
+    ## Limits
+
+    | what                         | limit                                         |
+    |------------------------------|-----------------------------------------------|
+    | `summary`                    | one line, ≤ 1 KiB UTF-8                       |
+    | inline file                  | ≤ 1 MiB decoded; larger files go by `url`     |
+    | files per delivery           | bridge-configured, default 10                 |
+    | bytes per delivery           | bridge-configured, default 8 MiB              |
+    | bytes per conversation       | bridge-configured, default 64 MiB             |
+    | request body                 | ≤ 64 KiB                                      |
+    | `wait` on `/deliveries`      | ≤ 30 s                                        |
+    | `text` of `/instructions`    | ≤ 8 KiB UTF-8                                 |
+
+    A delivery over a bridge limit is dropped as invalid and the requester is
+    told the data is not available.
+
+    ## Assistant instructions
+
+    `GET /instructions` is optional. It carries the provider's own text for the
+    assistant: what the product is, its terms, the tone and language to answer
+    in, and where to send people for what the assistant cannot do. It ships with
+    the adapter, so it is versioned with the provider's code.
+
+    The bridge appends it, fenced and labelled with the adapter's host, after
+    Sild's fixed brief, whose rules it cannot override. A text over the limit or
+    a body of the wrong shape is logged and ignored; 404 means none. The bridge
+    caches the answer for a few minutes and keeps the last good one while the
+    adapter is unreachable. A conversation under way may keep the text it
+    started with.
+
+    ## File URLs
+
+    A file delivered by `url` must be on the adapter's own host (same scheme,
+    host and port as the base URL). The bridge signs the GET like any other
+    request, follows no redirect, refuses any host that resolves to a private,
+    loopback, link-local or otherwise non-public address, enforces the declared
+    `size` and checks `sha256`. URLs should be short-lived.
+
+    ## Params schema subset
+
+    `params` in the catalog is a JSON Schema using only: `type` (`string`,
+    `number`, `integer`, `boolean`, `object`), `properties`, `required`,
+    `additionalProperties` (boolean), `enum`, `minimum`, `maximum`, `pattern`,
+    plus the annotations `title`, `description`, `examples`, `default`,
+    `$schema`, `$comment`. The top level is `type: object`. An entry using
+    anything else is dropped from the catalog by the bridge.
+
+    ## What reaches whom
+
+    `summary` is the only delivery field that reaches Sild, and is shown to the
+    requester. Files reach the bridge's runner box only. Redaction and the
+    decision whether `requester` may see the data are the adapter's job.
+
+servers:
+  - url: https://adapter.provider.example/sild
+
+security:
+  - sildSignature: []
+
+paths:
+  /catalog:
+    get:
+      operationId: getCatalog
+      summary: Sources this adapter offers.
+      responses:
+        '200':
+          description: The catalog.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Source' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /instructions:
+    get:
+      operationId: getInstructions
+      summary: The provider's instructions for the assistant. Optional.
+      responses:
+        '200':
+          description: The instructions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instructions' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: This adapter has no instructions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /requests:
+    post:
+      operationId: createRequest
+      summary: Ask for data from one source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InfoRequest' }
+      responses:
+        '201':
+          description: Answered at once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivery]
+                properties:
+                  delivery: { $ref: '#/components/schemas/SignedDelivery' }
+        '202':
+          description: Accepted; the delivery will appear on `/deliveries`, or never.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: The requester may not see this data.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [declined, reason]
+                properties:
+                  declined: { const: true }
+                  reason: { type: string, description: 'Shown to the requester; one line.' }
+        '404':
+          description: Unknown source.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: A request with this id was already received.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413':
+          description: Body over 64 KiB.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /deliveries:
+    get:
+      operationId: listDeliveries
+      summary: Long-poll for async deliveries.
+      description: |
+        Returns deliveries published after `cursor`, oldest first. With none
+        available, holds the request up to `wait` seconds for one to arrive.
+        An absent or empty cursor starts at the oldest delivery still
+        retained; adapters may drop deliveries once their `exp` has passed.
+        `next_cursor` is opaque; pass it back unchanged. A cursor must stay
+        valid across an adapter restart: deliveries published afterwards come
+        after it, and one the adapter cannot place is treated as empty.
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: wait
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 30, default: 0 }
+      responses:
+        '200':
+          description: A page of deliveries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/SignedDelivery' }
+                  next_cursor: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /files/{token}:
+    get:
+      operationId: getFile
+      summary: A file referenced by a delivery's `url`. The path is the adapter's choice.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The raw bytes; length and sha256 match the delivery.
+          content:
+            application/octet-stream: {}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    sildSignature:
+      type: apiKey
+      in: header
+      name: X-Sild-Signature
+      description: HMAC request signature; see the description above. Requires X-Sild-Timestamp and X-Sild-Nonce.
+
+  responses:
+    Unauthorized:
+      description: Missing, stale, replayed or wrong signature.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Error:
+      description: Bad request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Source:
+      type: object
+      required: [source, description, params, max_wait_seconds]
+      properties:
+        source:
+          type: string
+          pattern: '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$'
+          examples: [driver.devices]
+        description:
+          type: string
+          description: Read by the bridge's router to match a need to this source.
+        params:
+          type: object
+          description: JSON Schema (subset above) for the request params.
+        max_wait_seconds:
+          type: number
+          exclusiveMinimum: 0
+          description: After this the bridge stops waiting and tells the requester the data is not available.
+
+    Instructions:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          description: Markdown or plain text, ≤ 8 KiB UTF-8. Appended after Sild's brief; cannot change its rules.
+        version: { type: string, description: 'Opaque; logged by the bridge with each session it reaches.' }
+
+    Requester:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, description: "Sild's identity of the staff member asking; the adapter maps it to its own." }
+        display: { type: string }
+
+    InfoRequest:
+      type: object
+      required: [id, requester, conversation_ref, source, params, reason]
+      properties:
+        id: { type: string, pattern: '^[A-Za-z0-9_-]{8,64}$' }
+        requester: { $ref: '#/components/schemas/Requester' }
+        conversation_ref: { type: string }
+        source: { type: string }
+        params: { type: object }
+        reason: { type: string, description: 'Why the data is wanted, in plain words.' }
+
+    SignedDelivery:
+      type: string
+      description: Compact JWS whose payload is DeliveryClaims.
+      pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'
+
+    DeliveryClaims:
+      type: object
+      required: [request_id, conversation_ref, iat, exp, delivery]
+      properties:
+        request_id: { type: string }
+        conversation_ref: { type: string, description: 'Copied from the request.' }
+        iat: { type: integer }
+        exp: { type: integer, description: 'Unix seconds; the bridge refuses the delivery after this.' }
+        delivery: { $ref: '#/components/schemas/Delivery' }
+
+    Delivery:
+      type: object
+      required: [id, state, summary, files]
+      properties:
+        id: { type: string, description: 'The request id this delivery answers.' }
+        state: { enum: [delivered, declined, expired] }
+        summary:
+          type: string
+          maxLength: 1024
+          description: One line, ≤ 1 KiB UTF-8. For `declined`, the reason.
+        files:
+          type: array
+          items: { $ref: '#/components/schemas/File' }
+
+    File:
+      type: object
+      required: [name, mime, size, sha256]
+      properties:
+        name: { type: string, description: 'Display only. No path separators.' }
+        mime: { type: string }
+        size: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        inline: { type: string, contentEncoding: base64, description: '≤ 1 MiB decoded.' }
+        url: { type: string, format: uri, description: "On the adapter's own host." }
+      oneOf:
+        - required: [inline]
+        - required: [url]

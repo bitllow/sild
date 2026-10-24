@@ -2,6 +2,8 @@ package domain
 
 import (
 	"context"
+	"maps"
+	"slices"
 
 	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/search"
@@ -125,16 +127,23 @@ func (s *Service) renderPage(ctx context.Context, tenantID string, items []store
 	return out, nil
 }
 
-// agentNames resolves distinct actor ids in one pass.
-func (s *Service) agentNames(ctx context.Context, tenantID string, actorIDs []string) map[string]string {
-	out := make(map[string]string, len(actorIDs))
+// agentIdentities resolves actor ids to display names and, for members linked to
+// the tenant's integrator, their identity there.
+func (s *Service) agentIdentities(ctx context.Context, tenantID string, actorIDs []string) (names, subs map[string]string) {
+	names = make(map[string]string, len(actorIDs))
+	subs = map[string]string{}
 	for _, id := range actorIDs {
-		if _, done := out[id]; done {
-			continue
-		}
-		out[id] = s.AgentDisplayName(ctx, tenantID, id)
+		names[id] = ""
 	}
-	return out
+	admins, _ := s.store.Admins().ListByIDs(ctx, tenantID, slices.Collect(maps.Keys(names)))
+	for i := range admins {
+		a := &admins[i]
+		names[a.ID] = a.DisplayName()
+		if a.ExternalSub != nil {
+			subs[a.ID] = *a.ExternalSub
+		}
+	}
+	return names, subs
 }
 
 // searchConversations pages the SEARCH, then hydrates that page: the backend is
@@ -149,7 +158,7 @@ func (s *Service) searchConversations(ctx context.Context, tenantID string, scop
 
 	res, err := s.search.Search(ctx, tenantID, scope, SearchInput{
 		Query: in.Search, CallerActorID: in.CallerActorID, Kind: q.Kind,
-		Status: q.Status, Assignee: q.AssigneeActorID, ConvRole: q.ConvRole,
+		Status: q.Status, Assignee: q.AssigneeActorID, ConvRole: q.ConvRole, Queue: q.Queue,
 		IncludeInternal: in.IncludeInternal,
 		Before:          before, Limit: limit + 1, // +1 probes for another page
 	})

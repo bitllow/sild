@@ -1,6 +1,7 @@
 package models
 
 import (
+	"gorm.io/datatypes"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/id"
@@ -25,6 +26,11 @@ type Message struct {
 	// three dialects, so ingress never collides).
 	ClientMsgID *string `gorm:"size:64;uniqueIndex:idx_msg_idem,priority:2"`
 	CreatedAt   time.Time
+	// Parts are structured blocks (steps, diagnosis) an assistant attaches; Body
+	// stays the plain-text form search, previews and notifications use.
+	Parts datatypes.JSON `gorm:"type:json"`
+	// UpdatedAt is set when the author edits the parts.
+	UpdatedAt *time.Time
 
 	Attachments []MessageAttachment `gorm:"constraint:OnDelete:CASCADE"`
 }

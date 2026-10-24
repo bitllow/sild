@@ -33,14 +33,6 @@ func (s *Service) ListTenants(ctx context.Context) ([]models.Tenant, error) {
 // FindAdminByEmail resolves an admin within one tenant, so the CLI can address an
 // operator by email rather than by generated id.
 func (s *Service) FindAdminByEmail(ctx context.Context, tenantID, email string) (*models.AdminUser, error) {
-	admins, err := s.store.Admins().FindByEmail(ctx, email)
-	if err != nil {
-		return nil, mapStoreErr(err)
-	}
-	for i := range admins {
-		if admins[i].TenantID == tenantID {
-			return &admins[i], nil
-		}
-	}
-	return nil, ErrNotFound
+	a, err := s.store.Admins().GetByEmail(ctx, tenantID, email)
+	return a, mapStoreErr(err)
 }

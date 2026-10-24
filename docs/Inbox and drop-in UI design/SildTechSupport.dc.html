@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/radius.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/shadows.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/motion.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/base.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/styles.css">
+  <script src="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/_ds_bundle.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;font-family:var(--font-sans);color:var(--text-primary)}
+    h2,p{margin:0}
+    a{color:var(--brand)}
+    a:hover{text-decoration:underline}
+  </style>
+</helmet>
+<div style="height:100%;width:100%;min-height:0;display:flex;background:var(--surface-page)">
+  <div style="width:340px;flex:none;display:flex;flex-direction:column;background:var(--surface-card);border-right:1px solid var(--border-default)">
+    <div style="padding:16px 16px 12px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--border-subtle)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px">
+        <h2 style="font-size:18px;letter-spacing:-.01em">{{ listTitle }}</h2>
+        <sc-if value="{{ canNew }}"><x-import component-from-global-scope="SildDesignSystem_a95234.Button" size="sm" onClick="{{ onNew }}" hint-size="auto,32px">New request</x-import></sc-if>
+      </div>
+      <sc-if value="{{ hasListHint }}"><p style="font-size:12px;line-height:1.5;color:var(--text-tertiary)">{{ listHint }}</p></sc-if>
+      <sc-if value="{{ showFilters }}">
+      <div style="display:flex;gap:3px;background:var(--surface-sunken);padding:3px;border-radius:8px">
+        <sc-for list="{{ filters }}" as="f" hint-placeholder-count="4">
+          <button onClick="{{ f.onClick }}" style="{{ f.style }}">{{ f.label }}<span style="font-size:11px;color:var(--text-tertiary)">{{ f.count }}</span></button>
+        </sc-for>
+      </div>
+      </sc-if>
+    </div>
+    <div style="flex:1;overflow-y:auto">
+      <sc-for list="{{ rows }}" as="row" hint-placeholder-count="4">
+        <button onClick="{{ row.onClick }}" style="{{ row.style }}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.title }}</span>
+            <span style="font-size:11px;color:var(--text-tertiary);flex:none">{{ row.time }}</span>
+          </div>
+          <div style="font-size:13px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.preview }}</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+            <x-import component-from-global-scope="SildDesignSystem_a95234.StatusPill" status="{{ row.pill }}" label="{{ row.pillLabel }}" hint-size="auto,22px"></x-import>
+            <div style="flex:1"></div>
+            <span style="font-size:12px;color:var(--text-tertiary);white-space:nowrap">{{ row.owner }}</span>
+          </div>
+        </button>
+      </sc-for>
+      <sc-if value="{{ noRows }}"><div style="padding:40px 24px;text-align:center;color:var(--text-tertiary);font-size:13px;line-height:1.6">No tech support chats in this view.</div></sc-if>
+    </div>
+  </div>
+
+  <sc-if value="{{ hasThread }}" hint-placeholder-val="{{ true }}">
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+    <div style="height:64px;flex:none;display:flex;align-items:center;gap:12px;padding:0 18px;background:var(--surface-card);border-bottom:1px solid var(--border-default)">
+      <div style="min-width:0;flex:1">
+        <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ th.title }}</div>
+        <div style="font-size:12px;color:var(--text-tertiary);font-family:var(--font-mono)">{{ th.sub }}</div>
+      </div>
+      <x-import component-from-global-scope="SildDesignSystem_a95234.StatusPill" status="{{ th.pill }}" label="{{ th.pillLabel }}" hint-size="auto,22px"></x-import>
+      <sc-if value="{{ canClose }}"><x-import component-from-global-scope="SildDesignSystem_a95234.Button" size="sm" variant="secondary" onClick="{{ onClose }}" hint-size="auto,32px">Close conversation</x-import></sc-if>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:20px 20px 24px">
+      <div style="max-width:740px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+        <sc-for list="{{ items }}" as="it" hint-placeholder-count="4">
+          <sc-if value="{{ it.isEvent }}">
+            <div style="align-self:center;max-width:90%;padding:6px 12px;border-radius:999px;background:var(--surface-sunken);color:var(--text-secondary);font-size:12px;font-weight:500;text-align:center">{{ it.body }}</div>
+          </sc-if>
+          <sc-if value="{{ it.isBubble }}">
+            <x-import component-from-global-scope="SildDesignSystem_a95234.MessageBubble" dc-props="{{ it.bubble }}" hint-size="auto,42px"></x-import>
+          </sc-if>
+          <sc-if value="{{ it.isAi }}">
+            <div style="display:flex;gap:10px;align-items:flex-start;max-width:640px">
+              <span style="width:28px;flex:none">
+                <sc-if value="{{ it.showName }}"><img src="assets/sild-mark-tile.svg" width="28" height="28" alt="" style="border-radius:8px;display:block"></sc-if>
+              </span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+                <sc-if value="{{ it.showName }}"><div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="font-weight:700">Triage assistant</span><span style="color:var(--text-tertiary)">{{ it.time }}</span></div></sc-if>
+                <sc-if value="{{ it.isText }}">
+                  <div style="padding:10px 14px;background:var(--white);border:1px solid var(--border-default);border-radius:4px 18px 18px 18px;font-size:14px;line-height:1.55;text-wrap:pretty">{{ it.body }}</div>
+                </sc-if>
+                <sc-if value="{{ it.isSteps }}">
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;overflow:hidden">
+                    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface-sunken)">
+                      <span style="flex:1;font-size:12px;font-weight:600;color:var(--text-secondary)">{{ it.header }}</span>
+                      <sc-if value="{{ it.canToggle }}"><button onClick="{{ it.onToggle }}" style="border:0;background:transparent;cursor:pointer;padding:0;font-family:var(--font-sans);font-size:12px;font-weight:600;color:var(--brand)">{{ it.toggleLabel }}</button></sc-if>
+                    </div>
+                    <sc-for list="{{ it.steps }}" as="s" hint-placeholder-count="2">
+                      <div style="display:flex;gap:10px;padding:9px 12px;border-top:1px solid var(--border-subtle)">
+                        <span style="width:16px;height:18px;flex:none;display:flex;align-items:center;justify-content:center">
+                          <sc-if value="{{ s.running }}"><x-import component-from-global-scope="SildDesignSystem_a95234.Spinner" size="sm" hint-size="14px,14px"></x-import></sc-if>
+                          <sc-if value="{{ s.ok }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--green-600)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
+                          <sc-if value="{{ s.warn }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--amber-600)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4M12 16h.01"></path></svg></sc-if>
+                        </span>
+                        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+                          <span style="font-size:13px">{{ s.plain }}</span>
+                          <sc-if value="{{ s.hasResult }}"><span style="font-size:12px;color:var(--text-secondary)">{{ s.result }}</span></sc-if>
+                          <sc-if value="{{ s.showApi }}"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary);word-break:break-all">{{ s.api }}</span></sc-if>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ it.isDiag }}">
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                      <span style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary)">Cause</span>
+                      <p style="font-size:14px;line-height:1.55;text-wrap:pretty">{{ it.cause }}</p>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px">
+                      <span style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary)">How to fix it</span>
+                      <sc-for list="{{ it.fix }}" as="fx" hint-placeholder-count="2">
+                        <div style="display:flex;gap:10px">
+                          <span style="width:20px;height:20px;flex:none;border-radius:50%;background:var(--blue-50);color:var(--blue-700);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">{{ fx.n }}</span>
+                          <span style="font-size:14px;line-height:1.5;text-wrap:pretty">{{ fx.text }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ it.isSuggest }}">
+                  <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+                    <x-import component-from-global-scope="SildDesignSystem_a95234.Textarea" label="Describe the issue" hint="What you expected, what happened instead, and any IDs, names or error messages." rows="{{ descRows }}" value="{{ composer }}" onChange="{{ onComposer }}" placeholder="e.g. Driver Andres Kuusk hasn't received new trips since 8:00" hint-size="100%,140px"></x-import>
+                    <div style="display:flex;justify-content:flex-end">
+                      <x-import component-from-global-scope="SildDesignSystem_a95234.Button" size="sm" onClick="{{ onSend }}" disabled="{{ descEmpty }}" hint-size="auto,32px">Send to assistant</x-import>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-if>
+        </sc-for>
+        <sc-if value="{{ isBusy }}">
+          <div style="display:flex;align-items:center;gap:10px;padding-left:38px;font-size:13px;color:var(--text-tertiary)">
+            <x-import component-from-global-scope="SildDesignSystem_a95234.Spinner" size="sm" hint-size="14px,14px"></x-import>Looking into it
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <div style="flex:none;padding:12px 20px 16px;background:var(--surface-card);border-top:1px solid var(--border-default)">
+      <div style="max-width:740px;margin:0 auto;display:flex;flex-direction:column;gap:10px">
+        <sc-if value="{{ showResolvePrompt }}">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:13px;color:var(--text-secondary);flex:1;min-width:160px">Did this fix it?</span>
+            <x-import component-from-global-scope="SildDesignSystem_a95234.Button" size="sm" onClick="{{ onResolve }}" hint-size="auto,32px">Yes, it's fixed</x-import>
+          </div>
+        </sc-if>
+        <sc-if value="{{ footAsk }}" hint-placeholder-val="{{ true }}">
+          <x-import component-from-global-scope="SildDesignSystem_a95234.ComposerBar" value="{{ composer }}" onChange="{{ onComposer }}" onSend="{{ onSend }}" placeholder="{{ askPlaceholder }}" disabled="{{ isBusy }}" hint-size="100%,56px"></x-import>
+        </sc-if>
+        <sc-if value="{{ footResolved }}"><span style="font-size:13px;color:var(--text-secondary)">{{ closedText }}</span></sc-if>
+        <sc-if value="{{ footObserve }}">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:13px;color:var(--text-secondary);flex:1;min-width:200px">{{ observeText }}</span>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+  <sc-if value="{{ noThread }}">
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text-tertiary);font-size:14px">{{ emptyText }}</div>
+  </sc-if>
+
+  <sc-if value="{{ showDetails }}">
+  <div style="width:300px;flex:none;background:var(--surface-card);border-left:1px solid var(--border-default);overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <span style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary)">Requester</span>
+      <div style="display:flex;gap:10px;align-items:center">
+        <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ det.name }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
+        <div style="min-width:0">
+          <div style="font-size:14px;font-weight:600">{{ det.name }}</div>
+          <div style="font-size:12px;color:var(--text-tertiary)">{{ det.title }}</div>
+        </div>
+      </div>
+    </div>
+    <sc-if value="{{ det.hasCalls }}">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <span style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-tertiary)">Integrator API calls · {{ det.callCount }}</span>
+      <sc-for list="{{ det.calls }}" as="c" hint-placeholder-count="3">
+        <span style="font-family:var(--font-mono);font-size:11px;line-height:1.45;color:var(--text-secondary);word-break:break-all">{{ c }}</span>
+      </sc-for>
+    </div>
+    </sc-if>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <x-import component-from-global-scope="SildDesignSystem_a95234.Tag" mono="{{ true }}" hint-size="auto,24px">{{ det.ref }}</x-import>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:760},&quot;meName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Marko Saar&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;canStart&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;canViewAll&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;canSeeApi&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;showApiCalls&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const TITLES = { 'Karl Sepp': 'Admin', 'Liis Mägi': 'Support agent', 'Marko Saar': 'Dispatcher', 'Eva Kask': 'Integrations lead', 'Jaan Pärn': 'Fleet manager' };
+const PILL = { new: ['assigned', 'New'], diagnosing: ['assigned', 'Diagnosing'], awaiting: ['queued', 'Needs details'], proposed: ['open', 'Fix proposed'], resolved: ['closed', 'Fixed'], closed: ['closed', 'Closed'] };
+const AI_KINDS = ['ai', 'steps', 'diag', 'suggest'];
+const SEED = () => [
+  { id: 't4', owner: 'Jaan Pärn', title: 'VIN rejected when adding a vehicle', ref: 'ts_8T3W', status: 'diagnosing', time: '10:40', items: [
+    { k: 'user', body: "Adding a new van fails with 'VIN invalid', but the VIN is correct: WV1ZZZSYZP9012345", time: '10:40' },
+    { k: 'steps', steps: [
+      { plain: 'Checked the VIN format', result: 'Check digit does not match', api: 'POST /v1/vehicles/validate · 422 · 64ms', code: 422 },
+      { plain: 'Looking up the VIN in the vehicle registry', api: 'GET /v1/registry/vin/WV1ZZZSYZP9012345', running: true }] }] },
+  { id: 't1', owner: 'Marko Saar', title: 'Driver not receiving new trips', ref: 'ts_7Q2K', status: 'proposed', time: '10:31', items: [
+    { k: 'user', body: "Andres Kuusk hasn't received any new trips since this morning. Other drivers are fine.", time: '10:28' },
+    { k: 'steps', steps: [
+      { plain: 'Found driver Andres Kuusk', result: 'drv_2207 · active · shift 07:00–15:00', api: 'GET /v1/drivers?q=Andres+Kuusk · 200 · 96ms', code: 200 },
+      { plain: 'Checked his phone registration', result: 'Notification token expired 07:42, after app update 5.12.0', api: 'GET /v1/drivers/drv_2207/devices · 200 · 142ms', code: 200 },
+      { plain: 'Checked trips waiting for him', result: '3 trips pending, delivery failed', api: 'GET /v1/dispatch/assignments?driver=drv_2207&state=pending · 200 · 188ms', code: 200 }] },
+    { k: 'diag', time: '10:29', cause: "Andres's phone stopped accepting notifications at 07:42, right after the driver app updated to 5.12.0. Trips are still assigned to him but can't reach his phone, so 3 are waiting.", fix: [
+      'Ask Andres to open the driver app and sign in again. This registers his phone for notifications.',
+      'The 3 waiting trips are delivered within a minute of him signing in.',
+      "If TR-88412 (pickup 11:30) can't wait, reassign it from Dispatch."] },
+    { k: 'user', body: 'Who can I reassign TR-88412 to?', time: '10:31' },
+    { k: 'steps', steps: [{ plain: 'Looked up available drivers near the pickup', result: '2 available within 5 km', api: 'GET /v1/drivers/available?near=TR-88412&radius=5km · 200 · 121ms', code: 200 }] },
+    { k: 'ai', time: '10:31', body: 'Mari Lepp (2.1 km away) and Toomas Rand (3.4 km) are available now. Open TR-88412 in Dispatch and choose Reassign.' }] },
+  { id: 't3', owner: 'Eva Kask', title: 'ERP webhook failing with 401', ref: 'ts_5R8H', status: 'proposed', time: '09:50', items: [
+    { k: 'user', body: 'Our ERP stopped receiving order webhooks around 08:00. Their logs show 401.', time: '09:41' },
+    { k: 'steps', steps: [
+      { plain: 'Checked the ERP sync webhook', result: '41 failed deliveries since 08:02', api: 'GET /v1/webhooks/wh_erp · 200 · 88ms', code: 200 },
+      { plain: 'Read the latest delivery attempts', result: 'erp.northwind.ee answers 401 Unauthorized', api: 'GET /v1/webhooks/wh_erp/deliveries?limit=5 · 200 · 131ms', code: 200 },
+      { plain: 'Checked recent changes to the webhook', result: 'Signing secret rotated 07:58 by Eva Kask', api: 'GET /v1/audit?resource=wh_erp · 200 · 97ms', code: 200 }] },
+    { k: 'diag', time: '09:42', cause: 'The webhook signing secret was rotated at 07:58. Your ERP still checks signatures with the old secret, so it rejects every delivery.', fix: [
+      'Update the secret in your ERP (Settings → Webhooks → ERP sync → Reveal secret).',
+      'Retry the 41 failed deliveries from the same page.'] },
+    { k: 'user', body: "Our ERP vendor can't change the config until Monday. Can you restore the old secret?", time: '09:50' },
+    { k: 'ai', time: '09:50', body: "A rotated secret can't be restored. Until Monday, you can pause the ERP sync webhook so deliveries queue instead of failing, then resume it once your vendor has the new secret. Queued deliveries are kept for 7 days." }] },
+  { id: 't2', owner: 'Marko Saar', title: 'September invoice export missing orders', ref: 'ts_6M1D', status: 'resolved', time: 'Yesterday', items: [
+    { k: 'user', body: 'The September invoice export has 212 orders, but our dispatch report shows 219.', time: '16:02' },
+    { k: 'steps', steps: [
+      { plain: 'Opened the September export', result: '212 orders, grouped by invoice date', api: 'GET /v1/invoices/exports/exp_2026_09 · 200 · 205ms', code: 200 },
+      { plain: 'Compared with orders completed in September', result: '7 orders completed 30 Sep, invoiced 1 Oct', api: 'GET /v1/orders?completed_from=2026-09-01&completed_to=2026-09-30 · 200 · 312ms', code: 200 }] },
+    { k: 'diag', time: '16:03', cause: 'Nothing is missing. 7 orders were completed on 30 September but invoiced on 1 October, so the export puts them in October.', fix: ["To match the dispatch report, export again with 'Group by completion date'."] },
+    { k: 'event', body: 'Marked as fixed by Marko Saar' }] }
+];
+const val = e => (e && e.target) ? e.target.value : e;
+
+class Component extends DCLogic {
+  state = { convs: SEED(), sel: null, filter: 'all', composer: '', busy: null, apiOpen: {} };
+  timers = [];
+  componentWillUnmount() { this.timers.forEach(clearTimeout); }
+  later(fn, ms) { this.timers.push(setTimeout(fn, ms)); }
+  now() { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+  me() { return this.props.meName || 'Marko Saar'; }
+  visibleList() { return this.props.canViewAll ? this.state.convs : this.state.convs.filter(c => c.owner === this.me()); }
+  current() { const l = this.visibleList(); return l.find(c => c.id === this.state.sel) || l.find(c => c.status !== 'resolved' && c.status !== 'closed') || null; }
+  patch(id, fn) { this.setState(s => ({ convs: s.convs.map(c => c.id === id ? fn(c) : c) })); }
+  newRequest() {
+    const id = 'tn' + Date.now(), t = this.now();
+    const conv = { id, owner: this.me(), title: 'New request', ref: 'ts_' + id.slice(-4), status: 'new', time: t, fresh: true, items: [
+      { k: 'ai', time: t, body: "Describe what's going wrong. I can look up orders, drivers, vehicles, invoices and webhooks in your account to find the cause." }, { k: 'suggest' }] };
+    this.setState(s => ({ convs: [conv, ...s.convs], sel: id, composer: '', filter: 'all' }));
+  }
+  send(textArg) {
+    const text = (textArg ?? this.state.composer ?? '').trim(), conv = this.current();
+    if (!text || !conv) return;
+    const id = conv.id, first = conv.fresh, t = this.now();
+    const extra = first ? { title: text.length > 46 ? text.slice(0, 44) + '…' : text, fresh: false } : {};
+    this.patch(id, c => ({ ...c, ...extra, time: t, status: 'diagnosing', items: [...c.items.filter(i => i.k !== 'suggest'), { k: 'user', body: text, time: t }] }));
+    this.setState({ composer: '', busy: id, sel: id });
+    const steps = first
+      ? [{ plain: 'Searched recent errors on your account', result: 'No failed jobs or errors in the last 24 hours', api: 'GET /v1/activity?since=24h&level=error · 200 · 164ms', code: 200 },
+         { plain: 'Checked service status', result: 'All services operating normally', api: 'GET /v1/status · 200 · 41ms', code: 200 }]
+      : [{ plain: 'Re-checked the data from my last answer', result: 'No change since then', api: 'GET /v1/activity?since=1h · 200 · 118ms', code: 200 }];
+    const reply = first
+      ? "I don't see errors or outages on your account right now. Which order, driver, vehicle or integration is affected? An ID or name lets me look it up directly."
+      : "Nothing has changed since my last answer. Tell me what happened when you tried the steps above, and I'll look further.";
+    this.later(() => this.patch(id, c => ({ ...c, items: [...c.items, { k: 'steps', steps: steps.map(x => ({ ...x, running: true })) }] })), 500);
+    this.later(() => {
+      this.patch(id, c => {
+        const items = c.items.slice(), last = items[items.length - 1];
+        if (last && last.k === 'steps') items[items.length - 1] = { ...last, steps: last.steps.map(x => ({ ...x, running: false })) };
+        return { ...c, status: first ? 'awaiting' : 'proposed', items: [...items, { k: 'ai', time: this.now(), body: reply }] };
+      });
+      this.setState({ busy: null });
+    }, 1900);
+  }
+  close() {
+    const conv = this.current(); if (!conv) return;
+    this.patch(conv.id, c => ({ ...c, status: 'closed', time: this.now(), items: [...c.items, { k: 'event', body: 'Conversation closed by ' + c.owner }] }));
+    this.setState({ busy: null });
+  }
+  resolve() {
+    const conv = this.current(); if (!conv) return;
+    this.patch(conv.id, c => ({ ...c, status: 'resolved', items: [...c.items, { k: 'event', body: 'Marked as fixed by ' + c.owner }] }));
+  }
+  renderVals() {
+    const s = this.state, p = this.props, meName = this.me(), all = !!p.canViewAll;
+    const canApi = !!p.canSeeApi, apiDefault = canApi && !!p.showApiCalls;
+    const list = this.visibleList();
+    const rowStyle = on => ({ display: 'flex', flexDirection: 'column', gap: 3, width: '100%', textAlign: 'left', padding: '12px 16px', border: 0, borderBottom: '1px solid var(--border-subtle)', borderLeft: '3px solid ' + (on ? 'var(--brand)' : 'transparent'), background: on ? 'var(--brand-subtle)' : 'var(--surface-card)', cursor: 'pointer', fontFamily: 'var(--font-sans)' });
+    const lastText = c => { const m = [...c.items].reverse().find(i => i.body && i.k !== 'event'); return m ? m.body : ''; };
+    const G = { all: () => true, active: c => ['new', 'diagnosing', 'awaiting', 'proposed'].includes(c.status), resolved: c => c.status === 'resolved' || c.status === 'closed' };
+    const filters = [['all', 'All'], ['active', 'Active'], ['resolved', 'Closed']].map(([id, label]) => ({ label, count: list.filter(G[id]).length, onClick: () => this.setState({ filter: id }),
+      style: { flex: 1, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, border: 0, borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600, background: s.filter === id ? 'var(--white)' : 'transparent', color: s.filter === id ? 'var(--text-primary)' : 'var(--text-secondary)', boxShadow: s.filter === id ? 'var(--shadow-xs)' : 'none' } }));
+    const conv = this.current();
+    const rows = list.filter(all ? G[s.filter] : G.all).map(c => ({ title: c.title, time: c.time, preview: lastText(c), pill: PILL[c.status][0], pillLabel: PILL[c.status][1], owner: all ? c.owner : '', style: rowStyle(conv && c.id === conv.id), onClick: () => this.setState({ sel: c.id, composer: '' }) }));
+
+    const ctx = !conv ? null : conv.owner === meName ? 'own' : 'observe';
+    let items = [], th = {}, det = {};
+    if (conv) {
+      th = { title: conv.title, sub: (ctx === 'own' ? '' : conv.owner + ' · ') + conv.ref, pill: PILL[conv.status][0], pillLabel: PILL[conv.status][1] };
+      items = conv.items.map((i, idx) => {
+        const prev = conv.items[idx - 1];
+        const v = { isEvent: false, isBubble: false, isAi: false, isText: false, isSteps: false, isDiag: false, isSuggest: false, showName: false, time: i.time, body: i.body };
+        if (i.k === 'event') { v.isEvent = true; return v; }
+        if (i.k === 'user') { v.isBubble = true; v.bubble = { direction: ctx === 'own' ? 'out' : 'in', author: ctx === 'own' ? undefined : conv.owner, time: i.time, body: i.body }; return v; }
+        v.isAi = true; v.showName = !(prev && AI_KINDS.includes(prev.k));
+        v.isText = i.k === 'ai'; v.isSuggest = i.k === 'suggest';
+        if (i.k === 'diag') { v.isDiag = true; v.cause = i.cause; v.fix = i.fix.map((t, n) => ({ n: n + 1, text: t })); }
+        if (i.k === 'steps') {
+          const key = conv.id + ':' + idx, open = canApi && (s.apiOpen[key] ?? apiDefault), running = i.steps.some(x => x.running);
+          v.isSteps = true; v.canToggle = canApi && !running; v.toggleLabel = open ? 'Hide API calls' : 'Show API calls';
+          v.onToggle = () => this.setState(st => ({ apiOpen: { ...st.apiOpen, [key]: !open } }));
+          v.header = running ? 'Checking your account…' : 'Checked ' + i.steps.length + (i.steps.length === 1 ? ' thing' : ' things') + ' in your account';
+          v.steps = i.steps.map(x => ({ plain: x.plain, result: x.result, hasResult: !!x.result && !x.running, api: x.api, showApi: open, running: !!x.running, ok: !x.running && x.code < 300, warn: !x.running && x.code >= 300 }));
+        }
+        return v;
+      });
+      const calls = canApi ? conv.items.filter(i => i.k === 'steps').flatMap(i => i.steps).filter(x => !x.running).map(x => x.api) : [];
+      det = { name: conv.owner, title: TITLES[conv.owner] || '', ref: conv.ref, calls, callCount: calls.length, hasCalls: calls.length > 0 };
+    }
+    const st = conv ? conv.status : null, aiOpen = ['new', 'diagnosing', 'awaiting', 'proposed'].includes(st);
+    const isBusy = !!s.busy && conv && s.busy === conv.id;
+    return {
+      av36: 36, listTitle: all ? 'Tech support' : 'Your requests',
+      listHint: all ? "Everyone's chats with the triage assistant." : '', hasListHint: all,
+      showFilters: all, filters, rows, noRows: rows.length === 0,
+      canNew: !!p.canStart, onNew: () => this.newRequest(),
+      hasThread: !!conv, noThread: !conv, emptyText: p.canStart ? 'Start a new request to talk to the triage assistant.' : 'Select a chat.',
+      th, items, det, isBusy, showDetails: !!conv && ctx === 'observe',
+      showResolvePrompt: ctx === 'own' && st === 'proposed' && !isBusy,
+      footAsk: ctx === 'own' && aiOpen && st !== 'new', descRows: 5, descEmpty: !(s.composer || '').trim(), askPlaceholder: st === 'new' ? "Describe what's going wrong…" : 'Ask a follow-up question…',
+      footResolved: ctx === 'own' && (st === 'resolved' || st === 'closed'),
+      closedText: st === 'closed' ? 'Conversation closed. Start a new request if you need more help.' : 'Marked as fixed.',
+      canClose: ctx === 'own' && st !== 'resolved' && st !== 'closed', onClose: () => this.close(),
+      footObserve: ctx === 'observe',
+      observeText: aiOpen ? conv.owner + "'s chat with the assistant. Only they can reply here." : 'Closed by ' + (conv ? conv.owner : ''),
+      composer: s.composer, onComposer: e => this.setState({ composer: val(e) }), onSend: () => this.send(),
+      onResolve: () => this.resolve()
+    };
+  }
+}
+</script>
+</body>
+</html>

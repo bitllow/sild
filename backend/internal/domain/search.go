@@ -40,6 +40,8 @@ type SearchInput struct {
 	Status   *models.ConversationStatus
 	Assignee string
 	ConvRole string
+	// Queue narrows non-peer conversations to one queue, as the list does.
+	Queue string
 	// IncludeInternal permits internal notes to match and be quoted. Only an
 	// agent-class principal sets it (§5.6).
 	IncludeInternal bool
@@ -80,6 +82,15 @@ func (s *SearchService) Search(ctx context.Context, tenantID string, scope polic
 	if pt, ok := scope.Participant(); ok {
 		q.Participant = pt
 	}
+	if actor, ok := scope.MemberActor(); ok {
+		q.MemberActor = actor
+	}
+	// With own requests the ceiling is a union the search does not express;
+	// hydration applies it, at the cost of sparser pages for that case only.
+	if _, _, own := scope.OwnRequests(); !own {
+		q.Queues = scope.AllowedQueues()
+	}
+	q.Queue = in.Queue
 	q.RequiresAssignment = scope.RequiresAssignment()
 	q.IncludeInternal = in.IncludeInternal
 	// Only a peer-scoped search widens to raw metadata; support search stays
