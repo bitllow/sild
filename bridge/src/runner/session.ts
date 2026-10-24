@@ -87,6 +87,7 @@ export class ClaudeSessionRunner implements SessionRunner {
       this.cfg.instructions?.() ?? null,
     ]);
     const inbox = new Inbox();
+    let answered = false;
     const q = (this.cfg.query ?? sdkQuery)({
       prompt: inbox,
       options: sessionOptions({
@@ -96,12 +97,17 @@ export class ClaudeSessionRunner implements SessionRunner {
         sessionId,
         resume,
         systemPrompt: brief({ srcDir: this.cfg.srcDir, workDir: p.work, dataDir: p.data, confluence: kb !== null, integrator }),
-        mcpServers: { [OPS_SERVER]: opsServer(ops), ...(kb && { [CONFLUENCE_SERVER]: kb.server }) },
+        mcpServers: { [OPS_SERVER]: opsServer(ops, () => (answered = true)), ...(kb && { [CONFLUENCE_SERVER]: kb.server }) },
         mcpTools: [...OPS_TOOLS, ...(kb?.tools ?? [])],
         env,
         model: this.cfg.model,
         maxTurns: this.cfg.maxTurns,
         maxBudgetUsd: this.cfg.maxBudgetUsd,
+        endTurn: () => {
+          const end = answered;
+          answered = false;
+          return end;
+        },
         onDecision: (tool, _input, d) => {
           if (!d.allow) this.cfg.log('tool denied', { conv, tool, reason: d.reason });
         },

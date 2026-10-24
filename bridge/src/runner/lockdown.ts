@@ -35,6 +35,8 @@ export type SessionSpec = {
   spawn?: Options['spawnClaudeCodeProcess'];
   abortController?: AbortController;
   onDecision?: (tool: string, input: unknown, decision: Decision) => void;
+  // Asked after each batch of tool calls; true ends the turn there.
+  endTurn?: () => boolean;
 };
 
 export function sessionOptions(spec: SessionSpec): Options {
@@ -53,6 +55,9 @@ export function sessionOptions(spec: SessionSpec): Options {
       },
     };
   };
+
+  // The model otherwise keeps answering within one turn until it writes plain text.
+  const stop: HookCallback = async () => (spec.endTurn?.() ? { continue: false, stopReason: 'answered' } : {});
 
   return {
     cwd: spec.workDir,
@@ -73,7 +78,7 @@ export function sessionOptions(spec: SessionSpec): Options {
     permissionMode: 'dontAsk',
     permissionPrompts: 'none',
     mcpServers: spec.mcpServers,
-    hooks: { PreToolUse: [{ hooks: [guard] }] },
+    hooks: { PreToolUse: [{ hooks: [guard] }], PostToolBatch: [{ hooks: [stop] }] },
 
     maxTurns: spec.maxTurns,
     maxBudgetUsd: spec.maxBudgetUsd,

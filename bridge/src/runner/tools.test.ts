@@ -28,3 +28,21 @@ test('a failing op is reported to the model as a tool error', async () => {
   assert.equal(res.isError, true);
   assert.deepEqual(res.content, [{ type: 'text', text: 'failed: sild down' }]);
 });
+
+test('answer tools report a delivered answer; request_info and failures do not', async () => {
+  let answered = 0;
+  const ok = async () => 'sent';
+  const [reply, ask, fix, info] = opsTools({ reply: ok, proposeFix: ok, requestInfo: ok }, () => answered++);
+  await reply.handler({ text: 'hi' }, {});
+  await ask.handler({ text: 'which?' }, {});
+  await fix.handler({ cause: 'c', fix: ['a'] }, {});
+  await info.handler({ need: 'n', why: 'w' }, {});
+  assert.equal(answered, 3);
+
+  const fail = async (): Promise<string> => {
+    throw new Error('sild down');
+  };
+  const [failing] = opsTools({ reply: fail, proposeFix: fail, requestInfo: fail }, () => answered++);
+  await failing.handler({ text: 'hi' }, {});
+  assert.equal(answered, 3);
+});
