@@ -15,6 +15,8 @@ export type DataConfig = {
   allowInsecureLocal: boolean;
   router: 'anthropic' | 'fake';
   routerModel: string;
+  // Unset: the router reaches the model through the bridge's proxy and its credential.
+  routerApiKey?: string;
   // Different ids one conversation may request data about.
   maxRequestIds: number;
 };
@@ -29,6 +31,9 @@ export function loadDataConfig(env: NodeJS.ProcessEnv = process.env): DataConfig
   const publicKey = loadSecret(env, problems, 'ADAPTER_PUBLIC_KEY', { needed })?.value ?? '';
   const router = env.ROUTER?.trim() || 'anthropic';
   if (router !== 'anthropic' && router !== 'fake') problems.push('ROUTER must be anthropic or fake');
+  const routerKey = env.ROUTER_API_KEY?.trim() || env.ROUTER_API_KEY_FILE?.trim()
+    ? loadSecret(env, problems, 'ROUTER_API_KEY')?.value
+    : undefined;
   const maxIds = Number(env.MAX_REQUEST_IDS?.trim() || DEFAULT_BROKER_LIMITS.distinctIds);
   if (!Number.isInteger(maxIds) || maxIds < 1) problems.push('MAX_REQUEST_IDS must be a whole number ≥ 1');
   if (problems.length) throw new ConfigError(`invalid data provider configuration:\n  ${problems.join('\n  ')}`);
@@ -40,10 +45,18 @@ export function loadDataConfig(env: NodeJS.ProcessEnv = process.env): DataConfig
     router: router as DataConfig['router'],
     routerModel: env.ROUTER_MODEL?.trim() || DEFAULT_ROUTER_MODEL,
     maxRequestIds: maxIds,
+    ...(routerKey && { routerApiKey: routerKey }),
   };
 }
 
-// The router reaches the model through the bridge's own proxy, so it holds only the proxy token.
+// A subscription token serves only Claude Code, so a model router needs a key of its own.
+export function checkRouterAuth(cfg: Config, data: DataConfig): void {
+  if (data.router === 'anthropic' && !data.routerApiKey && cfg.modelAuth.kind === 'oauth') {
+    throw new ConfigError('ROUTER=anthropic needs ROUTER_API_KEY when the model credential is a subscription token');
+  }
+}
+
+// Without its own key the router reaches the model through the bridge's proxy, holding only the proxy token.
 export function makeBroker(data: DataConfig, ctx: { config: Config; files: FileStore; modelBaseUrl: string; modelToken: string; log: Log }): InfoBroker {
   const log = (msg: string) => ctx.log(msg);
   const adapter = new AdapterClient({
@@ -56,6 +69,8 @@ export function makeBroker(data: DataConfig, ctx: { config: Config; files: FileS
   });
   const router: Router = data.router === 'fake'
     ? new FakeRouter()
-    : new AnthropicRouter({ baseURL: ctx.modelBaseUrl, authToken: ctx.modelToken, model: data.routerModel });
+    : new AnthropicRouter(data.routerApiKey
+      ? { apiKey: data.routerApiKey, model: data.routerModel }
+      : { baseURL: ctx.modelBaseUrl, authToken: ctx.modelToken, model: data.routerModel });
   return createBroker({ adapter, router, log, limits: { distinctIds: data.maxRequestIds } });
 }

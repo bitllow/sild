@@ -5,13 +5,13 @@
 #
 #   scripts/triage-local.sh            start everything; Ctrl-C stops it all
 #   RUNNER_MODE=local ...              run the CLI on the host instead of docker
-#   ROUTER=fake ...                    route requests with keyword rules (default: Claude Haiku)
+#   ROUTER=fake|anthropic ...          keyword rules or Claude Haiku (default: Haiku with an API key)
 #   FRESH=1 ...                        start from an empty database
 #   SRC_REPOS="/path/a /path/b" ...    the code the assistant reads (default: this repo)
 #   MODEL=... EFFORT=high ...          the session model and effort (default: opus, CLI default effort)
 #
-# Model auth: ANTHROPIC_API_KEY, or a token file at bridge/.secrets/oauth-token
-# (`claude setup-token`, local testing only).
+# Model auth: ANTHROPIC_API_KEY, or bridge/.secrets/oauth-token (`claude setup-token`,
+# local testing only) for Claude Code plus bridge/.secrets/api-key for the router.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -48,14 +48,29 @@ wait_for() { # url, name, log
   exit 1
 }
 
-# Model credential for the bridge's proxy. The runner container never gets it.
+# Claude Code runs on ANTHROPIC_API_KEY when set, else the subscription token, else
+# the key file. A subscription token serves only Claude Code, so the router gets the
+# API key separately and runs on keyword rules without one. The runner never sees either.
+key_file="$ROOT/bridge/.secrets/api-key"
+oauth_file="$ROOT/bridge/.secrets/oauth-token"
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   model_auth=(ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY")
-elif [ -s "$ROOT/bridge/.secrets/oauth-token" ]; then
-  model_auth=(CLAUDE_CODE_OAUTH_TOKEN_FILE="$ROOT/bridge/.secrets/oauth-token")
+elif [ -s "$oauth_file" ]; then
+  model_auth=(CLAUDE_CODE_OAUTH_TOKEN_FILE="$oauth_file")
+elif [ -s "$key_file" ]; then
+  model_auth=(ANTHROPIC_API_KEY="$(cat "$key_file")")
 else
-  echo "set ANTHROPIC_API_KEY or write bridge/.secrets/oauth-token" >&2
+  echo "set ANTHROPIC_API_KEY, or write bridge/.secrets/oauth-token or bridge/.secrets/api-key" >&2
   exit 1
+fi
+router_auth=()
+router_default=fake
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  router_auth=(ROUTER_API_KEY="$ANTHROPIC_API_KEY")
+  router_default=anthropic
+elif [ -s "$key_file" ]; then
+  router_auth=(ROUTER_API_KEY_FILE="$key_file")
+  router_default=anthropic
 fi
 
 # The code the assistant reads: committed files only, so nothing untracked (.env,
@@ -115,8 +130,8 @@ echo "starting the bridge (${RUNNER_MODE} runner)…"
   WORK_ROOT="$STATE/work" SRC_DIR="$STATE/src" RUNNER_MODE="$RUNNER_MODE" RUNNER_IMAGE="$RUNNER_IMAGE" \
   IDLE_RELEASE_SECONDS="${IDLE_RELEASE_SECONDS:-120}" MODEL="${MODEL:-claude-opus-5-5}" EFFORT="${EFFORT:-}" \
   ADAPTER_URL="http://127.0.0.1:$ADAPTER_PORT" ADAPTER_SECRET="$adapter_secret" ADAPTER_PUBLIC_KEY="$adapter_key" \
-  ADAPTER_ALLOW_INSECURE_LOCAL=1 ROUTER="${ROUTER:-anthropic}" \
-  "${model_auth[@]}" node src/main.ts >"$STATE/logs/bridge.log" 2>&1) &
+  ADAPTER_ALLOW_INSECURE_LOCAL=1 ROUTER="${ROUTER:-$router_default}" \
+  "${model_auth[@]}" ${router_auth[@]+"${router_auth[@]}"} node src/main.ts >"$STATE/logs/bridge.log" 2>&1) &
 pids+=($!)
 
 echo "starting the inbox on :${INBOX_PORT}…"

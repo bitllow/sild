@@ -7,7 +7,7 @@ import type { InfoBroker } from './contracts.ts';
 import { createConfluenceTools } from './runner/confluence.ts';
 import { startModelProxy } from './runner/proxy.ts';
 import { ClaudeSessionRunner } from './runner/session.ts';
-import { loadDataConfig, makeBroker, type DataConfig } from './data.ts';
+import { checkRouterAuth, loadDataConfig, makeBroker, type DataConfig } from './data.ts';
 import { SlotManager } from './slots/manager.ts';
 import { NullBroker } from './slots/null-broker.ts';
 import type { Log } from './slots/types.ts';
@@ -90,6 +90,7 @@ if (import.meta.main) {
   try {
     cfg = loadConfig();
     data = loadDataConfig();
+    if (data) checkRouterAuth(cfg, data);
   } catch (e) {
     if (!(e instanceof ConfigError)) throw e;
     console.error(e.message);

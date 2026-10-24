@@ -3,7 +3,8 @@ import { isRecord } from '../adapter/kit/schema.ts';
 import type { Proposal, RouteInput, RouteOutput, Router } from './router.ts';
 
 export type AnthropicRouterConfig = {
-  baseURL: string;
+  // Unset: the Anthropic API itself.
+  baseURL?: string;
   apiKey?: string;
   authToken?: string;
   model?: string;
