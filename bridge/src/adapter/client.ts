@@ -30,7 +30,7 @@ export type AdapterClientConfig = {
 };
 
 export type Received =
-  | { requestId: string; conv: string; source: string; state: 'delivered'; summary: string; files: DeliveredFile[] }
+  | { requestId: string; conv: string; source: string; state: 'delivered'; summary: string; files: DeliveredFile[]; approvedUntil?: number }
   | { requestId: string; conv: string; source: string; state: 'declined' | 'expired' | 'invalid'; reason: string; code?: string };
 
 // Unless the request failed, its outcome arrives through onReceived, even one answered in the response.
@@ -239,7 +239,8 @@ export class AdapterClient {
     }
     try {
       const files = await this.#store(conv, id, o.source, delivery);
-      return { ...base, state: 'delivered', summary: delivery.summary, files };
+      const until = delivery.approved_until;
+      return { ...base, state: 'delivered', summary: delivery.summary, files, ...(Number.isInteger(until) && { approvedUntil: until }) };
     } catch (err) {
       return { ...base, state: 'invalid', reason: clip(errText(err)) };
     }

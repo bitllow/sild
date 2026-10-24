@@ -3,14 +3,14 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
-  MIN_SECRET_LENGTH, STEP_UP_REQUIRED, createAdapter, generateKeyPair, loadPrivateKey, publicKeyOf, type Adapter, type Handler, type SildTrust,
+  MIN_SECRET_LENGTH, STEP_UP_REQUIRED, createAdapter, generateKeyPair, loadPrivateKey, publicKeyOf, type Adapter, type Final, type Handler, type SildTrust,
 } from '../src/adapter/kit/index.ts';
 import { CATALOG, INSTRUCTIONS, handle } from './scenarios.ts';
 
 export type FakeAdapter = { url: string; publicKey: string; adapter: Adapter; server: Server; close: () => Promise<void> };
 
-// Whether the requester approved data access for this conversation; unset means no approval is needed.
-export type Elevation = (user: string, conv: string) => Promise<boolean>;
+// Until when (unix seconds) the requester approved data access for this conversation, or null.
+export type Elevation = (user: string, conv: string) => Promise<number | null>;
 
 export async function startFakeAdapter(opts: {
   secret: string; sild: SildTrust; elevated?: Elevation; privateKey?: string; port?: number; host?: string; publicUrl?: string;
@@ -49,9 +49,12 @@ export async function startFakeAdapter(opts: {
 
 function stepUp(elevated: Elevation, next: Handler): Handler {
   return async (req) => {
-    const ok = await elevated(req.requester.id, req.conversation_ref).catch(() => false);
-    if (!ok) return { type: 'decline', code: STEP_UP_REQUIRED, reason: 'Approve data access to continue' };
-    return next(req);
+    const until = await elevated(req.requester.id, req.conversation_ref).catch(() => null);
+    if (!until) return { type: 'decline', code: STEP_UP_REQUIRED, reason: 'Approve data access to continue' };
+    const stamp = (f: Final): Final => (f.type === 'deliver' ? { ...f, approvedUntil: until } : f);
+    const outcome = await next(req);
+    if (outcome.type === 'async') return { type: 'async', result: outcome.result.then(stamp) };
+    return outcome.type === 'deliver' ? stamp(outcome) : outcome;
   };
 }
 
@@ -59,7 +62,8 @@ function stepUp(elevated: Elevation, next: Handler): Handler {
 function elevationAt(url: string): Elevation {
   return async (user, conv) => {
     const res = await fetch(`${url}?${new URLSearchParams({ user, conv })}`, { signal: AbortSignal.timeout(3_000) });
-    return res.ok && ((await res.json()) as { elevated?: boolean }).elevated === true;
+    const e = res.ok ? ((await res.json()) as { elevated?: boolean; until?: number }) : {};
+    return e.elevated && typeof e.until === 'number' ? e.until : null;
   };
 }
 

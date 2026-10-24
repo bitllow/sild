@@ -186,8 +186,11 @@ before your adapter answers:
    inbox's origin. Sild notes the approval in the conversation and retries
    the parked requests, and your adapter now finds the approval.
 
-One approval covers every request in that conversation until it expires. Each
-request is still asserted and signed on its own. After expiry, or in another
+One approval covers every request in that conversation until it expires; how
+long is yours to decide. Each request is still asserted and signed on its own.
+To show the requester that a request ran under their approval, deliver it with
+`approved_until` (unix seconds; with the kit, `approvedUntil` on the deliver
+outcome), and its step reads "Under your approval until 23:50". After expiry, or in another
 conversation, the requester is asked again. To approve per subject instead,
 store the approved ids with the approval and check `params` against them.
 

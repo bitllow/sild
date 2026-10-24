@@ -24,7 +24,8 @@ export type BrokerEvent =
   | { type: 'requested'; conv: string; requestId: string; label: string; source: string; params: Record<string, unknown> }
   // Waits for the requester to approve data access; retried once they do.
   | { type: 'parked'; conv: string; requestId: string; reason: string }
-  | { type: 'delivered'; conv: string; requestId: string; summary: string; files: DeliveredFile[] }
+  // approvedUntil: answered under the requester's approval, valid until then (unix seconds).
+  | { type: 'delivered'; conv: string; requestId: string; summary: string; files: DeliveredFile[]; approvedUntil?: number }
   | { type: 'not_available'; conv: string; requestId: string; reason: string };
 
 // The sources the session may ask for, and how much one conversation may ask.

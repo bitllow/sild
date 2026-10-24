@@ -91,6 +91,8 @@ export type Step = {
   state: StepState;
   // Stripped for readers who may not see internal notes.
   internal?: { source: string; params?: Record<string, unknown> | null };
+  // Unix seconds: answered under the requester's approval, valid until then.
+  approved_until?: number;
 };
 
 // A finding behind a diagnosis and where it came from.
@@ -104,8 +106,8 @@ export type Evidence = {
 export type Part =
   | { type: 'steps'; steps: Step[] }
   | { type: 'diagnosis'; cause: string; fix: string[]; evidence?: Evidence[] }
-  // On the system message a requester's approval of data access leaves.
-  | { type: 'approval' };
+  // On the system message a requester's approval of data access leaves; items name what it let the assistant check.
+  | { type: 'approval'; items?: string[] };
 
 export type Disposition = 'inline' | 'attachment';
 

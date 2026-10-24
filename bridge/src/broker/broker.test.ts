@@ -202,7 +202,7 @@ describe('a requester the provider cannot identify', () => {
 describe('step-up', () => {
   test('a request the requester has not approved is parked, and retried once they do', async () => {
     let approved = false;
-    const gated = await startFakeAdapter({ secret: SECRET, sild: testSild, elevated: async () => approved });
+    const gated = await startFakeAdapter({ secret: SECRET, sild: testSild, elevated: async () => (approved ? Math.floor(Date.now() / 1000) + 60 : null) });
     try {
       const adapter = new AdapterClient({
         url: gated.url, secret: SECRET, publicKey: gated.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS),
@@ -230,7 +230,8 @@ describe('step-up', () => {
       await until(() => events.some((e) => e.type === 'delivered'));
       const requested = events.filter((e) => e.type === 'requested').map((e) => e.requestId);
       assert.deepEqual(requested, [r.requestId, r.requestId], 'the retry keeps the request id');
-      assert.ok(events.some((e) => e.type === 'delivered' && e.requestId === r.requestId));
+      const delivered = events.find((e) => e.type === 'delivered' && e.requestId === r.requestId);
+      assert.ok(delivered?.type === 'delivered' && delivered.approvedUntil, 'the delivery says it came under the approval');
     } finally {
       await gated.close();
     }

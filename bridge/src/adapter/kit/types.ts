@@ -44,6 +44,8 @@ export type Delivery = {
   files: WireFile[];
   // Why a decline happened, for the bridge to act on; see DECLINE_CODE.
   code?: string;
+  // Unix seconds: delivered under the requester's step-up approval, valid until then.
+  approved_until?: number;
 };
 
 export const DECLINE_CODE = /^[a-z0-9_.-]{1,64}$/;

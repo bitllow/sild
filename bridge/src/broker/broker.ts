@@ -122,7 +122,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
     const f = settle(c, requestId, true)!;
     if (r.state === 'delivered') {
       c.delivered.set(f.key, { source: f.proposal.source, dir: r.requestId });
-      emit({ type: 'delivered', conv: r.conv, requestId, summary: r.summary, files: r.files });
+      emit({ type: 'delivered', conv: r.conv, requestId, summary: r.summary, files: r.files, approvedUntil: r.approvedUntil });
       return;
     }
     const reason = r.state === 'declined' ? `declined: ${r.reason}` : r.state === 'expired' ? 'expired: the provider gave up' : `invalid delivery: ${r.reason}`;

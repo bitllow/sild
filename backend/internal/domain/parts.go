@@ -18,6 +18,7 @@ const (
 	maxInternalBytes = 1024
 	maxFixItems      = 20
 	maxEvidence      = 10
+	maxApproved      = 10
 )
 
 type stepPart struct {
@@ -25,6 +26,8 @@ type stepPart struct {
 	Result   string          `json:"result,omitempty"`
 	State    string          `json:"state"`
 	Internal json.RawMessage `json:"internal,omitempty"`
+	// ApprovedUntil (unix seconds): answered under the requester's approval, valid until then.
+	ApprovedUntil int64 `json:"approved_until,omitempty"`
 }
 
 // A finding behind a diagnosis. Source names where it came from in the
@@ -41,6 +44,8 @@ type messagePart struct {
 	Cause    string         `json:"cause,omitempty"`
 	Fix      []string       `json:"fix,omitempty"`
 	Evidence []evidenceItem `json:"evidence,omitempty"`
+	// Items are what an approval let the assistant check, as its steps named them.
+	Items []string `json:"items,omitempty"`
 }
 
 // partsBySender is which part types each sender kind may attach.
@@ -69,7 +74,7 @@ func validateParts(raw json.RawMessage, sender models.SenderKind) (json.RawMessa
 		}
 		switch p.Type {
 		case "steps":
-			if len(p.Steps) == 0 || len(p.Steps) > maxSteps || p.Cause != "" || len(p.Fix) > 0 || len(p.Evidence) > 0 {
+			if len(p.Steps) == 0 || len(p.Steps) > maxSteps || p.Cause != "" || len(p.Fix) > 0 || len(p.Evidence) > 0 || len(p.Items) > 0 {
 				return nil, invalid(fmt.Sprintf("parts[%d]: a steps part holds 1 to %d steps and nothing else", i, maxSteps))
 			}
 			for j, s := range p.Steps {
@@ -86,7 +91,7 @@ func validateParts(raw json.RawMessage, sender models.SenderKind) (json.RawMessa
 			if p.Cause == "" || !short(p.Cause, maxTextChars) {
 				return nil, invalid(fmt.Sprintf("parts[%d]: a diagnosis cause is empty or longer than %d characters", i, maxTextChars))
 			}
-			if len(p.Fix) > maxFixItems || len(p.Steps) > 0 {
+			if len(p.Fix) > maxFixItems || len(p.Steps) > 0 || len(p.Items) > 0 {
 				return nil, invalid(fmt.Sprintf("parts[%d]: a diagnosis holds at most %d fix steps and no steps", i, maxFixItems))
 			}
 			for _, f := range p.Fix {
@@ -103,8 +108,13 @@ func validateParts(raw json.RawMessage, sender models.SenderKind) (json.RawMessa
 				}
 			}
 		case "approval":
-			if len(p.Steps) > 0 || p.Cause != "" || len(p.Fix) > 0 || len(p.Evidence) > 0 {
-				return nil, invalid(fmt.Sprintf("parts[%d]: an approval part holds nothing else", i))
+			if len(p.Steps) > 0 || p.Cause != "" || len(p.Fix) > 0 || len(p.Evidence) > 0 || len(p.Items) > maxApproved {
+				return nil, invalid(fmt.Sprintf("parts[%d]: an approval part holds at most %d items and nothing else", i, maxApproved))
+			}
+			for _, item := range p.Items {
+				if item == "" || !short(item, maxLabelChars) {
+					return nil, invalid(fmt.Sprintf("parts[%d]: an approved item is empty or too long", i))
+				}
 			}
 		}
 	}

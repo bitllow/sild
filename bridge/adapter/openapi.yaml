@@ -84,7 +84,8 @@ info:
     (keyed by the assertion's `sub` and `conv`), and answers
     `{type: "sild:step-up-done", conversation, ok}`. The bridge then retries the
     parked requests, and the adapter checks its own record again. Nothing that
-    proves the approval passes through Sild.
+    proves the approval passes through Sild. A delivery answered under an
+    approval may say so with `approved_until`, which the requester sees on the step.
 
     ## Limits
 
@@ -390,6 +391,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/File' }
         code: { type: string, pattern: '^[a-z0-9_.-]{1,64}$', description: 'For declined: as the 403 body code.' }
+        approved_until: { type: integer, description: 'Unix seconds. For delivered: answered under the requester''s step-up approval, valid until then; the requester sees it on the step.' }
 
     File:
       type: object

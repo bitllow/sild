@@ -80,6 +80,11 @@ const StepsCard = observer(function StepsCard({ id, steps, t }: { id: string; st
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
               <span style={{ fontSize: 13 }}>{s.label}</span>
               {result && <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{result}</span>}
+              {s.approved_until && (
+                <span data-testid="triage-step-approved" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                  Under your approval until {new Date(s.approved_until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
               {open && s.internal && (
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)", wordBreak: "break-all" }}>
                   {describeRequest(s.internal)}

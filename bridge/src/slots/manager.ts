@@ -571,7 +571,7 @@ export class SlotManager {
       case 'delivered': {
         const files = e.files.map((f) => f.path).join(', ') || 'no files';
         this.notify(e.conv, `Data ${e.requestId} arrived: ${files} — ${clip(e.summary)}`);
-        await this.updateStep(e.conv, st, e.requestId, { state: 'done', result: clip(e.summary) });
+        await this.updateStep(e.conv, st, e.requestId, { state: 'done', result: clip(e.summary), approved_until: e.approvedUntil });
         return;
       }
       case 'parked': {

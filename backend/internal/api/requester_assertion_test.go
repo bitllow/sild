@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -122,21 +123,36 @@ func TestOnlyTheRequesterApprovesDataAccess(t *testing.T) {
 	if got := approve(f.h.Request("POST", path).Cookie("sild_admin", f.liis)); got < 400 {
 		t.Fatalf("another requester approved: %d", got)
 	}
+	f.botMessage(t, []map[string]any{{"type": "steps", "steps": []map[string]any{
+		{"label": "Checked his phones", "state": "needs_approval"}, {"label": "Checked his trips", "state": "done"},
+	}}})
 	w := f.h.Request("POST", path).Cookie("sild_admin", f.marko).Do()
 	if w.Code != http.StatusCreated {
 		t.Fatalf("approve: %d %s", w.Code, w.Body)
 	}
 	var m struct {
-		SenderKind string           `json:"sender_kind"`
-		Parts      []map[string]any `json:"parts"`
+		SenderKind string `json:"sender_kind"`
+		Body       string `json:"body"`
+		Parts      []struct {
+			Type  string   `json:"type"`
+			Items []string `json:"items"`
+		} `json:"parts"`
 	}
 	testutil.DecodeJSON(t, w, &m)
-	if m.SenderKind != "system" || len(m.Parts) != 1 || m.Parts[0]["type"] != "approval" {
+	if m.SenderKind != "system" || len(m.Parts) != 1 || m.Parts[0].Type != "approval" ||
+		len(m.Parts[0].Items) != 1 || m.Parts[0].Items[0] != "Checked his phones" || m.Body != "Approved data access: Checked his phones" {
 		t.Fatalf("approval message: %+v", m)
 	}
 }
 
-func TestAStepMayWaitForApproval(t *testing.T) {
+func TestAStepMayWaitForApprovalAndShowWhenItRanUnderOne(t *testing.T) {
 	f := newRequesterFixture(t)
-	f.botMessage(t, []map[string]any{{"type": "steps", "steps": []map[string]any{{"label": "Checked his phones", "state": "needs_approval"}}}})
+	f.botMessage(t, []map[string]any{{"type": "steps", "steps": []map[string]any{
+		{"label": "Checked his phones", "state": "needs_approval"},
+		{"label": "Checked his trips", "state": "done", "approved_until": 1792866528},
+	}}})
+	w := f.h.Request("GET", "/v1/conversations/"+f.own+"/messages").Cookie("sild_admin", f.marko).Do()
+	if !strings.Contains(w.Body.String(), `"approved_until":1792866528`) {
+		t.Fatalf("the requester does not see when their approval runs out: %s", w.Body)
+	}
 }

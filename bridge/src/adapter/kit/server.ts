@@ -16,7 +16,7 @@ export type FileSpec = {
 };
 
 export type Final =
-  | { type: 'deliver'; summary: string; files: FileSpec[] }
+  | { type: 'deliver'; summary: string; files: FileSpec[]; approvedUntil?: number }
   | { type: 'decline'; reason: string; code?: string }
   | { type: 'expire' };
 
@@ -101,7 +101,7 @@ export function createAdapter(opts: AdapterOptions): Adapter {
   const seal = (req: InfoRequest, final: Final): string => {
     const delivery: Delivery =
       final.type === 'deliver'
-        ? { id: req.id, state: 'delivered', summary: clip(final.summary), files: final.files.map(wire) }
+        ? { id: req.id, state: 'delivered', summary: clip(final.summary), files: final.files.map(wire), ...(final.approvedUntil && { approved_until: Math.floor(final.approvedUntil) }) }
         : final.type === 'decline'
           ? { id: req.id, state: 'declined', summary: clip(final.reason), files: [], ...(final.code && { code: final.code }) }
           : { id: req.id, state: 'expired', summary: '', files: [] };

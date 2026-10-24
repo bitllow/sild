@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"regexp"
+	"strings"
 	"time"
 
 	"gorm.io/datatypes"
@@ -125,8 +126,44 @@ func (s *Service) ApproveDataAccess(ctx context.Context, tenantID, convID, actor
 	if r := requesterActor(members); r == nil || *r != actorID {
 		return nil, ErrForbidden
 	}
+	items, err := s.awaitingApproval(ctx, tenantID, convID)
+	if err != nil {
+		return nil, err
+	}
+	parts, err := json.Marshal([]messagePart{{Type: "approval", Items: items}})
+	if err != nil {
+		return nil, err
+	}
+	body := "Approved data access"
+	if len(items) > 0 {
+		body += ": " + strings.Join(items, "; ")
+	}
 	return s.SendMessage(ctx, tenantID, convID, SendInput{
-		SenderKind: models.SenderSystem, Internal: &actorID, Conv: conv,
-		Body: "Approved data access", Parts: json.RawMessage(`[{"type":"approval"}]`),
+		SenderKind: models.SenderSystem, Internal: &actorID, Conv: conv, Body: body, Parts: parts,
 	})
+}
+
+// awaitingApproval names the assistant's steps that wait for the requester's approval, as the steps label them.
+func (s *Service) awaitingApproval(ctx context.Context, tenantID, convID string) ([]string, error) {
+	page, err := s.store.Messages().ListBefore(ctx, tenantID, convID, "", 100, false)
+	if err != nil {
+		return nil, err
+	}
+	var items []string
+	seen := map[string]bool{}
+	for _, m := range page.Messages {
+		var parts []messagePart
+		if m.SenderKind != models.SenderBot || json.Unmarshal(m.Parts, &parts) != nil {
+			continue
+		}
+		for _, p := range parts {
+			for _, st := range p.Steps {
+				if st.State == "needs_approval" && !seen[st.Label] && len(items) < maxApproved {
+					seen[st.Label] = true
+					items = append(items, st.Label)
+				}
+			}
+		}
+	}
+	return items, nil
 }

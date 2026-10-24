@@ -159,7 +159,8 @@ createServer(async (req, res) => {
     }
     case "/elevation": {
       const key = `${url.searchParams.get("user")}:${url.searchParams.get("conv")}`;
-      return json(200, { elevated: (elevations.get(key) ?? 0) > Date.now() });
+      const until = elevations.get(key) ?? 0;
+      return json(200, { elevated: until > Date.now(), until: Math.floor(until / 1000) });
     }
     case "/validate": {
       if (req.method !== "POST") return json(405, { error: "POST only" });
@@ -279,8 +280,8 @@ function page(inbox: string): string {
 
   // Passkeys need a secure context: https, or plain http on localhost.
   const PASSKEYS = window.isSecureContext && !!window.PublicKeyCredential;
-  const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  const fromB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+  const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  const fromB64u = (s) => Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/")), (ch) => ch.charCodeAt(0));
   const post = async (path, body) => (await fetch(path, { method: "POST", body: JSON.stringify({ user: current, ...body }) })).json();
 
   async function createPasskey() {
