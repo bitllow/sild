@@ -27,6 +27,7 @@ type Store interface {
 	Messages() MessageRepo
 	Receipts() ReceiptRepo
 	Uploads() UploadRepo
+	RequesterAssertions() RequesterAssertionRepo
 	PushTokens() PushTokenRepo
 	PushConfigs() PushConfigRepo
 	PushOutbox() PushOutboxRepo

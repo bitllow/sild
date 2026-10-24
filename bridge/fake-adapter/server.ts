@@ -1,15 +1,20 @@
-// Fake provider adapter serving the design's scenarios.
-//   ADAPTER_SECRET=dev-secret-at-least-16 PORT=8790 node fake-adapter/server.ts
-// ADAPTER_PRIVATE_KEY (base64url PKCS#8 or PEM) pins a key; otherwise one is
-// generated and its public half printed for the bridge config.
+// Fake provider adapter serving the design's scenarios; prints its public key for the bridge:
+//   ADAPTER_SECRET=… SILD_TENANT=… SILD_JWKS_URL=… [SILD_KEYS] [ADAPTER_PRIVATE_KEY] [ELEVATION_URL] node fake-adapter/server.ts
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { MIN_SECRET_LENGTH, createAdapter, generateKeyPair, loadPrivateKey, publicKeyOf, type Adapter } from '../src/adapter/kit/index.ts';
+import {
+  MIN_SECRET_LENGTH, STEP_UP_REQUIRED, createAdapter, generateKeyPair, loadPrivateKey, publicKeyOf, type Adapter, type Handler, type SildTrust,
+} from '../src/adapter/kit/index.ts';
 import { CATALOG, INSTRUCTIONS, handle } from './scenarios.ts';
 
 export type FakeAdapter = { url: string; publicKey: string; adapter: Adapter; server: Server; close: () => Promise<void> };
 
-export async function startFakeAdapter(opts: { secret: string; privateKey?: string; port?: number; host?: string; publicUrl?: string }): Promise<FakeAdapter> {
+// Whether the requester approved data access for this conversation; unset means no approval is needed.
+export type Elevation = (user: string, conv: string) => Promise<boolean>;
+
+export async function startFakeAdapter(opts: {
+  secret: string; sild: SildTrust; elevated?: Elevation; privateKey?: string; port?: number; host?: string; publicUrl?: string;
+}): Promise<FakeAdapter> {
   const privateKey = loadPrivateKey(opts.privateKey ?? generateKeyPair().privateKey);
   const host = opts.host ?? '127.0.0.1';
   let publicUrl = opts.publicUrl ?? '';
@@ -17,7 +22,8 @@ export async function startFakeAdapter(opts: { secret: string; privateKey?: stri
     secret: opts.secret,
     privateKey,
     catalog: CATALOG,
-    handle,
+    handle: opts.elevated ? stepUp(opts.elevated, handle) : handle,
+    sild: opts.sild,
     instructions: () => INSTRUCTIONS,
     get publicUrl() {
       return publicUrl;
@@ -41,14 +47,39 @@ export async function startFakeAdapter(opts: { secret: string; privateKey?: stri
   };
 }
 
+function stepUp(elevated: Elevation, next: Handler): Handler {
+  return async (req) => {
+    const ok = await elevated(req.requester.id, req.conversation_ref).catch(() => false);
+    if (!ok) return { type: 'decline', code: STEP_UP_REQUIRED, reason: 'Approve data access to continue' };
+    return next(req);
+  };
+}
+
+// Asks the integrator, as a real adapter would read its own elevation store.
+function elevationAt(url: string): Elevation {
+  return async (user, conv) => {
+    const res = await fetch(`${url}?${new URLSearchParams({ user, conv })}`, { signal: AbortSignal.timeout(3_000) });
+    return res.ok && ((await res.json()) as { elevated?: boolean }).elevated === true;
+  };
+}
+
 if (import.meta.main) {
   const secret = process.env.ADAPTER_SECRET;
   if (!secret || secret.length < MIN_SECRET_LENGTH) {
     console.error(`ADAPTER_SECRET is required, at least ${MIN_SECRET_LENGTH} characters`);
     process.exit(1);
   }
+  const tenant = process.env.SILD_TENANT?.trim();
+  const jwksUrl = process.env.SILD_JWKS_URL?.trim() || undefined;
+  const keys = process.env.SILD_KEYS ? JSON.parse(process.env.SILD_KEYS) : undefined;
+  if (!tenant || (!jwksUrl && !keys)) {
+    console.error('SILD_TENANT and SILD_JWKS_URL or SILD_KEYS are required');
+    process.exit(1);
+  }
   const fake = await startFakeAdapter({
     secret,
+    sild: { tenant, jwksUrl, keys },
+    elevated: process.env.ELEVATION_URL ? elevationAt(process.env.ELEVATION_URL) : undefined,
     privateKey: process.env.ADAPTER_PRIVATE_KEY || undefined,
     port: Number(process.env.PORT ?? 8790),
     host: process.env.HOST ?? '127.0.0.1',

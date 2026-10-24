@@ -82,7 +82,8 @@ export type ConversationPage = Page<ConversationRow> & {
   counts?: { open: number; you: number; unassigned: number; closed: number };
 };
 
-export type StepState = 'running' | 'done' | 'not_available';
+// needs_approval: parked until the requester approves data access at the integrator.
+export type StepState = 'running' | 'done' | 'not_available' | 'needs_approval';
 
 export type Step = {
   label: string;
@@ -102,7 +103,9 @@ export type Evidence = {
 
 export type Part =
   | { type: 'steps'; steps: Step[] }
-  | { type: 'diagnosis'; cause: string; fix: string[]; evidence?: Evidence[] };
+  | { type: 'diagnosis'; cause: string; fix: string[]; evidence?: Evidence[] }
+  // On the system message a requester's approval of data access leaves.
+  | { type: 'approval' };
 
 export type Disposition = 'inline' | 'attachment';
 

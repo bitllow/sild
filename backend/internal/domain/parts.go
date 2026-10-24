@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"unicode/utf8"
+
+	"github.com/bitllow/sild/backend/internal/store/models"
 )
 
 // Limits on structured message parts, in characters. Results and summaries come
@@ -41,9 +43,19 @@ type messagePart struct {
 	Evidence []evidenceItem `json:"evidence,omitempty"`
 }
 
-// validateParts checks a parts document and returns it re-encoded, so only
-// known fields are stored.
-func validateParts(raw json.RawMessage) (json.RawMessage, error) {
+// partsBySender is which part types each sender kind may attach.
+var partsBySender = map[models.SenderKind]map[string]bool{
+	models.SenderBot:    {"steps": true, "diagnosis": true},
+	models.SenderSystem: {"approval": true},
+}
+
+// validateParts checks a parts document from sender and returns it
+// re-encoded, so only known fields are stored.
+func validateParts(raw json.RawMessage, sender models.SenderKind) (json.RawMessage, error) {
+	allowed := partsBySender[sender]
+	if allowed == nil {
+		return nil, invalid("only an assistant sends parts")
+	}
 	var parts []messagePart
 	if err := json.Unmarshal(raw, &parts); err != nil {
 		return nil, invalid("parts must be an array of parts")
@@ -52,6 +64,9 @@ func validateParts(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, invalid(fmt.Sprintf("parts must hold 1 to %d parts", maxParts))
 	}
 	for i, p := range parts {
+		if !allowed[p.Type] {
+			return nil, invalid(fmt.Sprintf("parts[%d].type %q is not a part this sender may send", i, p.Type))
+		}
 		switch p.Type {
 		case "steps":
 			if len(p.Steps) == 0 || len(p.Steps) > maxSteps || p.Cause != "" || len(p.Fix) > 0 || len(p.Evidence) > 0 {
@@ -59,9 +74,9 @@ func validateParts(raw json.RawMessage) (json.RawMessage, error) {
 			}
 			for j, s := range p.Steps {
 				switch s.State {
-				case "running", "done", "not_available":
+				case "running", "done", "not_available", "needs_approval":
 				default:
-					return nil, invalid(fmt.Sprintf("parts[%d].steps[%d].state must be running, done or not_available", i, j))
+					return nil, invalid(fmt.Sprintf("parts[%d].steps[%d].state must be running, done, not_available or needs_approval", i, j))
 				}
 				if !short(s.Label, maxLabelChars) || s.Label == "" || !short(s.Result, maxTextChars) || len(s.Internal) > maxInternalBytes {
 					return nil, invalid(fmt.Sprintf("parts[%d].steps[%d] is empty or too long", i, j))
@@ -87,11 +102,27 @@ func validateParts(raw json.RawMessage) (json.RawMessage, error) {
 					return nil, invalid(fmt.Sprintf("parts[%d].evidence[%d] is empty or too long", i, j))
 				}
 			}
-		default:
-			return nil, invalid(fmt.Sprintf("parts[%d].type must be steps or diagnosis", i))
+		case "approval":
+			if len(p.Steps) > 0 || p.Cause != "" || len(p.Fix) > 0 || len(p.Evidence) > 0 {
+				return nil, invalid(fmt.Sprintf("parts[%d]: an approval part holds nothing else", i))
+			}
 		}
 	}
 	return json.Marshal(parts)
+}
+
+// hasApproval reports a requester's approval of data access, which wakes the assistant like a reply.
+func hasApproval(raw []byte) bool {
+	var parts []messagePart
+	if json.Unmarshal(raw, &parts) != nil {
+		return false
+	}
+	for _, p := range parts {
+		if p.Type == "approval" {
+			return true
+		}
+	}
+	return false
 }
 
 func short(s string, max int) bool { return utf8.ValidString(s) && utf8.RuneCountInString(s) <= max }

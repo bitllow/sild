@@ -14,6 +14,7 @@ func All() []any {
 		&AdminSession{},
 		&TenantIdentityProvider{},
 		&EmbedSession{},
+		&RequesterAssertion{},
 		&SigningKey{},
 		&Contact{},
 		&ContactMeta{},

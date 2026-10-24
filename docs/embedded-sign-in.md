@@ -35,13 +35,18 @@ host page ──postMessage {token}──▶ iframe ──POST /v1/admin/auth/em
   anywhere it was not given for.
 - `allowed_origins` are the origins allowed to frame the inbox and post it a
   token.
+- `embedded_only` (default false): members linked to the integrator (with an
+  `external_sub`) may sign in only this way. Password and Google sign-in are
+  refused for them, and sessions they already had end at once, so switching
+  someone off at the integrator switches them off in Sild. Unlinked members,
+  such as a Sild-side owner, keep their normal sign-in as a way back in.
 
 `GET /v1/identity-provider` returns `embed_key`, `validator_url`,
-`has_validator_token`, `allowed_origins` and `updated_at`. `DELETE` turns
+`has_validator_token`, `allowed_origins`, `embedded_only` and `updated_at`. `DELETE` turns
 embedded sign-in off and ends every embedded session of the tenant.
 
 From the CLI: `sild-admin identity set --tenant ID --validator-url URL
---validator-token-file FILE --origins a,b`, plus `identity show` and
+--validator-token-file FILE --origins a,b [--embedded-only]`, plus `identity show` and
 `identity remove`.
 
 Only the host page's token comes from the request. The URL and the API token

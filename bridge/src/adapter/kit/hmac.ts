@@ -81,6 +81,7 @@ export function verifyRequest(
   return { ok: true };
 }
 
-function one(v: string | string[] | undefined): string | undefined {
+// A header sent once; a repeated header counts as absent.
+export function one(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? undefined : v;
 }

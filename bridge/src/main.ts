@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { connect, createHttp, principal as getPrincipal, realtimeToken, type Http } from '@sild/client';
+import { connect, createHttp, principal as getPrincipal, realtimeToken, requesterAssertion, type Http } from '@sild/client';
 import { Centrifuge } from 'centrifuge';
+import type { Assert } from './adapter/client.ts';
 import { DEFAULT_FILE_LIMITS, FileStore } from './adapter/files.ts';
 import { ConfigError, loadConfig, type Config } from './config.ts';
 import type { InfoBroker } from './contracts.ts';
@@ -12,7 +13,15 @@ import { SlotManager } from './slots/manager.ts';
 import { NullBroker } from './slots/null-broker.ts';
 import type { Log } from './slots/types.ts';
 
-export type BrokerFactory = (ctx: { config: Config; sild: Http; files: FileStore; modelBaseUrl: string; modelToken: string; log: Log }) => InfoBroker | Promise<InfoBroker>;
+export type BrokerFactory = (ctx: {
+  config: Config;
+  sild: Http;
+  files: FileStore;
+  assert: Assert;
+  modelBaseUrl: string;
+  modelToken: string;
+  log: Log;
+}) => InfoBroker | Promise<InfoBroker>;
 
 export type Bridge = { stop(): Promise<void> };
 
@@ -35,7 +44,8 @@ export async function startBridge(cfg: Config, makeBroker: BrokerFactory = () =>
   const proxyHost = cfg.runnerMode === 'docker' ? 'host.docker.internal' : '127.0.0.1';
   const confluence = createConfluenceTools(cfg.confluence, log);
   const files = new FileStore(cfg.workRoot, DEFAULT_FILE_LIMITS);
-  const broker = await makeBroker({ config: cfg, sild, files, modelBaseUrl: `http://127.0.0.1:${proxy.port}`, modelToken: proxyToken, log });
+  const assert = async (conv: string, body: string) => (await requesterAssertion(sild, conv, body)).assertion;
+  const broker = await makeBroker({ config: cfg, sild, files, assert, modelBaseUrl: `http://127.0.0.1:${proxy.port}`, modelToken: proxyToken, log });
   const runner = new ClaudeSessionRunner({
     workRoot: cfg.workRoot,
     srcDir: cfg.srcDir,

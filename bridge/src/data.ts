@@ -1,4 +1,4 @@
-import { AdapterClient } from './adapter/client.ts';
+import { AdapterClient, type Assert } from './adapter/client.ts';
 import type { FileStore } from './adapter/files.ts';
 import { createBroker, DEFAULT_BROKER_LIMITS } from './broker/broker.ts';
 import { ConfigError, loadSecret, type Config } from './config.ts';
@@ -57,13 +57,17 @@ export function checkRouterAuth(cfg: Config, data: DataConfig): void {
 }
 
 // Without its own key the router reaches the model through the bridge's proxy, holding only the proxy token.
-export function makeBroker(data: DataConfig, ctx: { config: Config; files: FileStore; modelBaseUrl: string; modelToken: string; log: Log }): InfoBroker {
+export function makeBroker(
+  data: DataConfig,
+  ctx: { config: Config; files: FileStore; assert: Assert; modelBaseUrl: string; modelToken: string; log: Log },
+): InfoBroker {
   const log = (msg: string) => ctx.log(msg);
   const adapter = new AdapterClient({
     url: data.adapterUrl,
     secret: data.adapterSecret,
     publicKey: data.adapterPublicKey,
     files: ctx.files,
+    assert: ctx.assert,
     allowInsecureLocal: data.allowInsecureLocal,
     log,
   });

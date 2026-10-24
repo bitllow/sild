@@ -20,7 +20,10 @@ export type DeliveredFile = {
 // What the info broker reports. The Sild side turns these into steps-part
 // updates and session wake-ups; the data side never talks to Sild or the session.
 export type BrokerEvent =
+  // Again for the same id: a parked request is being retried.
   | { type: 'requested'; conv: string; requestId: string; label: string; source: string; params: Record<string, unknown> }
+  // Waits for the requester to approve data access; retried once they do.
+  | { type: 'parked'; conv: string; requestId: string; reason: string }
   | { type: 'delivered'; conv: string; requestId: string; summary: string; files: DeliveredFile[] }
   | { type: 'not_available'; conv: string; requestId: string; reason: string };
 
@@ -43,4 +46,6 @@ export interface InfoBroker {
   instructions(): Promise<IntegratorInstructions | null>;
   // No sources when there are none or the catalog cannot be had. Never throws.
   catalog(): Promise<DataCatalog>;
+  // The requester approved data access: retry what was parked for it. Resolves to how many.
+  approved(conv: string): Promise<number>;
 }

@@ -99,17 +99,16 @@ func (m *KeyManager) MintAgent(ctx context.Context, adminID, tid string, ttl tim
 }
 
 func (m *KeyManager) mint(ctx context.Context, sub, tid, typ string, ttl time.Duration) (string, time.Time, error) {
-	sk, err := m.keys.Active(ctx)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	priv, err := parseECPrivate(sk.PrivatePEM)
-	if err != nil {
-		return "", time.Time{}, err
-	}
+	c, exp := m.claims(sub, tid, typ, ttl)
+	tok, err := m.sign(ctx, c)
+	return tok, exp, err
+}
+
+// claims are what every token Sild signs carries.
+func (m *KeyManager) claims(sub, tid, typ string, ttl time.Duration) (Claims, time.Time) {
 	now := time.Now()
 	exp := now.Add(ttl)
-	claims := Claims{
+	return Claims{
 		Tid: tid,
 		Typ: typ,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -118,11 +117,38 @@ func (m *KeyManager) mint(ctx context.Context, sub, tid, typ string, ttl time.Du
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
 		},
+	}, exp
+}
+
+// sign signs claims with the active key, named by kid.
+func (m *KeyManager) sign(ctx context.Context, claims jwt.Claims) (string, error) {
+	sk, err := m.keys.Active(ctx)
+	if err != nil {
+		return "", err
+	}
+	priv, err := parseECPrivate(sk.PrivatePEM)
+	if err != nil {
+		return "", err
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tok.Header["kid"] = sk.Kid
-	signed, err := tok.SignedString(priv)
-	return signed, exp, err
+	return tok.SignedString(priv)
+}
+
+// RequesterClaims vouch to a data adapter for who asks one exact request body.
+// Verify and VerifyRealtime refuse typ "requester".
+type RequesterClaims struct {
+	Claims
+	Conv string `json:"conv"`
+	Rid  string `json:"rid"`
+	Bsh  string `json:"bsh"`
+}
+
+// MintRequester signs a requester assertion with the active key.
+func (m *KeyManager) MintRequester(ctx context.Context, tid, sub, conv, rid, bodySHA256 string, ttl time.Duration) (string, time.Time, error) {
+	c, exp := m.claims(sub, tid, "requester", ttl)
+	tok, err := m.sign(ctx, RequesterClaims{Claims: c, Conv: conv, Rid: rid, Bsh: bodySHA256})
+	return tok, exp, err
 }
 
 // Verify parses and validates a user JWT, returning its claims (§2.2).

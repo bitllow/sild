@@ -47,6 +47,11 @@ export function stepsOf(m: Message): StepsPart[] {
   return (m.parts ?? []).filter((p): p is StepsPart => p.type === "steps");
 }
 
+/** Data requests parked until the requester approves data access at the integrator. */
+export function awaitingApproval(messages: Message[]): Step[] {
+  return messages.flatMap(stepsOf).flatMap((p) => p.steps).filter((s) => s.state === "needs_approval");
+}
+
 /** One data request as operators read it: source plus its parameters. */
 export function describeRequest(internal: NonNullable<Step["internal"]>): string {
   const params = Object.entries(internal.params ?? {})

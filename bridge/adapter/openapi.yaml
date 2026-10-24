@@ -49,6 +49,43 @@ info:
     that does not answer a request the bridge has outstanding for exactly that
     `conversation_ref`. A delivery is accepted once.
 
+    ## Requester assertion
+
+    `POST /requests` also carries `X-Sild-Requester`: a JWT signed by Sild
+    itself, not by the bridge, stating who asks this exact request. The adapter
+    verifies it against Sild's JWKS (`<sild>/.well-known/jwks.json`, ES256, by
+    `kid`) and refuses the request (401) unless every check holds:
+
+    | claim  | must be                                                     |
+    |--------|-------------------------------------------------------------|
+    | `typ`  | `requester`                                                 |
+    | `tid`  | the Sild tenant this adapter serves                         |
+    | `exp`  | in the future (`iat` not in the future), 30 s skew allowed  |
+    | `bsh`  | base64url(sha256(raw request body))                         |
+    | `sub`  | `requester.id` of the body                                  |
+    | `conv` | `conversation_ref` of the body                              |
+    | `rid`  | `id` of the body                                            |
+
+    Sild signs one only for the service account holding the conversation's
+    assignment, only while the conversation is open, and only for the
+    conversation's own linked requester, and it records each one. A leaked
+    bridge secret therefore cannot ask about anyone; a compromised bridge can
+    reach only the requesters of conversations it currently holds. The
+    assertion lives five minutes and is bound to one request body.
+
+    ## Step-up
+
+    An adapter may require the requester to approve data access first, for
+    example with a passkey on the integrator's own page. It declines with
+    `code: step_up_required` (in the 403 body, or in a declined delivery). The
+    bridge then parks the request and the requester sees an Approve button. The
+    embedded inbox posts `{type: "sild:step-up", conversation, reason}` to the
+    host page. The host runs its step-up, records the approval on its side
+    (keyed by the assertion's `sub` and `conv`), and answers
+    `{type: "sild:step-up-done", conversation, ok}`. The bridge then retries the
+    parked requests, and the adapter checks its own record again. Nothing that
+    proves the approval passes through Sild.
+
     ## Limits
 
     | what                         | limit                                         |
@@ -180,6 +217,7 @@ paths:
                 properties:
                   declined: { const: true }
                   reason: { type: string, description: 'Shown to the requester; one line.' }
+                  code: { type: string, pattern: '^[a-z0-9_.-]{1,64}$', description: 'Why, for the bridge to act on: step_up_required parks the request until the requester approves.' }
         '404':
           description: Unknown source.
           content:
@@ -321,6 +359,7 @@ components:
         source: { type: string }
         params: { type: object }
         reason: { type: string, description: 'Why the data is wanted, in plain words.' }
+      description: Sent with an `X-Sild-Requester` assertion; see above.
 
     SignedDelivery:
       type: string
@@ -350,6 +389,7 @@ components:
         files:
           type: array
           items: { $ref: '#/components/schemas/File' }
+        code: { type: string, pattern: '^[a-z0-9_.-]{1,64}$', description: 'For declined: as the 403 body code.' }
 
     File:
       type: object

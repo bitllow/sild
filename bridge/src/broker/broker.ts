@@ -5,6 +5,7 @@ import type { BrokerEvent, InfoBroker, Source } from '../contracts.ts';
 import type { AdapterClient, Received } from '../adapter/client.ts';
 import { safeConv } from '../adapter/files.ts';
 import { isRecord, validate } from '../adapter/kit/schema.ts';
+import { STEP_UP_REQUIRED } from '../adapter/kit/types.ts';
 import { redact } from '../router/redact.ts';
 import type { Proposal, Router } from '../router/router.ts';
 import { errText } from '../util.ts';
@@ -31,13 +32,26 @@ export type BrokerConfig = {
 
 export type Broker = InfoBroker & { close(): void };
 
-type Inflight = { source: string; key: string; timer: NodeJS.Timeout };
+// One request as the session knows it: its id survives a retry, while the
+// adapter sees a fresh wire id on every attempt.
+type Inflight = {
+  source: Source;
+  requester: string;
+  proposal: Proposal;
+  reason: string;
+  key: string;
+  wire: string;
+  // Unset while parked until the requester approves data access.
+  timer?: NodeJS.Timeout;
+};
 type Conv = {
   issued: number;
   ids: Set<string>;
   inflight: Map<string, Inflight>;
-  // key (source + params) → request id, for everything delivered so far.
-  delivered: Map<string, { source: string; requestId: string }>;
+  // wire id → request id, for the attempt under way.
+  wires: Map<string, string>;
+  // key (source + params) → the data directory of what was delivered.
+  delivered: Map<string, { source: string; dir: string }>;
 };
 
 export function createBroker(cfg: BrokerConfig): Broker {
@@ -49,7 +63,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
   const state = (conv: string): Conv => {
     let c = convs.get(conv);
     if (!c) {
-      convs.set(conv, (c = { issued: 0, ids: new Set(), inflight: new Map(), delivered: new Map() }));
+      convs.set(conv, (c = { issued: 0, ids: new Set(), inflight: new Map(), wires: new Map(), delivered: new Map() }));
       cfg.adapter.files.reopen(conv);
     }
     return c;
@@ -65,68 +79,89 @@ export function createBroker(cfg: BrokerConfig): Broker {
     }
   };
 
-  const catalog = async (): Promise<Source[]> => {
+  const sourcesByName = async (): Promise<Map<string, Source>> => {
     try {
-      return await cfg.adapter.catalog();
+      return new Map((await cfg.adapter.catalog()).map((s) => [s.source, s]));
     } catch (err) {
       log(`catalog unavailable: ${errText(err)}`);
-      return [];
+      return new Map();
     }
   };
 
-  const finish = (conv: string, requestId: string): Inflight | null => {
-    const f = convs.get(conv)?.inflight.get(requestId);
+  // Ends the attempt under way; the request stays known unless done.
+  const settle = (c: Conv, requestId: string, done: boolean): Inflight | null => {
+    const f = c.inflight.get(requestId);
     if (!f) return null;
     clearTimeout(f.timer);
-    convs.get(conv)!.inflight.delete(requestId);
+    f.timer = undefined;
+    c.wires.delete(f.wire);
+    if (done) c.inflight.delete(requestId);
     return f;
   };
 
   const notAvailable = (conv: string, requestId: string, reason: string) => {
-    if (finish(conv, requestId)) emit({ type: 'not_available', conv, requestId, reason });
+    const c = convs.get(conv);
+    if (c && settle(c, requestId, true)) emit({ type: 'not_available', conv, requestId, reason });
   };
 
   const received = async (r: Received) => {
-    const f = finish(r.conv, r.requestId);
-    if (!f) {
+    const c = convs.get(r.conv);
+    const requestId = c?.wires.get(r.requestId);
+    if (!c || !requestId) {
       // Forgotten or timed out while the files were being written.
       if (r.state === 'delivered' && r.files.length) {
         await rm(path.join(cfg.adapter.files.dataDir(r.conv), r.requestId), { recursive: true, force: true });
       }
       return;
     }
+    if (r.state === 'declined' && r.code === STEP_UP_REQUIRED) {
+      settle(c, requestId, false);
+      emit({ type: 'parked', conv: r.conv, requestId, reason: r.reason });
+      return;
+    }
+    const f = settle(c, requestId, true)!;
     if (r.state === 'delivered') {
-      convs.get(r.conv)?.delivered.set(f.key, { source: f.source, requestId: r.requestId });
-      emit({ type: 'delivered', conv: r.conv, requestId: r.requestId, summary: r.summary, files: r.files });
+      c.delivered.set(f.key, { source: f.proposal.source, dir: r.requestId });
+      emit({ type: 'delivered', conv: r.conv, requestId, summary: r.summary, files: r.files });
       return;
     }
     const reason = r.state === 'declined' ? `declined: ${r.reason}` : r.state === 'expired' ? 'expired: the provider gave up' : `invalid delivery: ${r.reason}`;
-    emit({ type: 'not_available', conv: r.conv, requestId: r.requestId, reason });
+    emit({ type: 'not_available', conv: r.conv, requestId, reason });
   };
 
   const unsubscribe = cfg.adapter.onReceived((r) => void received(r));
 
-  const start = (conv: string, requester: string, source: Source, p: Proposal, reason: string): string => {
-    const c = state(conv);
-    const requestId = randomUUID().replaceAll('-', '');
-    const wait = Math.min(source.max_wait_seconds, limits.maxWaitSeconds) + limits.graceSeconds;
-    const timer = setTimeout(() => {
-      cfg.adapter.cancel(requestId);
+  // One attempt at the adapter, under a fresh wire id.
+  const send = (conv: string, c: Conv, requestId: string, f: Inflight) => {
+    f.wire = randomUUID().replaceAll('-', '');
+    c.wires.set(f.wire, requestId);
+    const wait = Math.min(f.source.max_wait_seconds, limits.maxWaitSeconds) + limits.graceSeconds;
+    const wire = f.wire;
+    f.timer = setTimeout(() => {
+      cfg.adapter.cancel(wire);
       notAvailable(conv, requestId, `no answer within ${Math.round(wait)}s`);
     }, wait * 1000);
-    timer.unref();
-    c.issued++;
-    for (const id of idsOf(source, p.params)) c.ids.add(id);
-    c.inflight.set(requestId, { source: p.source, key: keyOf(p), timer });
-    emit({ type: 'requested', conv, requestId, label: redact(p.label).text, source: p.source, params: p.params });
+    f.timer.unref();
+    const p = f.proposal;
     cfg.adapter
-      .request(conv, { id: requestId, requester: { id: requester }, source: p.source, params: p.params, reason })
+      .request(conv, { id: wire, requester: { id: f.requester }, source: p.source, params: p.params, reason: f.reason })
       .then(
         (sent) => {
           if (sent.type === 'failed') notAvailable(conv, requestId, sent.reason);
         },
         (err: unknown) => notAvailable(conv, requestId, errText(err)),
       );
+  };
+
+  const start = (conv: string, requester: string, source: Source, p: Proposal, reason: string): string => {
+    const c = state(conv);
+    const requestId = randomUUID().replaceAll('-', '');
+    c.issued++;
+    for (const id of idsOf(source, p.params)) c.ids.add(id);
+    const f: Inflight = { source, requester, proposal: p, reason, key: keyOf(p), wire: '' };
+    c.inflight.set(requestId, f);
+    emit({ type: 'requested', conv, requestId, label: redact(p.label).text, source: p.source, params: p.params });
+    send(conv, c, requestId, f);
     return requestId;
   };
 
@@ -145,8 +180,8 @@ export function createBroker(cfg: BrokerConfig): Broker {
       safeConv(conv);
       const c = state(conv);
       const budget = Math.min(limits.perMessage, limits.perConversation - c.issued);
-      const sources = new Map((await catalog()).map((s) => [s.source, s]));
-      const taken = new Set([...[...c.delivered.values()].map((d) => d.source), ...[...c.inflight.values()].map((f) => f.source)]);
+      const sources = await sourcesByName();
+      const taken = new Set([...[...c.delivered.values()].map((d) => d.source), ...[...c.inflight.values()].map((f) => f.proposal.source)]);
       let proposals: Proposal[] = [];
       // A requester the provider cannot identify gets no data: fail closed.
       if (requester) {
@@ -177,7 +212,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
       if (!requester) return { notAvailable: 'the requester is not linked to the data provider' };
       const c = state(conv);
       if (c.issued >= limits.perConversation) return { notAvailable: 'request limit for this conversation reached' };
-      const sources = new Map((await catalog()).map((s) => [s.source, s]));
+      const sources = await sourcesByName();
       if (!sources.size) return { notAvailable: 'no data sources are reachable' };
       let p: Proposal | undefined;
       try {
@@ -191,8 +226,11 @@ export function createBroker(cfg: BrokerConfig): Broker {
       if (problem) return { notAvailable: problem };
       const key = keyOf(p);
       const done = c.delivered.get(key);
-      if (done) return { notAvailable: `already delivered in data/${done.requestId}/` };
-      for (const [requestId, f] of c.inflight) if (f.key === key) return { requestId };
+      if (done) return { notAvailable: `already delivered in data/${done.dir}/` };
+      for (const [requestId, f] of c.inflight) {
+        if (f.key !== key) continue;
+        return f.timer ? { requestId } : { notAvailable: 'already asked; it waits for the requester to approve data access and is retried then' };
+      }
       if (!convs.has(conv)) return { notAvailable: 'conversation closed' };
       return { requestId: start(conv, requester, sources.get(p.source)!, p, why) };
     },
@@ -205,16 +243,29 @@ export function createBroker(cfg: BrokerConfig): Broker {
     async forget(conv) {
       const c = convs.get(conv);
       convs.delete(conv);
-      for (const [requestId, f] of c?.inflight ?? []) {
+      for (const f of c?.inflight.values() ?? []) {
+        if (!f.timer) continue;
         clearTimeout(f.timer);
-        cfg.adapter.cancel(requestId);
+        cfg.adapter.cancel(f.wire);
       }
       await cfg.adapter.files.forget(conv);
     },
 
     instructions: () => cfg.adapter.instructions(),
 
-    catalog: async () => ({ sources: await catalog(), perConversation: limits.perConversation, distinctIds: limits.distinctIds }),
+    catalog: async () => ({ sources: [...(await sourcesByName()).values()], perConversation: limits.perConversation, distinctIds: limits.distinctIds }),
+
+    async approved(conv) {
+      const c = convs.get(conv);
+      let retried = 0;
+      for (const [requestId, f] of c?.inflight ?? []) {
+        if (f.timer) continue;
+        emit({ type: 'requested', conv, requestId, label: redact(f.proposal.label).text, source: f.proposal.source, params: f.proposal.params });
+        send(conv, c!, requestId, f);
+        retried++;
+      }
+      return retried;
+    },
 
     close() {
       unsubscribe();

@@ -11,16 +11,17 @@ import (
 
 type requesterFixture struct {
 	*serviceFixture
-	marko, liis string
-	own         string
+	marko, liis     string
+	markoID, liisID string
+	own             string
 }
 
 func newRequesterFixture(t *testing.T) *requesterFixture {
 	t.Helper()
 	f := &requesterFixture{serviceFixture: newServiceFixture(t)}
 	scope := models.RoleScope{Queues: []string{"triage"}}
-	f.h.SeedAdminScoped(f.tenant.ID, "marko@test", models.PlatformRequester, scope)
-	f.h.SeedAdminScoped(f.tenant.ID, "liis@test", models.PlatformRequester, scope)
+	f.markoID = f.h.SeedAdminScoped(f.tenant.ID, "marko@test", models.PlatformRequester, scope).ID
+	f.liisID = f.h.SeedAdminScoped(f.tenant.ID, "liis@test", models.PlatformRequester, scope).ID
 	f.marko, f.liis = loginAs(t, f.h, "marko@test"), loginAs(t, f.h, "liis@test")
 	f.own = f.open(t, f.marko, http.StatusCreated)
 	return f

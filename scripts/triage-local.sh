@@ -9,6 +9,8 @@
 #   FRESH=1 ...                        start from an empty database
 #   SRC_REPOS="/path/a /path/b" ...    the code the assistant reads (default: this repo)
 #   MODEL=... EFFORT=high ...          the session model and effort (default: opus, CLI default effort)
+#   STEP_UP=1 ...                      data needs the requester's approval (a simulated passkey) in
+#                                      the fake integrator at http://localhost:4400
 #
 # Model auth: ANTHROPIC_API_KEY, or bridge/.secrets/oauth-token (`claude setup-token`,
 # local testing only) for Claude Code plus bridge/.secrets/api-key for the router.
@@ -117,7 +119,12 @@ for _ in $(seq 1 40); do [ -s "$STATE/assistant.key" ] && break; sleep 0.25; don
 echo "starting the fake data adapter on :${ADAPTER_PORT}…"
 [ -s "$STATE/adapter.secret" ] || (umask 077 && openssl rand -hex 24 >"$STATE/adapter.secret")
 adapter_secret="$(cat "$STATE/adapter.secret")"
+# The adapter checks Sild's requester assertions against sild-dev's JWKS.
+tenant_id="$(curl -sf -H "Authorization: Bearer $(cat "$STATE/assistant.key")" "http://localhost:$SILD_PORT/v1/principal" |
+  sed -n 's/.*"tenant_id":"\([^"]*\)".*/\1/p')"
 (cd "$ROOT/bridge" && exec env ADAPTER_SECRET="$adapter_secret" PORT="$ADAPTER_PORT" \
+  SILD_TENANT="$tenant_id" SILD_JWKS_URL="http://localhost:$SILD_PORT/.well-known/jwks.json" \
+  ELEVATION_URL="${STEP_UP:+http://localhost:4400/elevation}" \
   node fake-adapter/server.ts >"$STATE/logs/adapter.log" 2>&1) &
 pids+=($!)
 for _ in $(seq 1 60); do grep -q '^ADAPTER_PUBLIC_KEY=' "$STATE/logs/adapter.log" 2>/dev/null && break; sleep 0.25; done

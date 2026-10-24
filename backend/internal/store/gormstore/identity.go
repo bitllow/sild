@@ -38,7 +38,7 @@ func (r *identityRepo) UpsertProvider(ctx context.Context, p *models.TenantIdent
 		Columns: []clause.Column{{Name: "tenant_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"embed_key", "validator_url", "validator_token_sealed", "validator_token_key_id",
-			"allowed_origins", "updated_at",
+			"allowed_origins", "embedded_only", "updated_at",
 		}),
 	}).Create(p).Error
 }

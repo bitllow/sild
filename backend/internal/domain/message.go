@@ -32,7 +32,7 @@ type SendInput struct {
 	// AllowInternal is true when the caller is an agent (admin/ingress); only
 	// then may Visibility be internal (§4.2, §5.6).
 	AllowInternal bool
-	// Parts are structured blocks; only an assistant (sender_kind bot) sends them.
+	// Parts are structured blocks; partsBySender says which a sender may attach.
 	Parts json.RawMessage
 	// Conv, when set, is the caller's already-read conversation, so SendMessage can
 	// apply the peer rules without reading the row again. Nil = read it here.
@@ -66,11 +66,8 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	}
 	var parts json.RawMessage
 	if len(in.Parts) > 0 {
-		if in.SenderKind != models.SenderBot {
-			return nil, invalid("only an assistant sends parts")
-		}
 		var err error
-		if parts, err = validateParts(in.Parts); err != nil {
+		if parts, err = validateParts(in.Parts, in.SenderKind); err != nil {
 			return nil, err
 		}
 	}
@@ -289,7 +286,7 @@ func (s *Service) UpdateMessageParts(ctx context.Context, tenantID, convID, msgI
 	if conv.Status == models.ConversationClosed {
 		return nil, conflict("conversation_closed", "the conversation is closed")
 	}
-	parts, err := validateParts(raw)
+	parts, err := validateParts(raw, models.SenderBot)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +306,7 @@ func (s *Service) UpdateMessageParts(ctx context.Context, tenantID, convID, msgI
 // requeueOnReply re-queues a conversation whose assignment was closed when its
 // client writes again, in queues that ask for it. The support queue never does.
 func (s *Service) requeueOnReply(ctx context.Context, tenantID string, conv *models.Conversation, queue *models.Queue, msg *models.Message) {
-	if msg.SenderKind == models.SenderBot || msg.SenderKind == models.SenderSystem {
+	if msg.SenderKind == models.SenderBot || (msg.SenderKind == models.SenderSystem && !hasApproval(msg.Parts)) {
 		return
 	}
 	if conv == nil || conv.Status != models.ConversationOpen || queue == nil || !queue.RequeueOnReply {

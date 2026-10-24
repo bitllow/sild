@@ -41,6 +41,11 @@ const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256
 
 const b64url = (v: string | Buffer) => Buffer.from(v).toString("base64url");
 
+// Data access approvals, as a passkey step-up records them: "<sub>:<conversation>" → expiry (ms).
+// The fake adapter asks GET /elevation, standing in for an adapter reading the integrator's own store.
+const STEP_UP_TTL_MS = Number(process.env.STEP_UP_TTL ?? 900) * 1000;
+const elevations = new Map<string, number>();
+
 function mint(p: Persona): { token: string; claims: Record<string, unknown> } {
   const iat = Math.floor(Date.now() / 1000);
   const claims = { i: p.i, n: NAMESPACE, r: p.r, t: "access", iat, exp: iat + TOKEN_TTL };
@@ -117,6 +122,20 @@ createServer(async (req, res) => {
       if (!persona) return json(404, { error: `unknown user; one of ${Object.keys(PERSONAS).join(", ")}` });
       return json(200, { ...mint(persona), sub: `${NAMESPACE}.${persona.i}`, persona: persona.name });
     }
+    case "/step-up": {
+      // A real integrator verifies the passkey assertion here before recording anything.
+      if (req.method !== "POST") return json(405, { error: "POST only" });
+      const body = (await readJSON(req).catch(() => null)) as { user?: unknown; conversation?: unknown } | null;
+      const persona = typeof body?.user === "string" ? PERSONAS[body.user] : undefined;
+      if (!persona || typeof body?.conversation !== "string") return json(400, { error: "user and conversation are required" });
+      elevations.set(`${NAMESPACE}.${persona.i}:${body.conversation}`, Date.now() + STEP_UP_TTL_MS);
+      console.log(`step-up → ${NAMESPACE}.${persona.i} approved data access in ${body.conversation} for ${STEP_UP_TTL_MS / 1000}s`);
+      return json(200, { ok: true });
+    }
+    case "/elevation": {
+      const key = `${url.searchParams.get("user")}:${url.searchParams.get("conv")}`;
+      return json(200, { elevated: (elevations.get(key) ?? 0) > Date.now() });
+    }
     case "/validate": {
       if (req.method !== "POST") return json(405, { error: "POST only" });
       if (req.headers.authorization !== `Bearer ${VALIDATOR_TOKEN}`) return json(401, { error: "bad validator token" });
@@ -179,6 +198,10 @@ function page(): string {
   .avatar{width:32px;height:32px;border-radius:50%;background:#e0e7ff;color:#3730a3;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px}
   main{flex:1;min-width:0;display:flex}
   iframe{flex:1;border:0;width:100%;height:100%}
+  .veil{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center}
+  .sheet{width:360px;background:#fff;border-radius:14px;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:12px;font-size:14px}
+  .sheet button{height:36px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;font:600 13px inherit;font-family:inherit;cursor:pointer}
+  .sheet button.go{background:#0f172a;color:#fff;border-color:#0f172a}
 </style>
 </head>
 <body>
@@ -226,7 +249,27 @@ function page(): string {
   window.addEventListener("message", (e) => {
     if (e.origin !== INBOX_ORIGIN || e.source !== frame.contentWindow) return;
     if (e.data && (e.data.type === "sild:ready" || e.data.type === "sild:token-request")) void sendToken();
+    if (e.data && e.data.type === "sild:step-up" && typeof e.data.conversation === "string") stepUp(e.data);
   });
+
+  // A real host calls navigator.credentials.get() against its own backend here.
+  function stepUp({ conversation, reason }) {
+    const veil = document.createElement("div");
+    veil.className = "veil";
+    veil.innerHTML = '<div class="sheet"><b>Confirm with your passkey</b>' +
+      '<span style="color:#475569">Simulated. The support assistant asks to check:</span>' +
+      '<span id="why" style="font-size:13px"></span>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end"><button id="no">Cancel</button><button class="go" id="yes">Use passkey</button></div></div>';
+    veil.querySelector("#why").textContent = String(reason || "");
+    document.body.appendChild(veil);
+    const answer = async (ok) => {
+      veil.remove();
+      if (ok) ok = (await fetch("/step-up", { method: "POST", body: JSON.stringify({ user: current, conversation }) })).ok;
+      frame.contentWindow.postMessage({ type: "sild:step-up-done", conversation, ok }, INBOX_ORIGIN);
+    };
+    veil.querySelector("#yes").addEventListener("click", () => void answer(true));
+    veil.querySelector("#no").addEventListener("click", () => void answer(false));
+  }
 
   document.getElementById("switch").addEventListener("click", (e) => {
     const id = e.target.closest("button")?.dataset.id;

@@ -8,8 +8,10 @@ import type { Message, Step } from "@sild/client";
 import { clockTime, mapAttachments } from "@/store/map";
 import type { TriageConversation, TriageStore } from "@/store/triage";
 import { PendingAttachments, useFilePicker } from "./PendingAttachments";
+import { canStepUp } from "@/api/host";
 import {
   TRIAGE_PILL,
+  awaitingApproval,
   describeRequest,
   diagnosisOf,
   isFromRequester,
@@ -48,6 +50,7 @@ function Event({ children }: { children: ReactNode }) {
 
 const StepsCard = observer(function StepsCard({ id, steps, t }: { id: string; steps: Step[]; t: TriageStore }) {
   const running = steps.some((s) => s.state === "running");
+  const waiting = steps.some((s) => s.state === "needs_approval");
   const canToggle = !running && steps.some((s) => s.internal);
   const open = canToggle && t.openRequests.has(id);
   const n = steps.length;
@@ -55,7 +58,7 @@ const StepsCard = observer(function StepsCard({ id, steps, t }: { id: string; st
     <div data-testid="triage-steps" style={{ background: "var(--white)", border: "1px solid var(--border-default)", borderRadius: 12, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "var(--surface-sunken)" }}>
         <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>
-          {running ? "Checking your account…" : `Checked ${n} ${n === 1 ? "thing" : "things"} in your account`}
+          {running ? "Checking your account…" : waiting ? "Waiting for your approval" : `Checked ${n} ${n === 1 ? "thing" : "things"} in your account`}
         </span>
         {canToggle && (
           <button
@@ -164,6 +167,29 @@ function AssistantBlock({ showName, time, children }: { showName: boolean; time?
     </div>
   );
 }
+
+const ApprovalCard = observer(function ApprovalCard({ t, conv, steps }: { t: TriageStore; conv: string; steps: Step[] }) {
+  const labels = steps.map((s) => s.label);
+  return (
+    <div data-testid="triage-approval" style={{ ...card, gap: 10 }}>
+      <span style={{ fontSize: 13, fontWeight: 600 }}>The assistant needs your approval to check:</span>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.5 }}>
+        {labels.map((l, i) => (
+          <li key={i}>{l}</li>
+        ))}
+      </ul>
+      {canStepUp() ? (
+        <div>
+          <Button size="sm" onClick={() => void t.approve(conv, labels.join("; "))} loading={t.approving === conv} data-testid="triage-approve">
+            Approve data access
+          </Button>
+        </div>
+      ) : (
+        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Open Tech support from your company&apos;s app to approve.</span>
+      )}
+    </div>
+  );
+});
 
 const DescribeForm = observer(function DescribeForm({ t }: { t: TriageStore }) {
   const picker = useFilePicker(t.atts);
@@ -294,6 +320,7 @@ export const TriageThread = observer(function TriageThread() {
   const status = t.statusOf(c);
   const open = isTriageActive(status);
   const owner = t.ownerName(c);
+  const awaiting = open ? awaitingApproval(c.messages) : [];
 
   let footer: ReactNode = null;
   if (own) {
@@ -302,6 +329,7 @@ export const TriageThread = observer(function TriageThread() {
     else if (status !== "new")
       footer = (
         <>
+          {awaiting.length > 0 && <ApprovalCard t={t} conv={c.id} steps={awaiting} />}
           {status === "fix_proposed" && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span style={{ fontSize: 13, color: "var(--text-secondary)", flex: 1, minWidth: 160 }}>Did this fix it?</span>

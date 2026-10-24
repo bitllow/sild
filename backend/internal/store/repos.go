@@ -298,6 +298,11 @@ type UploadRepo interface {
 	MarkCompleted(ctx context.Context, tenantID, objectKey string) error
 }
 
+type RequesterAssertionRepo interface {
+	Create(ctx context.Context, a *models.RequesterAssertion) error
+	CountByConversation(ctx context.Context, tenantID, convID string) (int64, error)
+}
+
 type PushTokenRepo interface {
 	Upsert(ctx context.Context, t *models.PushToken) error
 	DeleteByToken(ctx context.Context, tenantID, token string, owner Participant) error

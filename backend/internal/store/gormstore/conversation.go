@@ -552,6 +552,19 @@ func (r *uploadRepo) MarkCompleted(ctx context.Context, tenantID, objectKey stri
 		Update("status", models.UploadCompleted).Error
 }
 
+type requesterAssertionRepo struct{ db *gorm.DB }
+
+func (r *requesterAssertionRepo) Create(ctx context.Context, a *models.RequesterAssertion) error {
+	return r.db.WithContext(ctx).Create(a).Error
+}
+
+func (r *requesterAssertionRepo) CountByConversation(ctx context.Context, tenantID, convID string) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.RequesterAssertion{}).
+		Where("tenant_id = ? AND conversation_id = ?", tenantID, convID).Count(&n).Error
+	return n, err
+}
+
 type pushTokenRepo struct{ db *gorm.DB }
 
 func (r *pushTokenRepo) Upsert(ctx context.Context, t *models.PushToken) error {

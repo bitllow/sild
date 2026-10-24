@@ -15,9 +15,12 @@ import (
 // code keeps that code rather than collapsing to a generic one.
 func Fail(c *gin.Context, err error) {
 	var conflict *domain.ConflictError
+	var refused *domain.ForbiddenError
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		httpx.NotFound(c, "not found")
+	case errors.As(err, &refused):
+		httpx.Error(c, http.StatusForbidden, refused.Code, refused.Msg)
 	case errors.Is(err, domain.ErrForbidden):
 		httpx.Forbidden(c, "forbidden")
 	case errors.As(err, &conflict):

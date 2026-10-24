@@ -4,11 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
+	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/policy"
@@ -79,6 +81,11 @@ func (h *Handler) adminPasswordLogin(c *gin.Context) {
 		return
 	}
 	raw, exp, err := h.svc.CreateSessionWithPassword(c.Request.Context(), req.Email, req.Password)
+	var refused *domain.ForbiddenError
+	if errors.As(err, &refused) {
+		apiutil.Fail(c, err)
+		return
+	}
 	if err != nil {
 		httpx.Unauthorized(c, "invalid credentials")
 		return

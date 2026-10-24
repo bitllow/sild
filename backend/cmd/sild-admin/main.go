@@ -42,7 +42,7 @@ const usage = `sild-admin — operator commands
   apikey revoke --tenant ID --id KEY_ID
   queue set     --tenant ID --key KEY [--label L] [--requeue-on-reply] [--webhooks=false]
   service create --tenant ID --name NAME [--display "Triage assistant"] --queues triage
-  identity set    --tenant ID --validator-url URL [--validator-token-file FILE] --origins URL[,URL]
+  identity set    --tenant ID --validator-url URL [--validator-token-file FILE] --origins URL[,URL] [--embedded-only]
   identity show   --tenant ID
   identity remove --tenant ID
   agent link      --tenant ID --email EMAIL (--sub IDENTITY | --unlink)

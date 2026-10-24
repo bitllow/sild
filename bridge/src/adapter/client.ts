@@ -3,11 +3,15 @@ import type { DeliveredFile, IntegratorInstructions, Source } from '../contracts
 import { nameError, safeConv, type FileStore, type IncomingFile } from './files.ts';
 import { checkSchema, isRecord } from './kit/schema.ts';
 import { signRequest } from './kit/hmac.ts';
+import { REQUESTER_HEADER } from './kit/requester.ts';
 import { loadPublicKey, openDelivery } from './kit/jws.ts';
 import { clip, instructionsError } from './kit/server.ts';
 import { errText } from '../util.ts';
-import { LIMITS, SOURCE_NAME, type Delivery, type InfoRequest, type WireFile } from './kit/types.ts';
+import { DECLINE_CODE, LIMITS, SOURCE_NAME, type Delivery, type InfoRequest, type WireFile } from './kit/types.ts';
 import { resolveTarget, send, systemResolver, type Resolver, type Response } from './net.ts';
+
+// Sild's assertion of who asks this exact request body (kit/requester.ts).
+export type Assert = (conv: string, body: string) => Promise<string>;
 
 export type AdapterClientConfig = {
   url: string; // the adapter's registered base URL
@@ -15,6 +19,7 @@ export type AdapterClientConfig = {
   publicKey: string; // pinned Ed25519 key, base64url raw or PEM
   // Shared with the slot manager, which stores requester attachments in the same budget.
   files: FileStore;
+  assert: Assert;
   // Permits http:// to localhost / 127.0.0.1 / ::1. Local development only.
   allowInsecureLocal?: boolean;
   catalogTtlMs?: number;
@@ -26,7 +31,7 @@ export type AdapterClientConfig = {
 
 export type Received =
   | { requestId: string; conv: string; source: string; state: 'delivered'; summary: string; files: DeliveredFile[] }
-  | { requestId: string; conv: string; source: string; state: 'declined' | 'expired' | 'invalid'; reason: string };
+  | { requestId: string; conv: string; source: string; state: 'declined' | 'expired' | 'invalid'; reason: string; code?: string };
 
 // Unless the request failed, its outcome arrives through onReceived, even one answered in the response.
 export type Sent = { type: 'pending' } | { type: 'failed'; reason: string };
@@ -124,11 +129,18 @@ export class AdapterClient {
 
   async request(conv: string, req: Omit<InfoRequest, 'conversation_ref'>): Promise<Sent> {
     safeConv(conv);
-    const body: InfoRequest = { ...req, conversation_ref: conv };
+    const body = JSON.stringify({ ...req, conversation_ref: conv } satisfies InfoRequest);
     this.#outstanding.set(req.id, { conv, source: req.source });
+    let assertion: string;
+    try {
+      assertion = await this.#cfg.assert(conv, body);
+    } catch (err) {
+      this.#outstanding.delete(req.id);
+      return { type: 'failed', reason: `Sild would not vouch for the requester: ${errText(err)}` };
+    }
     let res: Response;
     try {
-      res = await this.#call('POST', 'requests', JSON.stringify(body), PAGE_BYTES);
+      res = await this.#call('POST', 'requests', body, PAGE_BYTES, { headers: { [REQUESTER_HEADER]: assertion } });
     } catch (err) {
       this.#outstanding.delete(req.id);
       return { type: 'failed', reason: `adapter unreachable: ${errText(err)}` };
@@ -148,7 +160,7 @@ export class AdapterClient {
     this.#outstanding.delete(req.id);
     if (res.status === 403) {
       const reason = isRecord(parsed) && typeof parsed.reason === 'string' ? clip(parsed.reason) || 'declined' : 'declined';
-      this.#emit({ requestId: req.id, conv, source: req.source, state: 'declined', reason });
+      this.#emit({ requestId: req.id, conv, source: req.source, state: 'declined', reason, ...declineCode(parsed) });
       return { type: 'pending' };
     }
     const error = isRecord(parsed) && typeof parsed.error === 'string' ? `: ${clip(parsed.error)}` : '';
@@ -176,7 +188,7 @@ export class AdapterClient {
       while (!ctl.signal.aborted && this.#outstanding.size > 0) {
         try {
           const q = new URLSearchParams({ cursor: this.#cursor, wait: String(POLL_WAIT_SECONDS) });
-          const res = await this.#call('GET', `deliveries?${q}`, '', PAGE_BYTES, ctl.signal, (POLL_WAIT_SECONDS + 15) * 1000);
+          const res = await this.#call('GET', `deliveries?${q}`, '', PAGE_BYTES, { signal: ctl.signal, timeoutMs: (POLL_WAIT_SECONDS + 15) * 1000 });
           if (res.status !== 200) throw new Error(`deliveries: HTTP ${res.status}`);
           const page = parseJson(res.body);
           if (!isRecord(page) || !Array.isArray(page.items) || typeof page.next_cursor !== 'string') throw new Error('deliveries: bad page');
@@ -220,7 +232,10 @@ export class AdapterClient {
     this.#outstanding.delete(id);
     const base = { requestId: id, conv, source: o.source };
     if (delivery.state !== 'delivered') {
-      return { ...base, state: delivery.state, reason: delivery.state === 'expired' ? 'the provider gave up' : clip(delivery.summary) || 'declined' };
+      return {
+        ...base, state: delivery.state, ...declineCode(delivery),
+        reason: delivery.state === 'expired' ? 'the provider gave up' : clip(delivery.summary) || 'declined',
+      };
     }
     try {
       const files = await this.#store(conv, id, o.source, delivery);
@@ -272,13 +287,20 @@ export class AdapterClient {
     return res.body;
   }
 
-  async #call(method: string, rel: string, body: string, maxBytes: number, signal?: AbortSignal, timeoutMs?: number): Promise<Response> {
+  async #call(
+    method: string, rel: string, body: string, maxBytes: number,
+    opts: { signal?: AbortSignal; timeoutMs?: number; headers?: Record<string, string> } = {},
+  ): Promise<Response> {
     const url = new URL(rel, this.#base);
     const target = await resolveTarget(url, this.#cfg.allowInsecureLocal ?? false, this.#resolve);
-    const headers: Record<string, string> = signRequest(this.#cfg.secret, { method, target: url.pathname + url.search, body });
+    const headers: Record<string, string> = { ...opts.headers, ...signRequest(this.#cfg.secret, { method, target: url.pathname + url.search, body }) };
     if (body) headers['content-type'] = 'application/json';
-    return send(target, { method, headers, body, maxBytes, signal, timeoutMs: timeoutMs ?? this.#cfg.timeoutMs ?? 10_000 });
+    return send(target, { method, headers, body, maxBytes, signal: opts.signal, timeoutMs: opts.timeoutMs ?? this.#cfg.timeoutMs ?? 10_000 });
   }
+}
+
+function declineCode(v: unknown): { code?: string } {
+  return isRecord(v) && typeof v.code === 'string' && DECLINE_CODE.test(v.code) ? { code: v.code } : {};
 }
 
 function inline(f: WireFile): Buffer {

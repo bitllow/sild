@@ -52,37 +52,43 @@ export function signDelivery(key: KeyObject, claims: DeliveryClaims): string {
 
 export type Opened = { ok: true; claims: DeliveryClaims } | { ok: false; reason: string };
 
+// A compact JWS taken apart; each opener checks its own algorithm, key and claims.
+export type Compact = { header: Record<string, unknown>; payload: unknown; signed: Buffer; signature: Buffer };
+
+export function splitCompact(jws: string): Compact | string {
+  const parts = jws.split('.');
+  if (parts.length !== 3) return 'not a compact JWS';
+  const [head, body, sig] = parts as [string, string, string];
+  const header = fromB64json(head);
+  if (!isRecord(header)) return 'bad header';
+  if (header.crit !== undefined) return 'unsupported crit header';
+  return { header, payload: fromB64json(body), signed: Buffer.from(`${head}.${body}`), signature: Buffer.from(sig, 'base64url') };
+}
+
 // Checks the signature, the pinned algorithm and expiry. Binding to an
 // outstanding request is the caller's job.
 export function openDelivery(key: KeyObject, jws: string, now = Date.now()): Opened {
-  const parts = jws.split('.');
-  if (parts.length !== 3) return { ok: false, reason: 'not a compact JWS' };
-  const [head, body, sig] = parts as [string, string, string];
-  let header: unknown;
-  try {
-    header = JSON.parse(Buffer.from(head, 'base64url').toString('utf8'));
-  } catch {
-    return { ok: false, reason: 'bad header' };
-  }
-  if (!isRecord(header) || header.alg !== HEADER.alg) return { ok: false, reason: 'algorithm not allowed' };
-  if (header.crit !== undefined) return { ok: false, reason: 'unsupported crit header' };
-  if (!verify(null, Buffer.from(`${head}.${body}`), key, Buffer.from(sig, 'base64url'))) {
-    return { ok: false, reason: 'bad signature' };
-  }
-  let claims: unknown;
-  try {
-    claims = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-  } catch {
-    return { ok: false, reason: 'bad payload' };
-  }
+  const c = splitCompact(jws);
+  if (typeof c === 'string') return { ok: false, reason: c };
+  if (c.header.alg !== HEADER.alg) return { ok: false, reason: 'algorithm not allowed' };
+  if (!verify(null, c.signed, key, c.signature)) return { ok: false, reason: 'bad signature' };
+  const claims = c.payload;
   if (!isClaims(claims)) return { ok: false, reason: 'bad payload' };
   if (claims.exp * 1000 <= now) return { ok: false, reason: 'expired' };
   if (claims.delivery.id !== claims.request_id) return { ok: false, reason: 'delivery id does not match request_id' };
   return { ok: true, claims };
 }
 
-function b64json(v: unknown): string {
+export function b64json(v: unknown): string {
   return Buffer.from(JSON.stringify(v)).toString('base64url');
+}
+
+function fromB64json(part: string): unknown {
+  try {
+    return JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function isClaims(v: unknown): v is DeliveryClaims {

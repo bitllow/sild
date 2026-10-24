@@ -515,3 +515,35 @@ func TestExternalSubLinking(t *testing.T) {
 		t.Fatalf("team list omits the link: %s", w.Body)
 	}
 }
+
+func TestEmbeddedOnlyRefusesOtherSignInForLinkedMembers(t *testing.T) {
+	f := newEmbedFixture(t)
+	ctx := context.Background()
+	owner := f.h.SeedAdmin(f.tenant.ID, "eva@test", models.PlatformOwner)
+	for _, id := range []string{f.marko.ID, owner.ID} {
+		if err := f.h.Svc.SetAdminPassword(ctx, f.tenant.ID, id, "password123"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	login := func(email string) int {
+		return f.h.Request("POST", "/v1/admin/auth/password").JSON(map[string]any{"email": email, "password": "password123"}).Do().Code
+	}
+	if got := login("marko@test"); got != http.StatusOK {
+		t.Fatalf("linked member before embedded_only: %d", got)
+	}
+	earlier := loginAs(t, f.h, "marko@test")
+
+	f.configure(t, map[string]any{
+		"validator_url": f.validator.srv.URL + "/validate", "allowed_origins": []string{hostOrigin}, "embedded_only": true,
+	})
+	if got := login("marko@test"); got != http.StatusForbidden {
+		t.Fatalf("linked member signed in with a password: %d", got)
+	}
+	if got := login("eva@test"); got != http.StatusOK {
+		t.Fatalf("unlinked owner lost the break-glass login: %d", got)
+	}
+	if w := f.h.Request("GET", "/v1/principal").Cookie("sild_admin", earlier).Do(); w.Code != http.StatusUnauthorized {
+		t.Fatalf("a session from before embedded_only still works: %d", w.Code)
+	}
+	f.signIn(t, "tok-marko")
+}

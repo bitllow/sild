@@ -5,6 +5,7 @@ import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { adminApi, type ApiEmbeddedSession } from "@/api/admin";
 import { ApiError, setBearer } from "@/api/client";
+import { setHostOrigin } from "@/api/host";
 import { CheckIcon, Spinner } from "@/components/ds";
 import { Shell } from "./Shell";
 
@@ -102,6 +103,7 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
           return;
         }
         setBearer(s.token, askForToken);
+        setHostOrigin(origin);
         if (refresh) clearTimeout(refresh);
         const wait = Math.max(5_000, new Date(s.expires_at).getTime() - Date.now() - REFRESH_LEAD_MS);
         refresh = setTimeout(askForToken, wait);
@@ -143,6 +145,7 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
 
     return () => {
       disposed = true;
+      setHostOrigin(null);
       window.removeEventListener("message", onMessage);
       if (refresh) clearTimeout(refresh);
       setBearer(null);

@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startFakeAdapter, type FakeAdapter } from '../../fake-adapter/server.ts';
+import { testAssert, testSild } from '../../fake-adapter/sild.ts';
 import { AdapterClient, type Received } from './client.ts';
 import { DEFAULT_FILE_LIMITS, FileStore } from './files.ts';
 import { generateKeyPair, loadPrivateKey, signDelivery } from './kit/jws.ts';
@@ -19,7 +20,7 @@ const SECRET = 'test-secret-0123456789';
 let fake: FakeAdapter;
 let root: string;
 before(async () => {
-  fake = await startFakeAdapter({ secret: SECRET });
+  fake = await startFakeAdapter({ secret: SECRET, sild: testSild });
   root = mkdtempSync(path.join(tmpdir(), 'client-'));
 });
 after(async () => {
@@ -29,7 +30,7 @@ after(async () => {
 
 const id = () => randomUUID().replaceAll('-', '');
 const client = (over: Partial<ConstructorParameters<typeof AdapterClient>[0]> = {}) =>
-  new AdapterClient({ url: fake.url, secret: SECRET, publicKey: fake.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true, ...over });
+  new AdapterClient({ url: fake.url, secret: SECRET, publicKey: fake.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true, assert: testAssert, ...over });
 const ask = (source: string, params: Record<string, unknown>) => ({ id: id(), requester: { id: 'u1' }, source, params, reason: 'test' });
 const next = (c: AdapterClient) => new Promise<Received>((resolve) => { const off = c.onReceived((r) => { off(); resolve(r); }); });
 
@@ -140,7 +141,7 @@ describe('against a misbehaving adapter', () => {
   });
   after(() => new Promise<void>((r) => server.close(() => r())));
 
-  const c = () => new AdapterClient({ url, secret: SECRET, publicKey: keys.publicKey, files: new FileStore(root, { ...DEFAULT_FILE_LIMITS, filesPerDelivery: 2, bytesPerDelivery: 64 }), allowInsecureLocal: true });
+  const c = () => new AdapterClient({ url, secret: SECRET, publicKey: keys.publicKey, files: new FileStore(root, { ...DEFAULT_FILE_LIMITS, filesPerDelivery: 2, bytesPerDelivery: 64 }), allowInsecureLocal: true, assert: testAssert });
   const claims = (body: { id: string; conversation_ref: string }, files: WireFile[], over: Partial<DeliveryClaims> = {}): DeliveryClaims => ({
     request_id: body.id,
     conversation_ref: body.conversation_ref,
@@ -220,7 +221,7 @@ describe('across an adapter restart', () => {
   const privateKey = loadPrivateKey(keys.privateKey);
   const catalog = [{ source: 'x.y', description: 'x', params: { type: 'object' }, max_wait_seconds: 30 }];
   const start = async (port: number, now: () => number) => {
-    const adapter = createAdapter({ secret: SECRET, privateKey, catalog, handle: () => ({ type: 'accepted' }), now });
+    const adapter = createAdapter({ secret: SECRET, privateKey, catalog, handle: () => ({ type: 'accepted' }), now, sild: testSild });
     const server = createServer(adapter.handler);
     await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
     const close = () => new Promise<void>((r) => {
@@ -234,7 +235,7 @@ describe('across an adapter restart', () => {
   for (const [clock, skew] of [['moved on', 0], ['went back', 60_000]] as const) {
     test(`new deliveries reach a client holding the old cursor when the clock ${clock}`, { timeout: 10_000 }, async () => {
       const first = await start(0, () => Date.now() + skew);
-      const c = new AdapterClient({ url: `http://127.0.0.1:${first.port}`, secret: SECRET, publicKey: keys.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true });
+      const c = new AdapterClient({ url: `http://127.0.0.1:${first.port}`, secret: SECRET, publicKey: keys.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true, assert: testAssert });
       const r1 = ask('x.y', {});
       const got1 = next(c);
       assert.deepEqual(await c.request('conv_restart', r1), { type: 'pending' });
@@ -273,7 +274,7 @@ describe('instructions', () => {
   after(() => new Promise<void>((r) => server.close(() => r())));
 
   const c = (instructionsTtlMs?: number) =>
-    new AdapterClient({ url, secret: SECRET, publicKey: generateKeyPair().publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true, instructionsTtlMs });
+    new AdapterClient({ url, secret: SECRET, publicKey: generateKeyPair().publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true, assert: testAssert, instructionsTtlMs });
   const good = { status: 200, body: { text: 'Acme is a CRM.', version: 'v1' } };
 
   test('404 is none', async () => {

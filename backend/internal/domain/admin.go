@@ -33,6 +33,15 @@ func (s *Service) CreateSession(ctx context.Context, email string) (raw string, 
 // mintSession creates a server-side session for an admin and returns the raw
 // cookie value.
 func (s *Service) mintSession(ctx context.Context, admin *models.AdminUser) (string, time.Time, error) {
+	if admin.ExternalSub != nil {
+		p, err := s.store.Identity().GetProvider(ctx, admin.TenantID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return "", time.Time{}, err
+		}
+		if p != nil && p.EmbeddedOnly {
+			return "", time.Time{}, forbidden(CodeEmbeddedOnly, "sign in through your company's app")
+		}
+	}
 	tok, err := auth.NewSessionToken()
 	if err != nil {
 		return "", time.Time{}, err

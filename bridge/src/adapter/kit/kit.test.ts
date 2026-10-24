@@ -8,6 +8,8 @@ import { HEADER, NonceStore, checkSecret, signRequest, verifyRequest } from './h
 import { generateKeyPair, loadPrivateKey, loadPublicKey, openDelivery, publicKeyOf, signDelivery } from './jws.ts';
 import { checkSchema, validate } from './schema.ts';
 import type { DeliveryClaims } from './types.ts';
+import { testAssert, testSild } from '../../../fake-adapter/sild.ts';
+import { REQUESTER_HEADER } from './requester.ts';
 
 const req = { method: 'POST', target: '/requests', body: '{"a":1}' };
 const S = 's3cret-0123456789';
@@ -144,7 +146,7 @@ describe('params schema', () => {
 });
 
 describe('adapter', () => {
-  const opts = { secret: S, privateKey: loadPrivateKey(generateKeyPair().privateKey), catalog: [], handle: () => ({ type: 'expire' as const }) };
+  const opts = { secret: S, privateKey: loadPrivateKey(generateKeyPair().privateKey), catalog: [], handle: () => ({ type: 'expire' as const }), sild: testSild };
 
   test('refuses a secret under 16 characters at construction', () => {
     assert.throws(() => createAdapter({ ...opts, secret: '' }), /at least 16/);
@@ -155,8 +157,10 @@ describe('adapter', () => {
     const server = createServer(adapter.handler);
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const call = (method: string, target: string, body = '') =>
-      fetch(origin + target, { method, body: body || undefined, headers: signRequest(S, { method, target, body }) });
+    const call = async (method: string, target: string, body = '') => {
+      const vouched: Record<string, string> = target === '/requests' ? { [REQUESTER_HEADER]: await testAssert('', body) } : {};
+      return fetch(origin + target, { method, body: body || undefined, headers: { ...signRequest(S, { method, target, body }), ...vouched } });
+    };
     return { call, close: () => (adapter.close(), server.close()) };
   };
 

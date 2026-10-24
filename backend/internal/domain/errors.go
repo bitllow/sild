@@ -47,6 +47,20 @@ const (
 	CodeLastMemberRemoval       = "last_member_removal"
 	CodePeerNotQueueable        = "peer_not_queueable"
 	CodeStaleVersion            = "stale_version"
+	CodeRequesterNotLinked      = "requester_not_linked"
+	CodeRequestLimit            = "request_limit"
+	CodeEmbeddedOnly            = "embedded_only"
 )
 
 func conflict(code, msg string) error { return &ConflictError{Code: code, Msg: msg} }
+
+// ForbiddenError is a refusal carrying a stable code and a message the caller may show.
+type ForbiddenError struct {
+	Code string
+	Msg  string
+}
+
+func (e *ForbiddenError) Error() string { return e.Msg }
+func (e *ForbiddenError) Unwrap() error { return ErrForbidden }
+
+func forbidden(code, msg string) error { return &ForbiddenError{Code: code, Msg: msg} }

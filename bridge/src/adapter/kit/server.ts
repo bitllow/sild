@@ -1,6 +1,7 @@
 import { createHash, randomBytes, type KeyObject } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { NonceStore, checkSecret, verifyRequest } from './hmac.ts';
+import { NonceStore, checkSecret, one, verifyRequest } from './hmac.ts';
+import { REQUESTER_HEADER, SildKeys, type SildTrust } from './requester.ts';
 import { signDelivery } from './jws.ts';
 import { checkSchema, isRecord, validate } from './schema.ts';
 import { LIMITS, REQUEST_ID, type Delivery, type InfoRequest, type Instructions, type Source, type WireFile } from './types.ts';
@@ -16,7 +17,7 @@ export type FileSpec = {
 
 export type Final =
   | { type: 'deliver'; summary: string; files: FileSpec[] }
-  | { type: 'decline'; reason: string }
+  | { type: 'decline'; reason: string; code?: string }
   | { type: 'expire' };
 
 export type Outcome =
@@ -37,6 +38,8 @@ export type AdapterOptions = {
   privateKey: KeyObject;
   catalog: Source[];
   handle: Handler;
+  // Every request must carry Sild's assertion of who asks; see requester.ts.
+  sild: SildTrust;
   instructions?: InstructionsOption;
   // Origin the bridge reaches this adapter at; needed for URL-delivered files.
   publicUrl?: string;
@@ -72,6 +75,7 @@ export function createAdapter(opts: AdapterOptions): Adapter {
     if (bad) throw new Error(`instructions: ${bad}`);
   }
   const now = opts.now ?? Date.now;
+  const sildKeys = new SildKeys(opts.sild);
   const base = (opts.basePath ?? '').replace(/\/$/, '');
   const nonces = new NonceStore();
   const sources = new Map(opts.catalog.map((s) => [s.source, s]));
@@ -99,7 +103,7 @@ export function createAdapter(opts: AdapterOptions): Adapter {
       final.type === 'deliver'
         ? { id: req.id, state: 'delivered', summary: clip(final.summary), files: final.files.map(wire) }
         : final.type === 'decline'
-          ? { id: req.id, state: 'declined', summary: clip(final.reason), files: [] }
+          ? { id: req.id, state: 'declined', summary: clip(final.reason), files: [], ...(final.code && { code: final.code }) }
           : { id: req.id, state: 'expired', summary: '', files: [] };
     const iat = Math.floor(now() / 1000);
     return signDelivery(opts.privateKey, {
@@ -160,6 +164,8 @@ export function createAdapter(opts: AdapterOptions): Adapter {
       const bad = requestErrors(parsed);
       if (bad) return json(res, 400, { error: bad });
       const ir = parsed as InfoRequest;
+      const unvouched = await sildKeys.check(one(req.headers[REQUESTER_HEADER]), body, ir, now());
+      if (unvouched) return json(res, 401, { error: unvouched });
       const source = sources.get(ir.source);
       if (!source) return json(res, 404, { error: `unknown source ${ir.source}` });
       const errors = validate(source.params, ir.params);
@@ -168,7 +174,9 @@ export function createAdapter(opts: AdapterOptions): Adapter {
       seenIds.add(ir.id);
 
       const outcome = await opts.handle(ir);
-      if (outcome.type === 'decline') return json(res, 403, { declined: true, reason: clip(outcome.reason) });
+      if (outcome.type === 'decline') {
+        return json(res, 403, { declined: true, reason: clip(outcome.reason), ...(outcome.code && { code: outcome.code }) });
+      }
       if (outcome.type === 'deliver' || outcome.type === 'expire') return json(res, 201, { delivery: seal(ir, outcome) });
 
       const p: Pending = { req: ir };

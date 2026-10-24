@@ -73,6 +73,12 @@ class FakeBroker implements InfoBroker {
   async catalog() {
     return { sources: [], perConversation: 0, distinctIds: 0 };
   }
+  approvals: string[] = [];
+  retries = 1;
+  async approved(conv: string) {
+    this.approvals.push(conv);
+    return this.retries;
+  }
   emit(e: BrokerEvent) {
     for (const cb of this.subs) cb(e);
   }
@@ -500,4 +506,44 @@ test('an attachment that cannot be downloaded is reported to the session', async
   await waitFor(() => runner.sessions[0].pushes.length === 2, 'push');
   assert.equal(runner.sessions[0].pushes[1], requesterMessage('see file')
     + '\nThe requester attached 1 file(s) that could not be stored: attachment download failed: 404');
+});
+
+test('a request waiting for approval shows as such, and the approval retries it on the same step', async () => {
+  const { sild, runner, broker, mgr } = await setup();
+  const a = sild.open('adm_r1', 'first');
+  mgr.start();
+  await waitFor(() => runner.sessions[0]?.pushes.length === 1, 'push');
+  const step = () => sild.botMessages(a).flatMap((m) => m.parts ?? []).flatMap((p) => (p.type === 'steps' ? p.steps : []));
+
+  broker.emit({ type: 'requested', conv: a, requestId: 'r1', label: 'Checked his phones', source: 'driver.devices', params: {} });
+  broker.emit({ type: 'parked', conv: a, requestId: 'r1', reason: 'Approve data access' });
+  await waitFor(() => step()[0]?.state === 'needs_approval', 'needs approval');
+  await waitFor(() => runner.sessions[0].pushes.some((p) => p.includes('waits for the requester to approve')), 'session told');
+
+  sild.approve(a);
+  nudge(mgr, a);
+  await waitFor(() => broker.approvals.includes(a), 'broker retried');
+  await waitFor(() => runner.sessions[0].pushes.some((p) => p.startsWith('The requester approved data access')), 'session told of approval');
+  assert.ok(!runner.sessions[0].pushes.some((p) => p.includes('<requester_message>\nApproved')), 'the approval is not requester text');
+
+  broker.emit({ type: 'requested', conv: a, requestId: 'r1', label: 'Checked his phones', source: 'driver.devices', params: {} });
+  await waitFor(() => step()[0]?.state === 'running', 'step running again');
+  assert.equal(step().length, 1, 'the retry runs on the same step');
+});
+
+test('an approval with nothing left to retry stops showing the steps as waiting', async () => {
+  const { sild, runner, broker, mgr } = await setup();
+  const a = sild.open('adm_r1', 'first');
+  mgr.start();
+  await waitFor(() => runner.sessions[0]?.pushes.length === 1, 'push');
+  const step = () => sild.botMessages(a).flatMap((m) => m.parts ?? []).flatMap((p) => (p.type === 'steps' ? p.steps : []));
+  broker.emit({ type: 'requested', conv: a, requestId: 'r1', label: 'Checked his phones', source: 'driver.devices', params: {} });
+  broker.emit({ type: 'parked', conv: a, requestId: 'r1', reason: 'Approve data access' });
+  await waitFor(() => step()[0]?.state === 'needs_approval', 'needs approval');
+
+  broker.retries = 0;
+  sild.approve(a);
+  nudge(mgr, a);
+  await waitFor(() => step()[0]?.state === 'not_available', 'step no longer waiting');
+  await waitFor(() => runner.sessions[0].pushes.some((p) => p.includes('no request was waiting')), 'session told to ask again');
 });

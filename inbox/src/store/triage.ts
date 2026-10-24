@@ -1,6 +1,7 @@
 import { computed, makeAutoObservable, runInAction, type IComputedValue } from "mobx";
 import {
   ApiError,
+  approveDataAccess,
   closeConversation,
   createConversation,
   getConversation,
@@ -16,6 +17,7 @@ import {
   type Message,
 } from "@sild/client";
 import { errorText, http, WITH_PROFILES } from "@/api/client";
+import { stepUp } from "@/api/host";
 import { AttachmentQueue } from "./attachments";
 import { relativeTime } from "./map";
 import { isFromRequester, isTriageActive, requesterOf, triageStatus, type TriageStatus } from "./triageStatus";
@@ -73,6 +75,8 @@ export class TriageStore {
   loadingMore = false;
   composer = "";
   sending = false;
+  // The conversation whose data access is being approved at the host.
+  approving: string | null = null;
   error: string | null = null;
   atts = new AttachmentQueue((msg) => runInAction(() => (this.error = msg)));
   // Message ids whose data requests are expanded.
@@ -364,6 +368,28 @@ export class TriageStore {
       runInAction(() => {
         this.sending = false;
       });
+    }
+  };
+
+  /** Runs the host's step-up (a passkey), then tells the assistant data access is approved. */
+  approve = async (conv: string, reason: string) => {
+    if (this.approving) return;
+    this.approving = conv;
+    this.error = null;
+    try {
+      if (!(await stepUp(conv, reason))) {
+        runInAction(() => (this.error = "Data access was not approved."));
+        return;
+      }
+      const msg = await approveDataAccess(http, conv);
+      runInAction(() => {
+        const row = this.rows.find((c) => c.id === conv);
+        if (row) this.append(row, msg);
+      });
+    } catch (e) {
+      runInAction(() => (this.error = errorText(e)));
+    } finally {
+      runInAction(() => (this.approving = null));
     }
   };
 

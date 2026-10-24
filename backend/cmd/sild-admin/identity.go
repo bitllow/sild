@@ -19,13 +19,14 @@ func identitySet(ctx context.Context, svc *domain.Service, args []string) error 
 	validatorURL := fs.String("validator-url", "", "the integrator's validator endpoint (docs/embedded-sign-in.md)")
 	tokenFile := fs.String("validator-token-file", "", "file holding the API token Sild presents to the validator; omit to keep the stored one")
 	origins := fs.String("origins", "", "comma-separated origins allowed to frame the inbox")
+	embeddedOnly := fs.Bool("embedded-only", false, "members linked to the integrator may sign in only through it")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if err := need("tenant", tenant, "validator-url", validatorURL, "origins", origins); err != nil {
 		return err
 	}
-	in := domain.IdentityProviderInput{ValidatorURL: *validatorURL, AllowedOrigins: split(*origins)}
+	in := domain.IdentityProviderInput{ValidatorURL: *validatorURL, AllowedOrigins: split(*origins), EmbeddedOnly: *embeddedOnly}
 	if *tokenFile != "" {
 		b, err := os.ReadFile(*tokenFile)
 		if err != nil {
@@ -69,6 +70,7 @@ func printIdentity(v *domain.IdentityProviderView) {
 	fmt.Printf("validator  %s\n", v.ValidatorURL)
 	fmt.Printf("token      %s\n", token)
 	fmt.Printf("origins    %s\n", strings.Join(v.AllowedOrigins, " "))
+	fmt.Printf("embedded-only %t\n", v.EmbeddedOnly)
 }
 
 func identityRemove(ctx context.Context, svc *domain.Service, args []string) error {

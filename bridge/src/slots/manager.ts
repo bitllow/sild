@@ -381,6 +381,20 @@ export class SlotManager {
   private route(h: Held, m: Message): void {
     h.input = h.input.then(async () => {
       if (h.released) return;
+      if (isApproval(m)) {
+        const retried = await this.broker.approved(h.conv).catch((e) => {
+          this.log('approval retry failed', { conv: h.conv, error: errText(e) });
+          return 0;
+        });
+        if (!retried) await this.expireApprovals(h.conv);
+        if (!h.released) {
+          this.push(h, retried
+            ? 'The requester approved data access. The requests waiting for it are being retried.'
+            : 'The requester approved data access, but no request was waiting for it any more. Ask again for what you still need.');
+        }
+        this.state(h.conv).seen = m.id;
+        return;
+      }
       let text: string;
       try {
         text = (await this.broker.onRequesterText(h.conv, h.providerIdentity, m.body)).text;
@@ -541,6 +555,10 @@ export class SlotManager {
   private async applyBroker(st: ConvState, e: BrokerEvent): Promise<void> {
     switch (e.type) {
       case 'requested': {
+        if (st.byRequest.has(e.requestId)) {
+          await this.updateStep(e.conv, st, e.requestId, { state: 'running', result: undefined });
+          return;
+        }
         const msg = st.open ?? { steps: [] };
         st.open = msg;
         const index = msg.steps.push({
@@ -556,6 +574,11 @@ export class SlotManager {
         await this.updateStep(e.conv, st, e.requestId, { state: 'done', result: clip(e.summary) });
         return;
       }
+      case 'parked': {
+        this.notify(e.conv, `Request ${e.requestId} waits for the requester to approve data access. They see one Approve button; it is retried once they approve. Tell them.`);
+        await this.updateStep(e.conv, st, e.requestId, { state: 'needs_approval', result: 'Waiting for your approval' });
+        return;
+      }
       case 'not_available': {
         this.notify(e.conv, `Request ${e.requestId} is not available: ${clip(e.reason)}`);
         await this.updateStep(e.conv, st, e.requestId, { state: 'not_available', result: clip(e.reason) });
@@ -567,9 +590,23 @@ export class SlotManager {
   private async updateStep(conv: string, st: ConvState, requestId: string, change: Partial<Step>): Promise<void> {
     const ref = st.byRequest.get(requestId);
     if (!ref) return;
-    st.byRequest.delete(requestId);
     Object.assign(ref.msg.steps[ref.index], change);
     await this.writeSteps(conv, ref.msg);
+  }
+
+  // Steps still shown as waiting for approval whose requests this process no longer holds, e.g. after a restart.
+  private async expireApprovals(conv: string): Promise<void> {
+    try {
+      for (const m of await sild.messagesSince(this.http, conv, BEFORE_FIRST_MESSAGE)) {
+        if (m.internal_actor_id !== this.me || !m.parts?.some((p) => p.type === 'steps' && p.steps.some((s) => s.state === 'needs_approval'))) continue;
+        const parts = m.parts.map((p) => (p.type !== 'steps' ? p : {
+          ...p, steps: p.steps.map((s) => (s.state === 'needs_approval' ? { ...s, state: 'not_available' as const, result: 'No longer waiting; ask again' } : s)),
+        }));
+        await sild.patchMessage(this.http, conv, m.id, parts);
+      }
+    } catch (e) {
+      this.log('expiring approvals failed', { conv, error: errText(e) });
+    }
   }
 
   private async writeSteps(conv: string, msg: StepsMessage): Promise<void> {
@@ -636,6 +673,11 @@ export class SlotManager {
     if (h.requester) return m.internal_actor_id === h.requester || m.external_user_id === h.requester;
     return m.sender_kind === 'user' || m.sender_kind === 'agent';
   }
+}
+
+// The system message a requester's approval of data access leaves in the conversation.
+function isApproval(m: Message): boolean {
+  return m.sender_kind === 'system' && !!m.parts?.some((p) => p.type === 'approval');
 }
 
 // Fenced so requester text cannot pass for an application notice.

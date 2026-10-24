@@ -53,6 +53,7 @@ type IdentityProviderInput struct {
 	// ValidatorToken nil keeps the stored one, unless the URL changes.
 	ValidatorToken *string  `json:"validator_token"`
 	AllowedOrigins []string `json:"allowed_origins"`
+	EmbeddedOnly   bool     `json:"embedded_only"`
 	// EmbedKey pins the public key (dev seed). Empty keeps or mints one.
 	EmbedKey string `json:"-"`
 }
@@ -63,13 +64,14 @@ type IdentityProviderView struct {
 	ValidatorURL      string    `json:"validator_url"`
 	HasValidatorToken bool      `json:"has_validator_token"`
 	AllowedOrigins    []string  `json:"allowed_origins"`
+	EmbeddedOnly      bool      `json:"embedded_only"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 func identityView(p *models.TenantIdentityProvider) *IdentityProviderView {
 	return &IdentityProviderView{
 		EmbedKey: p.EmbedKey, ValidatorURL: p.ValidatorURL, HasValidatorToken: len(p.ValidatorTokenSealed) > 0,
-		AllowedOrigins: nonNil(p.AllowedOrigins), UpdatedAt: p.UpdatedAt,
+		AllowedOrigins: nonNil(p.AllowedOrigins), EmbeddedOnly: p.EmbeddedOnly, UpdatedAt: p.UpdatedAt,
 	}
 }
 
@@ -100,7 +102,7 @@ func (s *Service) SetIdentityProvider(ctx context.Context, tenantID string, in I
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
-	p := &models.TenantIdentityProvider{TenantID: tenantID}
+	p := &models.TenantIdentityProvider{TenantID: tenantID, EmbeddedOnly: in.EmbeddedOnly}
 	if p.ValidatorURL, err = validatorURL(in.ValidatorURL, s.cfg.Env); err != nil {
 		return nil, invalid("validator_url: " + err.Error())
 	}

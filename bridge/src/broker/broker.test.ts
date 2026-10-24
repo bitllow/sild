@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BrokerEvent } from '../contracts.ts';
 import { startFakeAdapter, type FakeAdapter } from '../../fake-adapter/server.ts';
+import { testAssert, testSild } from '../../fake-adapter/sild.ts';
 import { AdapterClient } from '../adapter/client.ts';
 import { DEFAULT_FILE_LIMITS, FileStore } from '../adapter/files.ts';
 import { FakeRouter } from '../router/fake.ts';
@@ -19,7 +20,7 @@ let root: string;
 const open: Broker[] = [];
 
 before(async () => {
-  fake = await startFakeAdapter({ secret: SECRET });
+  fake = await startFakeAdapter({ secret: SECRET, sild: testSild });
   root = mkdtempSync(path.join(tmpdir(), 'broker-'));
 });
 after(async () => {
@@ -29,7 +30,7 @@ after(async () => {
 });
 
 function setup(limits: Partial<BrokerLimits> = {}, router: Router = new FakeRouter()) {
-  const adapter = new AdapterClient({ url: fake.url, secret: SECRET, publicKey: fake.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true });
+  const adapter = new AdapterClient({ url: fake.url, secret: SECRET, publicKey: fake.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true, assert: testAssert });
   const broker = createBroker({ adapter, router, limits });
   open.push(broker);
   const events: BrokerEvent[] = [];
@@ -148,7 +149,7 @@ describe('request_info', () => {
     await settled(1, 'c_again');
     const b = await broker.request('c_again', 'u1', 'service status', 'x');
     assert.ok('requestId' in a);
-    assert.deepEqual(b, { notAvailable: `already delivered in data/${a.requestId}/` });
+    assert.match('notAvailable' in b ? b.notAvailable : '', /^already delivered in data\/[0-9a-f]{32}\/$/);
   });
 
   test('a decline becomes not_available', async () => {
@@ -195,5 +196,43 @@ describe('a requester the provider cannot identify', () => {
     await new Promise((r) => setTimeout(r, 50));
     assert.equal((await broker.request('c_unlinked', '', 'pending trips for drv_2207', 'x') as { notAvailable?: string }).notAvailable,
       'the requester is not linked to the data provider');
+  });
+});
+
+describe('step-up', () => {
+  test('a request the requester has not approved is parked, and retried once they do', async () => {
+    let approved = false;
+    const gated = await startFakeAdapter({ secret: SECRET, sild: testSild, elevated: async () => approved });
+    try {
+      const adapter = new AdapterClient({
+        url: gated.url, secret: SECRET, publicKey: gated.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS),
+        allowInsecureLocal: true, assert: testAssert,
+      });
+      const broker = createBroker({ adapter, router: new FakeRouter() });
+      open.push(broker);
+      const events: BrokerEvent[] = [];
+      broker.subscribe((e) => events.push(e));
+      const until = async (pred: () => boolean) => {
+        for (let i = 0; i < 200 && !pred(); i++) await new Promise((r) => setTimeout(r, 25));
+      };
+
+      const r = await broker.request('c_step', 'u1', 'push token state of drv_2207 devices', 'no alerts');
+      assert.ok('requestId' in r);
+      await until(() => events.some((e) => e.type === 'parked'));
+      assert.ok(events.some((e) => e.type === 'parked' && e.requestId === r.requestId));
+      assert.ok(!events.some((e) => e.type === 'not_available'));
+
+      assert.deepEqual(await broker.request('c_step', 'u1', 'push token state of drv_2207 devices', 'again'),
+        { notAvailable: 'already asked; it waits for the requester to approve data access and is retried then' });
+
+      approved = true;
+      await broker.approved('c_step');
+      await until(() => events.some((e) => e.type === 'delivered'));
+      const requested = events.filter((e) => e.type === 'requested').map((e) => e.requestId);
+      assert.deepEqual(requested, [r.requestId, r.requestId], 'the retry keeps the request id');
+      assert.ok(events.some((e) => e.type === 'delivered' && e.requestId === r.requestId));
+    } finally {
+      await gated.close();
+    }
   });
 });

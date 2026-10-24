@@ -14,6 +14,9 @@ type TenantIdentityProvider struct {
 	ValidatorTokenSealed []byte
 	ValidatorTokenKeyID  string   `gorm:"size:32"`
 	AllowedOrigins       []string `gorm:"type:text;serializer:json"`
+	// EmbeddedOnly refuses every other sign-in to a member linked to the
+	// integrator, so switching them off there switches them off here.
+	EmbeddedOnly bool `gorm:"not null;default:false"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

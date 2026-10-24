@@ -15,6 +15,9 @@ export class NullBroker implements InfoBroker {
   async instructions(): Promise<null> {
     return null;
   }
+  async approved(): Promise<number> {
+    return 0;
+  }
   async catalog(): Promise<DataCatalog> {
     return { sources: [], perConversation: 0, distinctIds: 0 };
   }

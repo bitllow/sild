@@ -72,6 +72,8 @@ jobs:
 
       - name: Adapter conformance (fake adapter)
         run: |
+          eval "$(node fake-adapter/test-key.ts)"
+          export SILD_TENANT=t_conformance
           ADAPTER_SECRET=ci-conformance-secret PORT=8790 FAKE_DELAY_SCALE=0.2 node fake-adapter/server.ts > /tmp/adapter.log 2>&1 &
           for _ in $(seq 1 40); do grep -q '^ADAPTER_PUBLIC_KEY=' /tmp/adapter.log && break; sleep 0.25; done
           export ADAPTER_PUBLIC_KEY="$(sed -n 's/^ADAPTER_PUBLIC_KEY=//p' /tmp/adapter.log)"

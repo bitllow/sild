@@ -101,7 +101,14 @@ func (a *Auth) resolveAdmin(ctx context.Context, rawCookie string) (*principal.P
 	if err != nil || sess.ExpiresAt.Before(time.Now()) {
 		return nil, false
 	}
-	return a.adminPrincipal(ctx, sess.TenantID, sess.AdminUserID, nil)
+	// Sessions minted before embedded_only was turned on, or before the link, end with it.
+	return a.adminPrincipal(ctx, sess.TenantID, sess.AdminUserID, func(admin *models.AdminUser) bool {
+		if admin.ExternalSub == nil {
+			return true
+		}
+		p, err := a.store.Identity().GetProvider(ctx, admin.TenantID)
+		return err != nil || !p.EmbeddedOnly
+	})
 }
 
 // resolveEmbedded resolves an embedded-inbox bearer. The member must still be

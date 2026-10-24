@@ -94,6 +94,14 @@ export const openAssignment = (http: Http, conv: string) =>
 export const putMyContact = (http: Http, body: { metadata?: Record<string, unknown>; locale?: string }) =>
   http.put<void>('/v1/contacts/me', body);
 
+// The requester approved data access at the integrator; the assistant retries what waited for it.
+export const approveDataAccess = (http: Http, conv: string) =>
+  http.post<Message>(`/v1/conversations/${enc(conv)}/approvals`);
+
+// Sild's signed statement, for a data adapter, of who asks this exact request body.
+export const requesterAssertion = (http: Http, conv: string, body: string) =>
+  http.post<{ assertion: string; expires_at: string }>(`/v1/conversations/${enc(conv)}/requester-assertions`, { body });
+
 export const issueUpload = (http: Http, file: { mime_type: string; size_bytes: number; filename: string }) =>
   http.post<UploadGrant>('/v1/uploads', file);
 

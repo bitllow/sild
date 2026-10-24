@@ -58,6 +58,10 @@ func (s *Store) Queues() store.QueueRepo               { return &queueRepo{s.db}
 func (s *Store) Leases() store.LeaseRepo               { return &leaseRepo{s.db} }
 func (s *Store) Translations() store.TranslationRepo   { return &translationRepo{s.db} }
 
+func (s *Store) RequesterAssertions() store.RequesterAssertionRepo {
+	return &requesterAssertionRepo{s.db}
+}
+
 // translateErr maps GORM's not-found to the store sentinel.
 func translateErr(err error) error {
 	if err == gorm.ErrRecordNotFound {

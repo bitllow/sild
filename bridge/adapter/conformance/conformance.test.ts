@@ -1,21 +1,27 @@
 // Conformance suite a provider runs against its adapter:
 //   ADAPTER_URL=https://adapter.example.com/sild ADAPTER_SECRET=… ADAPTER_PUBLIC_KEY=… \
+//   SILD_TENANT=t_… SILD_TEST_KEY='<private EC P-256 JWK with kid>' \
 //     node --test 'adapter/conformance/*.test.ts'
+// The adapter under test must trust SILD_TEST_KEY's public half for SILD_TENANT,
+// in place of Sild's own keys.
 // CONFORMANCE_CASES may name a JSON file overriding DEFAULT_CASES (which fit
 // fake-adapter/). A case left out is skipped.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createPrivateKey, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
   LIMITS,
+  REQUESTER_HEADER,
   SOURCE_NAME,
   checkSchema,
   generateKeyPair,
   instructionsError,
   loadPublicKey,
   openDelivery,
+  requesterClaimsFor,
   signRequest,
+  signRequester,
   type DeliveryClaims,
   type Source,
 } from '../../src/adapter/kit/index.ts';
@@ -35,7 +41,15 @@ const DEFAULT_CASES: Cases = {
 const URL_ = process.env.ADAPTER_URL;
 const SECRET = process.env.ADAPTER_SECRET ?? '';
 const PUBLIC = process.env.ADAPTER_PUBLIC_KEY ?? '';
-const configured = Boolean(URL_ && SECRET && PUBLIC);
+const TENANT = process.env.SILD_TENANT ?? '';
+const SILD_JWK = process.env.SILD_TEST_KEY ? JSON.parse(process.env.SILD_TEST_KEY) : null;
+const configured = Boolean(URL_ && SECRET && PUBLIC && TENANT && SILD_JWK);
+const sildKey = SILD_JWK ? createPrivateKey({ key: SILD_JWK, format: 'jwk' }) : null;
+
+// Sild's assertion for this body, as the bridge sends it.
+function vouch(body: string): Record<string, string> {
+  return { [REQUESTER_HEADER]: signRequester(sildKey!, String(SILD_JWK.kid ?? 'test'), requesterClaimsFor(TENANT, body)) };
+}
 const cases: Cases = process.env.CONFORMANCE_CASES ? JSON.parse(readFileSync(process.env.CONFORMANCE_CASES, 'utf8')) : DEFAULT_CASES;
 const requester = cases.requester ?? { id: 'sild-conformance' };
 const base = configured ? new URL(URL_!.endsWith('/') ? URL_! : `${URL_}/`) : new URL('http://unset/');
@@ -43,10 +57,11 @@ const key = configured ? loadPublicKey(PUBLIC) : null;
 
 type Res = { status: number; body: unknown; raw: Buffer };
 
-async function call(method: string, rel: string, body = '', headers?: Record<string, string>): Promise<Res> {
+// headers replace the request signature; extra is added to it.
+async function call(method: string, rel: string, body = '', headers?: Record<string, string>, extra: Record<string, string> = {}): Promise<Res> {
   const url = new URL(rel, base);
   const target = url.pathname + url.search;
-  const h = headers ?? signRequest(SECRET, { method, target, body });
+  const h = { ...(headers ?? signRequest(SECRET, { method, target, body })), ...extra };
   const res = await fetch(url, {
     method,
     headers: { ...h, ...(body ? { 'content-type': 'application/json' } : {}) },
@@ -70,7 +85,10 @@ const newRequest = (c: Case, conversation_ref = conv()) => ({
   params: c.params,
   reason: 'Sild adapter conformance suite',
 });
-const post = (r: unknown) => call('POST', 'requests', JSON.stringify(r));
+const post = (r: unknown) => {
+  const body = JSON.stringify(r);
+  return call('POST', 'requests', body, undefined, vouch(body));
+};
 const field = (b: unknown, k: string): unknown => (typeof b === 'object' && b !== null ? (b as Record<string, unknown>)[k] : undefined);
 
 async function catalog(): Promise<Source[]> {
@@ -157,7 +175,7 @@ async function deliver(c: Case): Promise<{ claims: DeliveryClaims; req: ReturnTy
   return { claims: await awaitDelivery(req.id, cursor, (await maxWait(c.source)) + 10), req, status: 202 };
 }
 
-const offline = configured ? false : 'set ADAPTER_URL, ADAPTER_SECRET, ADAPTER_PUBLIC_KEY';
+const offline = configured ? false : 'set ADAPTER_URL, ADAPTER_SECRET, ADAPTER_PUBLIC_KEY, SILD_TENANT, SILD_TEST_KEY';
 const skip = (c?: Case) => offline || (c ? false : 'no case configured');
 
 describe('catalog', { skip: offline }, () => {
@@ -221,6 +239,18 @@ describe('request signing', { skip: offline }, () => {
     const h = signRequest(SECRET, { method: 'GET', target: new URL('catalog', base).pathname, body: '' });
     assert.equal((await call('GET', 'catalog', '', h)).status, 200);
     assert.equal((await call('GET', 'catalog', '', h)).status, 401);
+  });
+});
+
+describe('requester assertion', { skip: offline }, () => {
+  test('a request without one is refused', { skip: skip(cases.sync) }, async () => {
+    const body = JSON.stringify(newRequest(cases.sync!));
+    assert.equal((await call('POST', 'requests', body)).status, 401);
+  });
+  test('one made for another body is refused', { skip: skip(cases.sync) }, async () => {
+    const body = JSON.stringify(newRequest(cases.sync!));
+    const other = JSON.stringify(newRequest(cases.sync!));
+    assert.equal((await call('POST', 'requests', body, undefined, vouch(other))).status, 401);
   });
 });
 

@@ -432,3 +432,44 @@ func (h *Handler) patchMessageParts(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+
+// approveDataAccess: POST /v1/conversations/:id/approvals. The requester tells
+// the assistant they approved data access at the integrator.
+func (h *Handler) approveDataAccess(c *gin.Context) {
+	convID := c.Param("id")
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesSend, convID) {
+		return
+	}
+	msg, err := h.svc.ApproveDataAccess(c.Request.Context(), apiutil.Tenant(c), convID, middleware.Get(c).AdminID)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, views.Message(msg, h.attachmentURL(c)))
+}
+
+// mintRequesterAssertion: POST /v1/conversations/:id/requester-assertions. The
+// body is the exact data-adapter request the assistant is about to send.
+func (h *Handler) mintRequesterAssertion(c *gin.Context) {
+	convID := c.Param("id")
+	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesSend, convID) {
+		return
+	}
+	p := middleware.Get(c)
+	if !p.Service {
+		httpx.Forbidden(c, "only an assistant asks for requester assertions")
+		return
+	}
+	var req struct {
+		Body string `json:"body"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	assertion, exp, err := h.svc.MintRequesterAssertion(c.Request.Context(), apiutil.Tenant(c), convID, p.AdminID, []byte(req.Body))
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"assertion": assertion, "expires_at": exp})
+}

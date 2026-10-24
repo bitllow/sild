@@ -77,6 +77,15 @@ export class FakeSild {
     return m;
   }
 
+  // The requester approves data access, as POST /approvals does: a system message, and the conversation queued again if let go.
+  approve(conv: string): Message {
+    const c = this.conv(conv);
+    const requester = c.members.find((m) => m.conv_role === 'client')!.internal_actor_id!;
+    const m = this.addMessage(c, { sender_kind: 'system', internal_actor_id: requester, body: 'Approved data access', parts: [{ type: 'approval' }] });
+    if (c.status === 'open' && !this.openAssignment(c)) this.enqueue(conv);
+    return m;
+  }
+
   // A message the bot posted earlier, e.g. before a restart.
   botSaid(conv: string, text: string, parts?: Part[]): Message {
     return this.addMessage(this.conv(conv), { sender_kind: 'bot', internal_actor_id: BOT, body: text, parts });

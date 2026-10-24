@@ -42,7 +42,13 @@ export type Delivery = {
   state: DeliveryState;
   summary: string;
   files: WireFile[];
+  // Why a decline happened, for the bridge to act on; see DECLINE_CODE.
+  code?: string;
 };
+
+export const DECLINE_CODE = /^[a-z0-9_.-]{1,64}$/;
+// The requester must approve data access at the integrator first; the bridge retries once they do.
+export const STEP_UP_REQUIRED = 'step_up_required';
 
 // Payload of the compact JWS that carries a delivery.
 export type DeliveryClaims = {
