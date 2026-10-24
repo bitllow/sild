@@ -7,6 +7,7 @@
 #   RUNNER_MODE=local ...              run the CLI on the host instead of docker
 #   ROUTER=anthropic ...               route requester text with a model (default: rules)
 #   FRESH=1 ...                        start from an empty database
+#   SRC_REPOS="/path/a /path/b" ...    the code the assistant reads (default: this repo)
 #
 # Model auth: ANTHROPIC_API_KEY, or a token file at bridge/.secrets/oauth-token
 # (`claude setup-token`, local testing only).
@@ -56,11 +57,25 @@ else
   exit 1
 fi
 
-# The code the assistant reads: tracked files only, so nothing untracked (keys,
-# tokens) is ever inside its read-only mount.
-if [ ! -d "$STATE/src" ]; then
-  mkdir -p "$STATE/src"
-  git -C "$ROOT" archive HEAD | tar -x -C "$STATE/src"
+# The code the assistant reads: committed files only, so nothing untracked (.env,
+# local keys) is ever inside its read-only mount; key-shaped files are dropped
+# even when committed.
+repos="${SRC_REPOS:-$ROOT}"
+if [ "$(cat "$STATE/src/.repos" 2>/dev/null)" != "$repos" ]; then
+  rm -rf "$STATE/src" && mkdir -p "$STATE/src"
+  for r in $repos; do
+    dest="$STATE/src"
+    [ -n "${SRC_REPOS:-}" ] && dest="$STATE/src/$(basename "$r")" && mkdir -p "$dest"
+    git -C "$r" archive HEAD | tar -x -C "$dest"
+  done
+  find "$STATE/src" -type f \( -name '.env*' -o -name '*.pem' -o -name '*.key' -o -name '*.p12' \
+    -o -name '*.jks' -o -name '*.keystore' -o -name '*.tfvars' -o -name '*credentials*.json' \) -delete
+  # Committed key material goes entirely; credential values elsewhere are redacted in place.
+  grep -rlE --null -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key"[[:space:]]*:' "$STATE/src" | xargs -0 rm -f
+  cred='AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|sk_live_[0-9A-Za-z]{20,}|rk_live_[0-9A-Za-z]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|ghp_[A-Za-z0-9]{30,}|glpat-[A-Za-z0-9_-]{20}|sk-ant-[a-z0-9]+-[A-Za-z0-9_-]{20,}'
+  grep -rlE --null -- "$cred|(PASSWORD|SECRET|API_KEY|TOKEN)[A-Z_]*[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9/+_-]{16,}" "$STATE/src" |
+    xargs -0 perl -pi -e "s/($cred)/REDACTED/g; s/((?:PASSWORD|SECRET|API_KEY|TOKEN)[A-Z_]*[\"']?\\s*[:=]\\s*[\"']?)[A-Za-z0-9\\/+_-]{16,}/\${1}REDACTED/g"
+  echo "$repos" >"$STATE/src/.repos"
 fi
 
 if [ "$RUNNER_MODE" = docker ] && ! docker image inspect "$RUNNER_IMAGE" >/dev/null 2>&1; then
@@ -93,7 +108,7 @@ echo "starting the bridge (${RUNNER_MODE} runner)…"
 (cd "$ROOT/bridge" && exec env \
   SILD_URL="http://localhost:$SILD_PORT" SILD_SERVICE_KEY="$(cat "$STATE/assistant.key")" \
   WORK_ROOT="$STATE/work" SRC_DIR="$STATE/src" RUNNER_MODE="$RUNNER_MODE" RUNNER_IMAGE="$RUNNER_IMAGE" \
-  IDLE_RELEASE_SECONDS="${IDLE_RELEASE_SECONDS:-120}" MODEL="${MODEL:-claude-sonnet-5-5}" \
+  IDLE_RELEASE_SECONDS="${IDLE_RELEASE_SECONDS:-120}" MODEL="${MODEL:-claude-opus-5-5}" \
   ADAPTER_URL="http://127.0.0.1:$ADAPTER_PORT" ADAPTER_SECRET="$adapter_secret" ADAPTER_PUBLIC_KEY="$adapter_key" \
   ADAPTER_ALLOW_INSECURE_LOCAL=1 ROUTER="${ROUTER:-fake}" \
   "${model_auth[@]}" node src/main.ts >"$STATE/logs/bridge.log" 2>&1) &
