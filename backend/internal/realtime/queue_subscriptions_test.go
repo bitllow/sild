@@ -159,3 +159,23 @@ func TestARequesterQueueGrantFollowsALiveSocket(t *testing.T) {
 		t.Fatalf("revoke: unsubscribed %v", h.Pub.Unsubscribed)
 	}
 }
+
+func TestANewQueueReachesOperatorsOfEveryQueue(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+	if err := h.Svc.SetQueue(ctx, &models.Queue{TenantID: tenant.ID, Key: "billing"}); err != nil {
+		t.Fatal(err)
+	}
+	owner := h.SeedAdmin(tenant.ID, "o@test", models.PlatformOwner)
+	h.SeedAdmin(tenant.ID, "a@test", models.PlatformAgent)
+	h.SeedAdminScoped(tenant.ID, "m@test", models.PlatformRequester, models.RoleScope{Queues: []string{"billing"}})
+
+	h.Pub.Reset()
+	if err := h.Svc.SetQueue(ctx, &models.Queue{TenantID: tenant.ID, Key: "triage"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{owner.ID + "→" + realtime.QueueChannel(tenant.ID, "triage")}; !slices.Equal(h.Pub.Subscribed, want) {
+		t.Fatalf("subscribed %v, want %v", h.Pub.Subscribed, want)
+	}
+}

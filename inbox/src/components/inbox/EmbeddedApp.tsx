@@ -87,6 +87,8 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
     let askedAt = 0;
     let refresh: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
+    // Only the newest token's exchange counts: validators may answer out of order.
+    let latest = 0;
     const retiring = new Map<string, ReturnType<typeof setTimeout>>();
     const retire = (token: string | null) => {
       if (!token) return;
@@ -126,9 +128,15 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
       askedAt = 0;
       const first = adminId === null;
       if (first) setPhase({ kind: "checking", step: 1, tokenHint: token.slice(0, 12) });
+      const seq = ++latest;
+      let exchanged = false;
       try {
         const s = await exchange(embedKey, token);
-        if (disposed) return;
+        exchanged = true;
+        if (disposed || seq !== latest) {
+          endSession(s.token);
+          return;
+        }
         // Another person signed in on the host: start from a clean store.
         if (adminId !== null && s.admin_id !== adminId) {
           endSession(bearer);
@@ -156,7 +164,7 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
         }
         setPhase({ kind: "ready" });
       } catch (e) {
-        if (disposed) return;
+        if (disposed || (!exchanged && seq !== latest)) return;
         // A refresh that hit a hiccup keeps the bearer it has and asks again.
         if (!first && transient(e) && Date.now() < expiresAt) {
           if (refresh) clearTimeout(refresh);

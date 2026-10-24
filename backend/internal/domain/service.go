@@ -222,7 +222,11 @@ func (s *Service) SetQueue(ctx context.Context, q *models.Queue) error {
 		return mapStoreErr(err)
 	}
 	q.CreatedAt = s.now()
-	return s.store.Queues().Upsert(ctx, q)
+	if err := s.store.Queues().Upsert(ctx, q); err != nil {
+		return err
+	}
+	s.subscribeQueueOperators(ctx, q)
+	return nil
 }
 
 // ListQueues returns the tenant-defined queues; the built-in support queue is not among them.

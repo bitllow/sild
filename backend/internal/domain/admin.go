@@ -278,6 +278,31 @@ func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID 
 	}
 }
 
+// subscribeQueueOperators adds a queue to the open sockets of members who reach
+// every queue: their channel set listed the tenant's queues when they connected.
+func (s *Service) subscribeQueueOperators(ctx context.Context, q *models.Queue) {
+	sub, ok := s.pub.(realtime.Subscriber)
+	if !ok {
+		return
+	}
+	rows, err := s.store.RoleAssignments().ListByTenant(ctx, q.TenantID)
+	if err != nil {
+		return
+	}
+	byAdmin := map[string][]models.RoleAssignment{}
+	for _, r := range rows {
+		byAdmin[r.AdminUserID] = append(byAdmin[r.AdminUserID], r)
+	}
+	ch := realtime.QueueChannel(q.TenantID, q.Key)
+	in := realtime.ChannelInputs{Queues: []string{q.Key}}
+	for id, held := range byAdmin {
+		p := principal.ForAdmin(&models.AdminUser{ID: id, TenantID: q.TenantID}, held)
+		if _, all := p.Queues(); all && realtime.AgentChannels(p, in)[ch] {
+			_ = sub.Subscribe(id, ch)
+		}
+	}
+}
+
 // RoleAssignments lists what one member holds.
 func (s *Service) RoleAssignments(ctx context.Context, tenantID, adminID string) ([]models.RoleAssignment, error) {
 	as, err := s.store.RoleAssignments().ListByAdmin(ctx, tenantID, adminID)

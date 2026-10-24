@@ -409,6 +409,13 @@ func TestIdentityProviderConfig(t *testing.T) {
 			}
 		}
 	})
+	t.Run("drops a default port", func(t *testing.T) {
+		key := f.configure(t, map[string]any{"validator_url": url, "allowed_origins": []string{"https://app.example:443", "http://localhost:80"}})
+		w := f.h.Request("GET", "/v1/admin/auth/embedded/"+key).Do()
+		if !strings.Contains(w.Body.String(), `["https://app.example","http://localhost"]`) {
+			t.Fatalf("origins: %s", w.Body)
+		}
+	})
 }
 
 func TestValidatorURLMustBeHTTPSOutsideDevelopment(t *testing.T) {
@@ -510,6 +517,19 @@ func TestEmbeddedSessionEnds(t *testing.T) {
 		if w := f.h.Request("GET", "/v1/principal").Bearer(bearer).Do(); w.Code != http.StatusUnauthorized {
 			t.Fatalf("session after token rotation: want 401, got %d", w.Code)
 		}
+	})
+	t.Run("provider removed while the validator answers", func(t *testing.T) {
+		f.validator.answer("tok-race", func(w http.ResponseWriter, r *http.Request) {
+			f.h.Request("DELETE", "/v1/identity-provider").Cookie("sild_admin", f.owner).Do()
+			active("fleetline.7", time.Now().Add(time.Hour))(w, r)
+		})
+		if r := f.exchange(t, f.embed, "tok-race"); r.code == http.StatusOK || f.sessions(t) != 0 {
+			t.Fatalf("a session outlived its provider: %d %s", r.code, r.body)
+		}
+		f.embed = f.configure(t, map[string]any{
+			"validator_url": f.validator.srv.URL + "/validate", "validator_token": validatorToken,
+			"allowed_origins": []string{hostOrigin},
+		})
 	})
 	t.Run("provider removed", func(t *testing.T) {
 		bearer := f.signIn(t, "tok-marko")

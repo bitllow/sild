@@ -137,26 +137,39 @@ func (s *Service) ApproveDataAccess(ctx context.Context, tenantID, convID, actor
 	if err != nil {
 		return nil, err
 	}
-	body := "Approved data access"
-	if len(items) > 0 {
-		body += ": " + strings.Join(items, "; ")
-	}
+	body := "Approved data access: " + strings.Join(items, "; ")
 	return s.SendMessage(ctx, tenantID, convID, SendInput{
 		SenderKind: models.SenderSystem, Internal: &actorID, Conv: conv, Body: body, Parts: parts,
 	})
 }
 
 // awaitingApproval names the assistant's steps that wait for the requester's approval, as the steps label them.
+// A step the latest approval already covered, unchanged since, waits for the assistant, not for another approval.
 func (s *Service) awaitingApproval(ctx context.Context, tenantID, convID string) ([]string, error) {
 	page, err := s.store.Messages().ListBefore(ctx, tenantID, convID, "", 100, false)
 	if err != nil {
 		return nil, err
+	}
+	var approvedAt time.Time
+	for _, m := range page.Messages {
+		var parts []messagePart
+		if m.SenderKind == models.SenderSystem && json.Unmarshal(m.Parts, &parts) == nil &&
+			len(parts) > 0 && parts[0].Type == "approval" && m.CreatedAt.After(approvedAt) {
+			approvedAt = m.CreatedAt
+		}
 	}
 	var items []string
 	seen := map[string]bool{}
 	for _, m := range page.Messages {
 		var parts []messagePart
 		if m.SenderKind != models.SenderBot || json.Unmarshal(m.Parts, &parts) != nil {
+			continue
+		}
+		changed := m.CreatedAt
+		if m.UpdatedAt != nil && m.UpdatedAt.After(changed) {
+			changed = *m.UpdatedAt
+		}
+		if !changed.After(approvedAt) {
 			continue
 		}
 		for _, p := range parts {

@@ -49,7 +49,14 @@ export function stepsOf(m: Message): StepsPart[] {
 
 /** Data requests parked until the requester approves data access at the integrator. */
 export function awaitingApproval(messages: Message[]): Step[] {
-  return messages.flatMap(stepsOf).flatMap((p) => p.steps).filter((s) => s.state === "needs_approval");
+  // Steps unchanged since the latest approval wait for the assistant to retry, as the server counts them.
+  const at = (iso: string) => new Date(iso).getTime();
+  const approvedAt = Math.max(0, ...messages.filter((m) => m.parts?.some((p) => p.type === "approval")).map((m) => at(m.created_at)));
+  return messages
+    .filter((m) => Math.max(at(m.created_at), m.updated_at ? at(m.updated_at) : 0) > approvedAt)
+    .flatMap(stepsOf)
+    .flatMap((p) => p.steps)
+    .filter((s) => s.state === "needs_approval");
 }
 
 /** One data request as operators read it: source plus its parameters. */

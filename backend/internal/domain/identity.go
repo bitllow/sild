@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -192,7 +193,12 @@ func normalizeOrigins(in []string, production bool) ([]string, error) {
 		if production && u.Scheme != "https" {
 			return nil, invalid("allowed origin " + raw + " must use https")
 		}
-		origin := strings.ToLower(u.Scheme + "://" + u.Host)
+		// The browser reports an origin without its scheme's default port.
+		host := u.Host
+		if p := u.Port(); (u.Scheme == "https" && p == "443") || (u.Scheme == "http" && p == "80") {
+			host = strings.TrimSuffix(host, ":"+p)
+		}
+		origin := strings.ToLower(u.Scheme + "://" + host)
 		if !slices.Contains(out, origin) {
 			out = append(out, origin)
 		}
@@ -301,6 +307,15 @@ func (s *Service) ExchangeEmbedToken(ctx context.Context, embedKey, token string
 		ExpiresAt: exp, CreatedAt: now,
 	}); err != nil {
 		return nil, err
+	}
+	// Checked after the insert: a provider change ends sessions only after it lands, so one of the two catches this one.
+	cur, err := s.store.Identity().GetProvider(ctx, p.TenantID)
+	if err != nil || cur.EmbedKey != p.EmbedKey || cur.ValidatorURL != p.ValidatorURL || !bytes.Equal(cur.ValidatorTokenSealed, p.ValidatorTokenSealed) {
+		_ = s.store.Identity().DeleteSession(ctx, tok.Hash)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		return nil, ErrUnknownEmbedKey
 	}
 	return &EmbedSession{Token: tok.Raw, ExpiresAt: exp, ExternalSub: v.Sub, Admin: admin}, nil
 }

@@ -126,7 +126,7 @@ func TestOnlyTheRequesterApprovesDataAccess(t *testing.T) {
 	if got := approve(f.h.Request("POST", path).Cookie("sild_admin", f.marko)); got != http.StatusConflict {
 		t.Fatalf("approved with nothing waiting: want 409, got %d", got)
 	}
-	f.botMessage(t, []map[string]any{{"type": "steps", "steps": []map[string]any{
+	steps := f.botMessage(t, []map[string]any{{"type": "steps", "steps": []map[string]any{
 		{"label": "Checked his phones", "state": "needs_approval"}, {"label": "Checked his trips", "state": "done"},
 	}}})
 	w := f.h.Request("POST", path).Cookie("sild_admin", f.marko).Do()
@@ -145,6 +145,16 @@ func TestOnlyTheRequesterApprovesDataAccess(t *testing.T) {
 	if m.SenderKind != "system" || len(m.Parts) != 1 || m.Parts[0].Type != "approval" ||
 		len(m.Parts[0].Items) != 1 || m.Parts[0].Items[0] != "Checked his phones" || m.Body != "Approved data access: Checked his phones" {
 		t.Fatalf("approval message: %+v", m)
+	}
+	if got := approve(f.h.Request("POST", path).Cookie("sild_admin", f.marko)); got != http.StatusConflict {
+		t.Fatalf("approved the same steps twice: want 409, got %d", got)
+	}
+	parked := []map[string]any{{"type": "steps", "steps": []map[string]any{{"label": "Checked his trips", "state": "needs_approval"}}}}
+	if w := f.h.Request("PATCH", "/v1/conversations/"+f.own+"/messages/"+steps).Bearer(f.key).JSON(map[string]any{"parts": parked}).Do(); w.Code != http.StatusOK {
+		t.Fatalf("park again: %d %s", w.Code, w.Body)
+	}
+	if got := approve(f.h.Request("POST", path).Cookie("sild_admin", f.marko)); got != http.StatusCreated {
+		t.Fatalf("a step parked after the approval: want 201, got %d", got)
 	}
 }
 
