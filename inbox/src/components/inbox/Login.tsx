@@ -52,7 +52,7 @@ export const Login = observer(function Login() {
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/assets/sild-mark-tile.svg" width={46} alt="Sild" style={{ borderRadius: 13 }} />
+        <img src="/assets/sild-mark-tile.png" width={46} alt="Sild" style={{ borderRadius: 13 }} />
         <h1 style={{ fontSize: 24, marginTop: 18, letterSpacing: "-0.02em" }}>Sild support inbox</h1>
         <p style={{ fontSize: 14, color: "var(--text-secondary)", marginTop: 8, lineHeight: 1.5 }}>
           Sign in to the assignment queue. Agents see only the conversations they&apos;re assigned.
