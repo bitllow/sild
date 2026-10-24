@@ -39,7 +39,7 @@ test.describe("settings · embedding", () => {
 
     await page.reload();
     await gotoSettings(page, "Embedding");
-    await expect(page.getByTestId("embedding-origins")).toHaveValue(new RegExp(extra.replace(/\./g, "\\.")));
+    await expect.poll(() => page.getByTestId("embedding-origins").inputValue()).toContain(extra);
     await expect(page.getByTestId("embedding-validator-token")).toHaveValue("");
     await expect(page.getByTestId("embedding-token-stored")).toBeVisible();
     await expect(page.getByTestId("embed-key")).toHaveText(key);
