@@ -138,6 +138,7 @@ echo "starting the bridge (${RUNNER_MODE} runner)…"
 (cd "$ROOT/bridge" && exec env \
   SILD_URL="http://localhost:$SILD_PORT" SILD_SERVICE_KEY="$(cat "$STATE/assistant.key")" \
   WORK_ROOT="$STATE/work" SRC_DIR="$STATE/src" RUNNER_MODE="$RUNNER_MODE" RUNNER_IMAGE="$RUNNER_IMAGE" \
+  RUNNER_EGRESS=open \
   IDLE_RELEASE_SECONDS="${IDLE_RELEASE_SECONDS:-120}" MODEL="${MODEL:-claude-opus-5-5}" EFFORT="${EFFORT:-}" \
   ADAPTER_URL="http://127.0.0.1:$ADAPTER_PORT" ADAPTER_SECRET="$adapter_secret" ADAPTER_PUBLIC_KEY="$adapter_key" \
   ADAPTER_ALLOW_INSECURE_LOCAL=1 ROUTER="${ROUTER:-$router_default}" \

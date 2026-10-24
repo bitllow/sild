@@ -93,9 +93,15 @@ func (m *KeyManager) Mint(ctx context.Context, sub, tid string, ttl time.Duratio
 // MintAgent issues an agent JWT for an admin actor (typ="agent"), used only to
 // authenticate the inbox's egress-only realtime connection (§5). It carries no
 // authorization — the realtime node resolves an agent's channel set live from
-// the assignment queue on connect.
-func (m *KeyManager) MintAgent(ctx context.Context, adminID, tid string, ttl time.Duration) (string, time.Time, error) {
-	return m.mint(ctx, adminID, tid, "agent", ttl)
+// the assignment queue on connect. A non-zero end caps the token at that instant.
+func (m *KeyManager) MintAgent(ctx context.Context, adminID, tid string, ttl time.Duration, end time.Time) (string, time.Time, error) {
+	c, exp := m.claims(adminID, tid, "agent", ttl)
+	if !end.IsZero() && end.Before(exp) {
+		exp = end
+		c.ExpiresAt = jwt.NewNumericDate(end)
+	}
+	tok, err := m.sign(ctx, c)
+	return tok, exp, err
 }
 
 func (m *KeyManager) mint(ctx context.Context, sub, tid, typ string, ttl time.Duration) (string, time.Time, error) {

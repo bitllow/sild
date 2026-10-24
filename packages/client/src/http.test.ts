@@ -77,6 +77,18 @@ test('per-call anonymous drops the bearer', async () => {
   assert.equal((await http.get<{ auth: null }>('/v1/echo', { anonymous: true })).auth, null);
 });
 
+test('keepalive reaches fetch only when asked for', async () => {
+  const seen: (boolean | undefined)[] = [];
+  const spy: typeof fetch = async (_url, init) => {
+    seen.push(init?.keepalive);
+    return new Response(null, { status: 204 });
+  };
+  const http = createHttp({ credential: { kind: 'cookie' }, fetch: spy });
+  await http.post('/v1/x', {});
+  await http.post('/v1/x', {}, { keepalive: true });
+  assert.deepEqual(seen, [undefined, true]);
+});
+
 test('JSON bodies and queries are encoded; empty query values are dropped', async () => {
   const http = createHttp({ baseUrl: srv.url, credential: { kind: 'anonymous' } });
   const r = await http.post<{ url: string; body: string }>('/v1/echo', { a: 1 }, { query: { q: 'a b', limit: 5, cursor: null, x: '' } });

@@ -4,6 +4,7 @@ package principal
 
 import (
 	"slices"
+	"time"
 
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
@@ -38,6 +39,10 @@ type Principal struct {
 
 	// signed (upload capability)
 	ObjectKey string
+
+	// Expires is when the credential ends, for anything minted from it; zero when
+	// nothing minted from it can outlive it.
+	Expires time.Time
 }
 
 // Assignment is one role the member holds, with the scope that role defines.

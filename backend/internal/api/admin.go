@@ -157,7 +157,7 @@ func (h *Handler) realtimeToken(c *gin.Context) {
 		return
 	}
 	p := middleware.Get(c)
-	tok, exp, err := h.km.MintAgent(c.Request.Context(), p.AdminID, p.TenantID, time.Hour)
+	tok, exp, err := h.km.MintAgent(c.Request.Context(), p.AdminID, p.TenantID, time.Hour, p.Expires)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return

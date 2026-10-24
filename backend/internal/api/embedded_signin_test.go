@@ -221,6 +221,31 @@ func TestEmbeddedSessionOpensRealtime(t *testing.T) {
 	}
 }
 
+func TestRealtimeTokenNeverOutlivesTheEmbeddedSession(t *testing.T) {
+	f := newEmbedFixture(t)
+	f.validator.answer("tok-short", active("fleetline.7", time.Now().Add(2*time.Minute)))
+	r := f.exchange(t, f.embed, "tok-short")
+	if r.code != http.StatusOK {
+		t.Fatalf("exchange: %d %s", r.code, r.body)
+	}
+	w := f.h.Request("GET", "/v1/realtime/token").Bearer(r.token).Do()
+	var rt struct {
+		Token     string    `json:"token"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	testutil.DecodeJSON(t, w, &rt)
+	if w.Code != http.StatusOK {
+		t.Fatalf("realtime token: %d %s", w.Code, w.Body)
+	}
+	claims, err := f.h.KM.VerifyRealtime(context.Background(), rt.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.ExpiresAt.After(r.expiresAt) || rt.ExpiresAt.After(r.expiresAt) {
+		t.Fatalf("realtime token expires %v (reported %v), session %v", claims.ExpiresAt.Time, rt.ExpiresAt, r.expiresAt)
+	}
+}
+
 func TestEmbeddedSessionIsNotAUserToken(t *testing.T) {
 	f := newEmbedFixture(t)
 	bearer := f.signIn(t, "tok-marko")

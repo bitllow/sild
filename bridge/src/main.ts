@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import path from 'node:path';
 import { connect, createHttp, principal as getPrincipal, realtimeToken, requesterAssertion, type Http } from '@sild/client';
 import { Centrifuge } from 'centrifuge';
 import type { Assert } from './adapter/client.ts';
@@ -6,11 +7,13 @@ import { DEFAULT_FILE_LIMITS, FileStore } from './adapter/files.ts';
 import { ConfigError, loadConfig, type Config } from './config.ts';
 import type { InfoBroker } from './contracts.ts';
 import { createConfluenceTools } from './runner/confluence.ts';
+import { internalNetworkProblem } from './runner/docker.ts';
 import { startModelProxy } from './runner/proxy.ts';
 import { ClaudeSessionRunner } from './runner/session.ts';
 import { checkRouterAuth, loadDataConfig, makeBroker, type DataConfig } from './data.ts';
 import { SlotManager } from './slots/manager.ts';
 import { NullBroker } from './slots/null-broker.ts';
+import { JsonStore } from './state.ts';
 import type { Log } from './slots/types.ts';
 
 export type BrokerFactory = (ctx: {
@@ -18,6 +21,8 @@ export type BrokerFactory = (ctx: {
   sild: Http;
   files: FileStore;
   assert: Assert;
+  // Where broker and adapter state that outlives the process lives.
+  stateRoot: string;
   modelBaseUrl: string;
   modelToken: string;
   log: Log;
@@ -45,7 +50,8 @@ export async function startBridge(cfg: Config, makeBroker: BrokerFactory = () =>
   const confluence = createConfluenceTools(cfg.confluence, log);
   const files = new FileStore(cfg.workRoot, DEFAULT_FILE_LIMITS);
   const assert = async (conv: string, body: string) => (await requesterAssertion(sild, conv, body)).assertion;
-  const broker = await makeBroker({ config: cfg, sild, files, assert, modelBaseUrl: `http://127.0.0.1:${proxy.port}`, modelToken: proxyToken, log });
+  const stateRoot = path.join(cfg.workRoot, '.bridge');
+  const broker = await makeBroker({ config: cfg, sild, files, assert, stateRoot, modelBaseUrl: `http://127.0.0.1:${proxy.port}`, modelToken: proxyToken, log });
   const runner = new ClaudeSessionRunner({
     workRoot: cfg.workRoot,
     srcDir: cfg.srcDir,
@@ -72,6 +78,7 @@ export async function startBridge(cfg: Config, makeBroker: BrokerFactory = () =>
     turnTimeoutMs: cfg.turnTimeoutMs,
     pollMs: cfg.pollMs,
     log,
+    state: new JsonStore(path.join(stateRoot, 'steps')),
   });
   slots.start();
   const realtime = connect({
@@ -104,6 +111,11 @@ if (import.meta.main) {
   } catch (e) {
     if (!(e instanceof ConfigError)) throw e;
     console.error(e.message);
+    process.exit(1);
+  }
+  const egress = cfg.runnerMode === 'docker' && cfg.runnerEgress === 'internal' ? await internalNetworkProblem(cfg.runnerNetwork!) : null;
+  if (egress) {
+    console.error(`invalid configuration:\n  RUNNER_NETWORK: ${egress}`);
     process.exit(1);
   }
   const bridge = await startBridge(cfg, data ? (ctx) => makeBroker(data, ctx) : undefined);

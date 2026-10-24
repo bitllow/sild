@@ -65,6 +65,19 @@ is a kit, `bridge/src/adapter/kit` (`createAdapter`), which does the signing,
 verification, long-polling and file serving for you. You write the catalog and
 a handler. `bridge/fake-adapter/` is a complete example.
 
+**Run one instance of a kit-based adapter.** The kit keeps its state in process
+memory: seen nonces, pending requests and published deliveries.
+- **Several replicas:** a nonce is checked only on the replica that received
+  it, and one replica's `/deliveries` misses what another published.
+- **A restart:** the kit loses pending async requests. The bridge then reports
+  them as not available once their wait runs out. Deliveries published but not
+  yet collected are lost too, and a captured request could be replayed once
+  within its 5-minute window.
+
+For more than one instance, or restarts without loss, back the kit with a
+shared store (for example Redis) for those three, or build the contract
+yourself.
+
 ### Endpoints
 
 - `GET /catalog`: the sources you offer.

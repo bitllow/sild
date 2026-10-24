@@ -149,7 +149,7 @@ export async function setTranslation(page: Page, key: string, value: string): Pr
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
-export async function gotoSettings(page: Page, tab: "Channels" | "Appearance" | "API keys" | "Webhooks" | "Team"): Promise<void> {
+export async function gotoSettings(page: Page, tab: "Embedding" | "Channels" | "Appearance" | "API keys" | "Webhooks" | "Team"): Promise<void> {
   await navSettings(page).click();
   const tabBtn = page.getByRole("button", { name: tab, exact: true });
   await tabBtn.click();

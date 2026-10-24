@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, test } from 'node:test';
 import { createHttp } from '@sild/client';
 import { DEFAULT_FILE_LIMITS, FileStore } from '../adapter/files.ts';
+import { JsonStore } from '../state.ts';
 import type { BrokerEvent, InfoBroker } from '../contracts.ts';
 import { FakeSild, waitFor } from '../sild/fake.ts';
 import { requesterMessage, SlotManager, type SlotConfig } from './manager.ts';
@@ -546,4 +547,30 @@ test('an approval with nothing left to retry stops showing the steps as waiting'
   nudge(mgr, a);
   await waitFor(() => step()[0]?.state === 'not_available', 'step no longer waiting');
   await waitFor(() => runner.sessions[0].pushes.some((p) => p.includes('no request was waiting')), 'session told to ask again');
+});
+
+test('a step created before a restart is still updated after it', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'steps-state-'));
+  cleanup.push(async () => rmSync(dir, { recursive: true, force: true }));
+  const first = await setup({ state: new JsonStore(dir) });
+  const a = first.sild.open('adm_r1', 'first');
+  first.mgr.start();
+  await waitFor(() => first.runner.sessions[0]?.pushes.length === 1, 'push');
+  first.broker.emit({ type: 'requested', conv: a, requestId: 'r1', label: 'Checked his phones', source: 'driver.devices', params: {} });
+  await waitFor(() => first.sild.botMessages(a).some((m) => m.parts?.some((p) => p.type === 'steps')), 'step written');
+  await first.mgr.stop();
+
+  const runner = new FakeRunner();
+  const broker = new FakeBroker();
+  const second = new SlotManager(createHttp({ baseUrl: first.sild.url, credential: { kind: 'bearer', token: 'sild_live_test' } }), 'adm_bot', runner, broker,
+    new FileStore(mkdtempSync(path.join(tmpdir(), 'slots-')), DEFAULT_FILE_LIMITS), {
+      queue: 'triage', slots: 1, idleReleaseMs: 60_000, maxClaimMs: 60_000, turnTimeoutMs: 60_000, pollMs: 60_000, log: () => {}, state: new JsonStore(dir),
+    });
+  cleanup.push(() => second.stop());
+  second.start();
+  broker.emit({ type: 'delivered', conv: a, requestId: 'r1', summary: 'token expired 07:42', files: [] });
+  const steps = () => first.sild.botMessages(a).flatMap((m) => m.parts ?? []).flatMap((p) => (p.type === 'steps' ? p.steps : []));
+  await waitFor(() => steps()[0]?.state === 'done', 'step updated after the restart');
+  assert.equal(steps()[0]!.result, 'token expired 07:42');
+  assert.equal(steps().length, 1);
 });

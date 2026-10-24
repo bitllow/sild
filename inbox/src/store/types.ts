@@ -95,6 +95,8 @@ export interface TeamMember {
   name: string;
   email: string;
   assignments: RoleAssignment[];
+  /** Linked identity at the integrator; "" when not linked. */
+  externalSub: string;
 }
 
 /** The email support channel as the Channels settings render it (§6.2). */
@@ -117,6 +119,6 @@ export interface Brand {
 }
 
 export type InboxView = "triage" | "inbox" | "peer" | "settings" | "translations";
-export type SettingsTab = "installation" | "channels" | "appearance" | "keys" | "webhooks" | "team" | "queues";
+export type SettingsTab = "installation" | "embedding" | "channels" | "appearance" | "keys" | "webhooks" | "team" | "queues";
 export type InboxFilter = "you" | "unassigned" | "all";
 export type SessionState = "loading" | "authed" | "anon";

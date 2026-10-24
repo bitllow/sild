@@ -60,6 +60,19 @@ export function dockerSpawner(runner: DockerRunner): (opts: SpawnOptions) => Spa
   };
 }
 
+// Null when name is a docker network without a route out, otherwise why not.
+export async function internalNetworkProblem(name: string): Promise<string | null> {
+  const out = await new Promise<{ code: number | null; text: string }>((resolve) => {
+    const child = spawn('docker', ['network', 'inspect', '-f', '{{.Internal}}', name], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let text = '';
+    child.stdout.on('data', (b: Buffer) => (text += b.toString()));
+    child.on('error', () => resolve({ code: -1, text: '' }));
+    child.on('close', (code) => resolve({ code, text: text.trim() }));
+  });
+  if (out.code !== 0) return `docker network ${name} does not exist`;
+  return out.text === 'true' ? null : `docker network ${name} is not internal (create it with docker network create --internal)`;
+}
+
 // The SDK launches either the native binary or `node cli.js`; only the CLI's own args cross over.
 function stripLauncher(command: string, args: string[]): string[] {
   const launcher = path.basename(command);

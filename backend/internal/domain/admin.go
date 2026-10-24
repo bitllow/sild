@@ -261,22 +261,21 @@ func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID 
 	if after == nil {
 		return
 	}
-	if now := after.PeerAccess(); now != before.PeerAccess() {
-		moveSubscription(sub, adminID, realtime.PeerChannel(tenantID), now)
-	}
-	// The tenant support channel follows whether any role reaches a conversation.
-	was := !policy.Scope(before, policy.ConversationsList).DenyAll()
-	if now := !policy.Scope(after, policy.ConversationsList).DenyAll(); now != was {
-		moveSubscription(sub, adminID, realtime.AgentsChannel(tenantID), now)
-	}
-}
-
-func moveSubscription(sub realtime.Subscriber, adminID, channel string, on bool) {
-	if on {
-		_ = sub.Subscribe(adminID, channel)
+	in, err := realtime.LoadChannelInputs(ctx, s.store, tenantID, adminID, before, after)
+	if err != nil {
 		return
 	}
-	_ = sub.Unsubscribe(adminID, channel)
+	was, now := realtime.AgentChannels(before, in), realtime.AgentChannels(after, in)
+	for ch := range now {
+		if !was[ch] {
+			_ = sub.Subscribe(adminID, ch)
+		}
+	}
+	for ch := range was {
+		if !now[ch] {
+			_ = sub.Unsubscribe(adminID, ch)
+		}
+	}
 }
 
 // RoleAssignments lists what one member holds.

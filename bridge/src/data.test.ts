@@ -4,7 +4,7 @@ import { ConfigError, loadConfig } from './config.ts';
 import { checkRouterAuth, loadDataConfig } from './data.ts';
 
 const data = { ADAPTER_URL: 'https://erp.example.com/sild', ADAPTER_SECRET: 's', ADAPTER_PUBLIC_KEY: 'k' };
-const base = { SILD_URL: 'https://chat.example.com', SILD_SERVICE_KEY: 'sild_live_x' };
+const base = { SILD_URL: 'https://chat.example.com', SILD_SERVICE_KEY: 'sild_live_x', RUNNER_EGRESS: 'open' };
 
 test('the router uses the proxy unless it has a key of its own', () => {
   assert.equal(loadDataConfig(data)!.routerApiKey, undefined);

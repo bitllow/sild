@@ -71,6 +71,8 @@ export interface ApiTeamMember {
   /** Every role this member holds, each with its scope. */
   assignments: RoleAssignment[];
   has_password: boolean;
+  /** The member's identity at the integrator, for embedded sign-in. */
+  external_sub?: string | null;
   created_at: string;
 }
 
@@ -195,6 +197,25 @@ export interface ApiTranslationPublished {
   locales: string[];
 }
 
+// Embedded sign-in config. The validator token is write-only: a read only says
+// whether one is stored.
+export interface ApiIdentityProvider {
+  embed_key: string;
+  validator_url: string;
+  has_validator_token: boolean;
+  allowed_origins: string[];
+  embedded_only: boolean;
+  updated_at: string;
+}
+
+export interface IdentityProviderInput {
+  validator_url: string;
+  /** Omit to keep the stored token; only allowed while the URL is unchanged. */
+  validator_token?: string;
+  allowed_origins: string[];
+  embedded_only: boolean;
+}
+
 export interface ApiEmbeddedSession {
   token: string;
   expires_at: string;
@@ -214,6 +235,14 @@ export const adminApi = {
     http.post<ApiEmbeddedSession>("/v1/admin/auth/embedded", { embed_key: embedKey, token }, { anonymous: true }),
   embedOrigins: (embedKey: string) =>
     http.get<{ allowed_origins: string[] }>(`/v1/admin/auth/embedded/${enc(embedKey)}`, { anonymous: true }),
+  // Names the bearer explicitly: it may no longer be the client's credential,
+  // and keepalive lets the call outlive an unloading frame.
+  endEmbedded: (token: string) =>
+    http.post<void>("/v1/admin/auth/logout", {}, {
+      anonymous: true,
+      headers: { authorization: `Bearer ${token}` },
+      keepalive: true,
+    }),
 
   // ── Conversations ─────────────────────────────────────────────────────
   // Drains the cursor: the Details-panel history and the contact filter render a
@@ -259,6 +288,14 @@ export const adminApi = {
   setRoleScope: (id: string, role: PlatformRole, scope: RoleScope) =>
     http.put<void>(`/v1/team/${id}/roles/${role}`, { scope }),
   removeRole: (id: string, role: PlatformRole) => http.del<void>(`/v1/team/${id}/roles/${role}`),
+  // Empty unlinks. 409 external_sub_taken when another member holds it.
+  setExternalSub: (id: string, externalSub: string) =>
+    http.put<void>(`/v1/team/${id}/external-sub`, { external_sub: externalSub }),
+
+  // ── Settings: embedded sign-in ────────────────────────────────────────
+  getIdentityProvider: () => http.get<ApiIdentityProvider>("/v1/identity-provider"),
+  putIdentityProvider: (input: IdentityProviderInput) => http.put<ApiIdentityProvider>("/v1/identity-provider", input),
+  deleteIdentityProvider: () => http.del<void>("/v1/identity-provider"),
 
   // ── Settings: service accounts and queues ─────────────────────────────
   createServiceAccount: (account: {

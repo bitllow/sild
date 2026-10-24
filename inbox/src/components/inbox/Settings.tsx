@@ -8,6 +8,7 @@ import { cardStyle as card, fieldLabel, rowBorder, tabStyle } from "./styles";
 import { Appearance } from "./Appearance";
 import { TeamRoles } from "./TeamRoles";
 import { Queues } from "./Queues";
+import { Embedding } from "./Embedding";
 import { KeyRow } from "./KeyDialog";
 
 const PlusInline = () => (
@@ -19,6 +20,8 @@ const PlusInline = () => (
 export const Settings = observer(function Settings() {
   const store = useStore();
   const tab = store.settingsTab;
+  // The config decides who may sign in as a member, so it is the owner's alone.
+  const embedding = store.can("identity.manage");
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
@@ -28,6 +31,11 @@ export const Settings = observer(function Settings() {
           <button onClick={() => store.setSettingsTab("installation")} style={tabStyle(tab === "installation")}>
             Installation
           </button>
+          {embedding && (
+            <button onClick={() => store.setSettingsTab("embedding")} style={tabStyle(tab === "embedding")}>
+              Embedding
+            </button>
+          )}
           <button onClick={() => store.setSettingsTab("channels")} style={tabStyle(tab === "channels")}>
             Channels
           </button>
@@ -121,6 +129,8 @@ export const Settings = observer(function Settings() {
           {tab === "queues" && <Queues />}
 
           {tab === "installation" && <Installation />}
+
+          {tab === "embedding" && embedding && <Embedding />}
 
           {tab === "channels" && <Channels />}
         </div>

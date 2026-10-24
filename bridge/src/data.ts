@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { AdapterClient, type Assert } from './adapter/client.ts';
 import type { FileStore } from './adapter/files.ts';
 import { createBroker, DEFAULT_BROKER_LIMITS } from './broker/broker.ts';
@@ -7,6 +8,7 @@ import { AnthropicRouter, DEFAULT_ROUTER_MODEL } from './router/anthropic.ts';
 import { FakeRouter } from './router/fake.ts';
 import type { Router } from './router/router.ts';
 import type { Log } from './slots/types.ts';
+import { JsonStore } from './state.ts';
 
 export type DataConfig = {
   adapterUrl: string;
@@ -59,7 +61,7 @@ export function checkRouterAuth(cfg: Config, data: DataConfig): void {
 // Without its own key the router reaches the model through the bridge's proxy, holding only the proxy token.
 export function makeBroker(
   data: DataConfig,
-  ctx: { config: Config; files: FileStore; assert: Assert; modelBaseUrl: string; modelToken: string; log: Log },
+  ctx: { config: Config; files: FileStore; assert: Assert; stateRoot: string; modelBaseUrl: string; modelToken: string; log: Log },
 ): InfoBroker {
   const log = (msg: string) => ctx.log(msg);
   const adapter = new AdapterClient({
@@ -68,6 +70,7 @@ export function makeBroker(
     publicKey: data.adapterPublicKey,
     files: ctx.files,
     assert: ctx.assert,
+    state: new JsonStore(path.join(ctx.stateRoot, 'adapter')),
     allowInsecureLocal: data.allowInsecureLocal,
     log,
   });
@@ -76,5 +79,5 @@ export function makeBroker(
     : new AnthropicRouter(data.routerApiKey
       ? { apiKey: data.routerApiKey, model: data.routerModel }
       : { baseURL: ctx.modelBaseUrl, authToken: ctx.modelToken, model: data.routerModel });
-  return createBroker({ adapter, router, log, limits: { distinctIds: data.maxRequestIds } });
+  return createBroker({ adapter, router, log, limits: { distinctIds: data.maxRequestIds }, state: new JsonStore(path.join(ctx.stateRoot, 'broker')) });
 }

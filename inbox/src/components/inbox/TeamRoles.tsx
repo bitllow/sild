@@ -17,6 +17,8 @@ export const TeamRoles = observer(function TeamRoles() {
   const [segment, setSegment] = useState<"people" | "service">("people");
   const [addingService, setAddingService] = useState(false);
   const [issuingFor, setIssuingFor] = useState<TeamMember | null>(null);
+  const [linking, setLinking] = useState<TeamMember | null>(null);
+  const canLink = store.can("team.manage");
 
   const people = store.team.filter((t) => t.kind !== "service");
   const services = store.team.filter((t) => t.kind === "service");
@@ -129,7 +131,11 @@ export const TeamRoles = observer(function TeamRoles() {
                 + Add role
               </button>
             </div>
-            {t.kind === "service" && <ServiceKeys member={t} onIssue={() => setIssuingFor(t)} />}
+            {t.kind === "service" ? (
+              <ServiceKeys member={t} onIssue={() => setIssuingFor(t)} />
+            ) : (
+              <IntegratorIdentity member={t} onEdit={canLink ? () => setLinking(t) : undefined} />
+            )}
           </div>
         </div>
       ))}
@@ -137,6 +143,8 @@ export const TeamRoles = observer(function TeamRoles() {
       {addingService && <AddServiceAccountDialog onClose={() => setAddingService(false)} />}
 
       {issuingFor && <IssueKeyDialog member={issuingFor} onClose={() => setIssuingFor(null)} />}
+
+      {linking && <LinkIdentityDialog member={linking} onClose={() => setLinking(null)} />}
 
       {inviting && (
         <InviteDialog
@@ -187,6 +195,76 @@ export const TeamRoles = observer(function TeamRoles() {
         </Dialog>
       )}
     </>
+  );
+});
+
+/** Who the member is at the integrator, which embedded sign-in matches on. */
+function IntegratorIdentity({ member, onEdit }: { member: TeamMember; onEdit?: () => void }) {
+  return (
+    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-tertiary)" }} data-testid="integrator-identity">
+      <span>Integrator identity</span>
+      {member.externalSub ? (
+        <code data-testid="integrator-identity-value" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-primary)", overflowWrap: "anywhere" }}>
+          {member.externalSub}
+        </code>
+      ) : (
+        <span data-testid="integrator-identity-value">Not linked</span>
+      )}
+      {onEdit && (
+        <button type="button" data-testid="integrator-identity-edit" onClick={onEdit} style={chip(true)}>
+          {member.externalSub ? "Edit" : "+ Link"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const LinkIdentityDialog = observer(function LinkIdentityDialog({ member, onClose }: { member: TeamMember; onClose: () => void }) {
+  const store = useStore();
+  const [sub, setSub] = useState(member.externalSub);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (value: string) => {
+    setBusy(true);
+    const err = await store.setExternalSub(member.id, value);
+    setBusy(false);
+    if (err) setError(err);
+    else onClose();
+  };
+
+  return (
+    <Dialog
+      title={`Integrator identity — ${member.name}`}
+      subtitle="The sub your validator returns for this person. A token for it signs in as them."
+      onClose={onClose}
+    >
+      <Input
+        label="Identity (sub)"
+        data-testid="integrator-identity-input"
+        placeholder="e.g. fleetline.7"
+        value={sub}
+        error={error ?? undefined}
+        onChange={(e) => {
+          setSub(e.target.value);
+          setError(null);
+        }}
+      />
+      <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 10 }}>
+        {member.externalSub && (
+          <Button variant="secondary" data-testid="integrator-identity-unlink" onClick={() => void submit("")} disabled={busy}>
+            Unlink
+          </Button>
+        )}
+        <div style={{ flex: 1 }} />
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button data-testid="integrator-identity-save" onClick={() => void submit(sub)} disabled={busy || !sub.trim()}>
+          Save
+        </Button>
+      </div>
+    </Dialog>
   );
 });
 
@@ -287,7 +365,15 @@ const ScopeDialog = observer(function ScopeDialog({
           Remove role
         </Button>
         <div style={{ flex: 1 }} />
-        <Button onClick={onClose}>Done</Button>
+        {/* Closing first would let a reload abort the last scope write. */}
+        <Button
+          onClick={async () => {
+            await store.scopeSaved(memberId, role);
+            onClose();
+          }}
+        >
+          Done
+        </Button>
       </div>
     </Dialog>
   );

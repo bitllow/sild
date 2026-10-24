@@ -11,6 +11,11 @@ import { DEFAULT_FILE_LIMITS, FileStore } from '../adapter/files.ts';
 import { FakeRouter } from '../router/fake.ts';
 import type { Router } from '../router/router.ts';
 import { createBroker, type Broker, type BrokerLimits } from './broker.ts';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { CATALOG } from '../../fake-adapter/scenarios.ts';
+import { createAdapter, generateKeyPair, loadPrivateKey } from '../adapter/kit/index.ts';
+import { JsonStore } from '../state.ts';
 
 process.env.FAKE_DELAY_SCALE = '0';
 const SECRET = 'broker-secret-0123456789';
@@ -234,6 +239,98 @@ describe('step-up', () => {
       assert.ok(delivered?.type === 'delivered' && delivered.approvedUntil, 'the delivery says it came under the approval');
     } finally {
       await gated.close();
+    }
+  });
+});
+
+describe('restart', () => {
+  type Rig = { broker: Broker; events: BrokerEvent[]; until: (pred: () => boolean) => Promise<void> };
+  const boot = (url: string, publicKey: string, dir: string, limits: Partial<BrokerLimits> = {}): Rig => {
+    const adapter = new AdapterClient({
+      url, secret: SECRET, publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true,
+      assert: testAssert, state: new JsonStore(path.join(dir, 'adapter')),
+    });
+    const broker = createBroker({ adapter, router: new FakeRouter(), limits, state: new JsonStore(path.join(dir, 'broker')) });
+    open.push(broker);
+    const events: BrokerEvent[] = [];
+    broker.subscribe((e) => events.push(e));
+    const until = async (pred: () => boolean) => {
+      for (let i = 0; i < 200 && !pred(); i++) await new Promise((r) => setTimeout(r, 25));
+    };
+    return { broker, events, until };
+  };
+
+  // An adapter that accepts every request and answers only when the test says so.
+  const holdingAdapter = async () => {
+    const seen: string[] = [];
+    const { privateKey, publicKey } = generateKeyPair();
+    const adapter = createAdapter({
+      secret: SECRET, privateKey: loadPrivateKey(privateKey), catalog: CATALOG, sild: testSild,
+      handle: (req) => (seen.push(req.id), { type: 'accepted' }),
+    });
+    const server = createServer(adapter.handler);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return { url, publicKey, seen, adapter, close: () => (adapter.close(), server.closeAllConnections(), server.close()) };
+  };
+
+  test('a request in flight is still answered after the bridge restarts', async () => {
+    const held = await holdingAdapter();
+    const dir = mkdtempSync(path.join(tmpdir(), 'broker-state-'));
+    try {
+      const first = boot(held.url, held.publicKey, dir);
+      const r = await first.broker.request('c_restart', 'u1', 'push token state of drv_2207 devices', 'x');
+      assert.ok('requestId' in r);
+      await first.until(() => held.seen.length === 1);
+      first.broker.close();
+
+      const second = boot(held.url, held.publicKey, dir);
+      held.adapter.publish(held.seen[0]!, { type: 'deliver', summary: 'token expired', files: [] });
+      await second.until(() => second.events.some((e) => e.type === 'delivered'));
+      assert.ok(second.events.some((e) => e.type === 'delivered' && e.requestId === r.requestId), 'delivered under the same request id');
+    } finally {
+      held.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a request whose wait ran out during the restart is reported not available', async () => {
+    const held = await holdingAdapter();
+    const dir = mkdtempSync(path.join(tmpdir(), 'broker-state-'));
+    try {
+      const first = boot(held.url, held.publicKey, dir, { maxWaitSeconds: 0.2, graceSeconds: 0 });
+      const r = await first.broker.request('c_late', 'u1', 'push token state of drv_2207 devices', 'x');
+      await first.until(() => held.seen.length === 1);
+      first.broker.close();
+      await new Promise((res) => setTimeout(res, 300));
+
+      const second = boot(held.url, held.publicKey, dir, { maxWaitSeconds: 0.2, graceSeconds: 0 });
+      await second.until(() => second.events.some((e) => e.type === 'not_available'));
+      assert.ok('requestId' in r && second.events.some((e) => e.type === 'not_available' && e.requestId === r.requestId));
+    } finally {
+      held.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a request parked for approval is retried after a restart', async () => {
+    let approved = false;
+    const gated = await startFakeAdapter({ secret: SECRET, sild: testSild, elevated: async () => (approved ? Math.floor(Date.now() / 1000) + 60 : null) });
+    const dir = mkdtempSync(path.join(tmpdir(), 'broker-state-'));
+    try {
+      const first = boot(gated.url, gated.publicKey, dir);
+      const r = await first.broker.request('c_parked', 'u1', 'push token state of drv_2207 devices', 'x');
+      await first.until(() => first.events.some((e) => e.type === 'parked'));
+      first.broker.close();
+
+      const second = boot(gated.url, gated.publicKey, dir);
+      approved = true;
+      assert.equal(await second.broker.approved('c_parked'), 1);
+      await second.until(() => second.events.some((e) => e.type === 'delivered'));
+      assert.ok('requestId' in r && second.events.some((e) => e.type === 'delivered' && e.requestId === r.requestId));
+    } finally {
+      await gated.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

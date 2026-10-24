@@ -85,6 +85,12 @@ test.describe("settings · team", () => {
 
     // The signed-in owner's own row — the roster may hold other members by now.
     const mine = page.getByTestId("team-row").filter({ hasText: ADMIN.email });
+    // A failed earlier attempt may have left the role behind; a retry starts clean.
+    if (await mine.getByTestId("assignment-translator").count()) {
+      await mine.getByTestId("assignment-translator").click();
+      await page.getByTestId("remove-role").click();
+      await expect(mine.getByTestId("assignment-translator")).toHaveCount(0);
+    }
     await mine.getByTestId("add-role").click();
     await page.getByTestId("add-role-translator").click();
 
@@ -93,6 +99,8 @@ test.describe("settings · team", () => {
     await page.getByTestId("scope-projects-all").click();
     await page.getByTestId("scope-locales-all").click();
     await page.getByRole("button", { name: "Done" }).click();
+    // Done closes once both scope writes have landed; reloading earlier would abort the second.
+    await expect(page.getByTestId("scope-locales-all")).toHaveCount(0);
 
     await expect(mine.getByTestId("assignment-translator")).toContainText("all projects");
 

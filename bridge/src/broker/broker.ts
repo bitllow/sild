@@ -6,6 +6,7 @@ import type { AdapterClient, Received } from '../adapter/client.ts';
 import { safeConv } from '../adapter/files.ts';
 import { isRecord, validate } from '../adapter/kit/schema.ts';
 import { STEP_UP_REQUIRED } from '../adapter/kit/types.ts';
+import type { JsonStore } from '../state.ts';
 import { redact } from '../router/redact.ts';
 import type { Proposal, Router } from '../router/router.ts';
 import { errText } from '../util.ts';
@@ -28,6 +29,8 @@ export type BrokerConfig = {
   router: Router;
   limits?: Partial<BrokerLimits>;
   log?: (msg: string) => void;
+  // Keeps each conversation's requests across a restart.
+  state?: JsonStore;
 };
 
 export type Broker = InfoBroker & { close(): void };
@@ -35,14 +38,21 @@ export type Broker = InfoBroker & { close(): void };
 // One request as the session knows it: its id survives a retry, while the
 // adapter sees a fresh wire id on every attempt.
 type Inflight = {
-  source: Source;
+  waitSeconds: number;
   requester: string;
   proposal: Proposal;
   reason: string;
   key: string;
   wire: string;
-  // Unset while parked until the requester approves data access.
+  // When the attempt under way gives up (ms); unset while parked until the requester approves.
+  deadline?: number;
   timer?: NodeJS.Timeout;
+};
+type SavedConv = {
+  issued: number;
+  ids: string[];
+  inflight: [string, Omit<Inflight, 'timer'>][];
+  delivered: [string, { source: string; dir: string }][];
 };
 type Conv = {
   issued: number;
@@ -67,6 +77,16 @@ export function createBroker(cfg: BrokerConfig): Broker {
       cfg.adapter.files.reopen(conv);
     }
     return c;
+  };
+
+  const save = (conv: string, c: Conv) => {
+    if (!convs.has(conv)) return;
+    cfg.state?.set(conv, {
+      issued: c.issued,
+      ids: [...c.ids],
+      inflight: [...c.inflight].map(([id, { timer: _t, ...f }]) => [id, f]),
+      delivered: [...c.delivered],
+    } satisfies SavedConv);
   };
 
   const emit = (e: BrokerEvent) => {
@@ -95,13 +115,16 @@ export function createBroker(cfg: BrokerConfig): Broker {
     clearTimeout(f.timer);
     f.timer = undefined;
     c.wires.delete(f.wire);
+    f.deadline = undefined;
     if (done) c.inflight.delete(requestId);
     return f;
   };
 
   const notAvailable = (conv: string, requestId: string, reason: string) => {
     const c = convs.get(conv);
-    if (c && settle(c, requestId, true)) emit({ type: 'not_available', conv, requestId, reason });
+    if (!c || !settle(c, requestId, true)) return;
+    save(conv, c);
+    emit({ type: 'not_available', conv, requestId, reason });
   };
 
   const received = async (r: Received) => {
@@ -116,12 +139,14 @@ export function createBroker(cfg: BrokerConfig): Broker {
     }
     if (r.state === 'declined' && r.code === STEP_UP_REQUIRED) {
       settle(c, requestId, false);
+      save(r.conv, c);
       emit({ type: 'parked', conv: r.conv, requestId, reason: r.reason });
       return;
     }
     const f = settle(c, requestId, true)!;
+    if (r.state === 'delivered') c.delivered.set(f.key, { source: f.proposal.source, dir: r.requestId });
+    save(r.conv, c);
     if (r.state === 'delivered') {
-      c.delivered.set(f.key, { source: f.proposal.source, dir: r.requestId });
       emit({ type: 'delivered', conv: r.conv, requestId, summary: r.summary, files: r.files, approvedUntil: r.approvedUntil });
       return;
     }
@@ -131,20 +156,26 @@ export function createBroker(cfg: BrokerConfig): Broker {
 
   const unsubscribe = cfg.adapter.onReceived((r) => void received(r));
 
+  // Gives up on the attempt under way at its deadline.
+  const arm = (conv: string, c: Conv, requestId: string, f: Inflight) => {
+    const wire = f.wire;
+    c.wires.set(wire, requestId);
+    f.timer = setTimeout(() => {
+      cfg.adapter.cancel(wire);
+      notAvailable(conv, requestId, `no answer within ${Math.round(f.waitSeconds)}s`);
+    }, Math.max(f.deadline! - Date.now(), 0));
+    f.timer.unref();
+  };
+
   // One attempt at the adapter, under a fresh wire id.
   const send = (conv: string, c: Conv, requestId: string, f: Inflight) => {
     f.wire = randomUUID().replaceAll('-', '');
-    c.wires.set(f.wire, requestId);
-    const wait = Math.min(f.source.max_wait_seconds, limits.maxWaitSeconds) + limits.graceSeconds;
-    const wire = f.wire;
-    f.timer = setTimeout(() => {
-      cfg.adapter.cancel(wire);
-      notAvailable(conv, requestId, `no answer within ${Math.round(wait)}s`);
-    }, wait * 1000);
-    f.timer.unref();
+    f.deadline = Date.now() + f.waitSeconds * 1000;
+    arm(conv, c, requestId, f);
+    save(conv, c);
     const p = f.proposal;
     cfg.adapter
-      .request(conv, { id: wire, requester: { id: f.requester }, source: p.source, params: p.params, reason: f.reason })
+      .request(conv, { id: f.wire, requester: { id: f.requester }, source: p.source, params: p.params, reason: f.reason })
       .then(
         (sent) => {
           if (sent.type === 'failed') notAvailable(conv, requestId, sent.reason);
@@ -158,7 +189,8 @@ export function createBroker(cfg: BrokerConfig): Broker {
     const requestId = randomUUID().replaceAll('-', '');
     c.issued++;
     for (const id of idsOf(source, p.params)) c.ids.add(id);
-    const f: Inflight = { source, requester, proposal: p, reason, key: keyOf(p), wire: '' };
+    const waitSeconds = Math.min(source.max_wait_seconds, limits.maxWaitSeconds) + limits.graceSeconds;
+    const f: Inflight = { waitSeconds, requester, proposal: p, reason, key: keyOf(p), wire: '' };
     c.inflight.set(requestId, f);
     emit({ type: 'requested', conv, requestId, label: redact(p.label).text, source: p.source, params: p.params });
     send(conv, c, requestId, f);
@@ -174,6 +206,18 @@ export function createBroker(cfg: BrokerConfig): Broker {
     const ids = new Set([...c.ids, ...idsOf(s, p.params)]);
     return ids.size > limits.distinctIds ? `this conversation may ask about at most ${limits.distinctIds} different ids` : null;
   };
+
+  // A restart resumes each attempt's remaining wait; parked requests keep waiting for approval.
+  for (const conv of cfg.state?.keys() ?? []) {
+    const saved = cfg.state!.get<SavedConv>(conv);
+    if (!saved) continue;
+    const c: Conv = {
+      issued: saved.issued, ids: new Set(saved.ids), inflight: new Map(saved.inflight),
+      wires: new Map(), delivered: new Map(saved.delivered),
+    };
+    convs.set(conv, c);
+    for (const [requestId, f] of c.inflight) if (f.deadline) arm(conv, c, requestId, f);
+  }
 
   return {
     async onRequesterText(conv, requester, text) {
@@ -243,6 +287,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
     async forget(conv) {
       const c = convs.get(conv);
       convs.delete(conv);
+      cfg.state?.delete(conv);
       for (const f of c?.inflight.values() ?? []) {
         if (!f.timer) continue;
         clearTimeout(f.timer);

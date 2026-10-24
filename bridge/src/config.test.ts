@@ -8,7 +8,10 @@ import { ConfigError, loadConfig } from './config.ts';
 const dir = mkdtempSync(path.join(os.tmpdir(), 'sild-config-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
-const base = { SILD_URL: 'https://chat.example.com', SILD_SERVICE_KEY: 'sild_live_x', ANTHROPIC_API_KEY: 'sk-x' };
+const base = {
+  SILD_URL: 'https://chat.example.com', SILD_SERVICE_KEY: 'sild_live_x', ANTHROPIC_API_KEY: 'sk-x',
+  RUNNER_NETWORK: 'sild-runners', MODEL_PROXY_URL: 'http://bridge:8787',
+};
 
 test('defaults', () => {
   const c = loadConfig(base);
@@ -91,4 +94,12 @@ test('confluence needs a token and an explicit tool list', () => {
 test('EFFORT is passed through, and only a known level', () => {
   assert.equal(loadConfig({ ...base, EFFORT: 'high' }).effort, 'high');
   assert.throws(() => loadConfig({ ...base, EFFORT: 'extreme' }), /EFFORT must be one of low, medium, high, xhigh, max/);
+});
+
+test('a docker runner needs an internal network unless egress is opened', () => {
+  const { RUNNER_NETWORK: _n, MODEL_PROXY_URL: _u, ...open } = base;
+  assert.throws(() => loadConfig(open), /RUNNER_NETWORK \(an internal docker network\) and MODEL_PROXY_URL are required/);
+  assert.equal(loadConfig({ ...open, RUNNER_EGRESS: 'open' }).runnerEgress, 'open');
+  assert.equal(loadConfig({ ...open, RUNNER_MODE: 'local' }).runnerMode, 'local');
+  assert.equal(loadConfig(base).runnerEgress, 'internal');
 });

@@ -1,5 +1,6 @@
 import type { FileStore, IncomingFile } from '../adapter/files.ts';
 import { isRecord } from '../adapter/kit/schema.ts';
+import type { JsonStore } from '../state.ts';
 import * as sild from '@sild/client';
 import {
   ApiError, BEFORE_FIRST_MESSAGE, pages, signedUrl,
@@ -18,6 +19,8 @@ export type SlotConfig = {
   // Safety net for missed realtime events.
   pollMs: number;
   log: Log;
+  // Keeps which message shows each request across a restart.
+  state?: JsonStore;
 };
 
 const WAIT_PREFIX = 'wait-';
@@ -53,7 +56,9 @@ type Held = {
   turn?: NodeJS.Timeout;
 };
 
-type StepsMessage = { id?: string; steps: Step[] };
+// stale: known only by id after a restart; its steps are read back from Sild before the next write.
+type StepsMessage = { id?: string; steps: Step[]; stale?: boolean };
+type SavedSteps = Record<string, { id: string; index: number }>;
 
 // Survives a release; dropped when the conversation closes.
 type ConvState = {
@@ -363,6 +368,7 @@ export class SlotManager {
 
   private async forget(conv: string): Promise<void> {
     this.convs.delete(conv);
+    this.cfg.state?.delete(conv);
     try {
       await this.runner.destroy(conv);
     } catch (e) {
@@ -566,6 +572,7 @@ export class SlotManager {
         }) - 1;
         st.byRequest.set(e.requestId, { msg, index });
         await this.writeSteps(e.conv, msg);
+        this.saveSteps(e.conv, st);
         return;
       }
       case 'delivered': {
@@ -589,7 +596,7 @@ export class SlotManager {
 
   private async updateStep(conv: string, st: ConvState, requestId: string, change: Partial<Step>): Promise<void> {
     const ref = st.byRequest.get(requestId);
-    if (!ref) return;
+    if (!ref || !(await this.loadSteps(conv, ref.msg)) || !ref.msg.steps[ref.index]) return;
     Object.assign(ref.msg.steps[ref.index], change);
     await this.writeSteps(conv, ref.msg);
   }
@@ -607,6 +614,27 @@ export class SlotManager {
     } catch (e) {
       this.log('expiring approvals failed', { conv, error: errText(e) });
     }
+  }
+
+  private async loadSteps(conv: string, msg: StepsMessage): Promise<boolean> {
+    if (!msg.stale) return true;
+    try {
+      const m = (await sild.messagesSince(this.http, conv, BEFORE_FIRST_MESSAGE)).find((x) => x.id === msg.id);
+      const part = m?.parts?.find((p) => p.type === 'steps');
+      if (!part || part.type !== 'steps') return false;
+      msg.steps = part.steps;
+      msg.stale = false;
+      return true;
+    } catch (e) {
+      this.log('steps reload failed', { conv, error: errText(e) });
+      return false;
+    }
+  }
+
+  private saveSteps(conv: string, st: ConvState): void {
+    const saved: SavedSteps = {};
+    for (const [requestId, { msg, index }] of st.byRequest) if (msg.id) saved[requestId] = { id: msg.id, index };
+    this.cfg.state?.set(conv, saved);
   }
 
   private async writeSteps(conv: string, msg: StepsMessage): Promise<void> {
@@ -645,6 +673,11 @@ export class SlotManager {
     let st = this.convs.get(conv);
     if (!st) {
       st = { byRequest: new Map(), pending: [], chain: Promise.resolve() };
+      const msgs = new Map<string, StepsMessage>();
+      for (const [requestId, { id, index }] of Object.entries(this.cfg.state?.get<SavedSteps>(conv) ?? {})) {
+        if (!msgs.has(id)) msgs.set(id, { id, steps: [], stale: true });
+        st.byRequest.set(requestId, { msg: msgs.get(id)!, index });
+      }
       this.convs.set(conv, st);
     }
     return st;

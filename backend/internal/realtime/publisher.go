@@ -32,7 +32,7 @@ func AgentsChannel(tenantID string) string { return "agents:" + tenantID }
 // PeerChannel carries every peer-conversation event (new-conversation nudges and
 // message.created / member.added / conversation.closed for peer conversations) to
 // operators who observe the peer surface. ONLY peer_access operators are ever
-// subscribed here (gated in agentSubscriptions + reconcilePeerSubscriptions), so
+// subscribed here (gated in AgentChannels), so
 // peer content reaching a non-peer operator is impossible as a subscription fact.
 // A single tenant channel — rather than one subscription per peer conversation —
 // means a peer conversation created after an operator connects is observed with
@@ -74,7 +74,7 @@ type Publisher interface {
 // Subscriber adjusts a connected user's server-side subscriptions live, so an
 // access change (e.g. peer_access granted/revoked) takes effect without waiting
 // for the connection to reconnect — subscriptions are otherwise only derived at
-// connect time (agentSubscriptions). Implemented by the Centrifuge publisher;
+// connect time (AgentChannels). Implemented by the Centrifuge publisher;
 // absent in tests/workers, so callers type-assert and no-op when unavailable.
 type Subscriber interface {
 	Subscribe(userID, channel string) error

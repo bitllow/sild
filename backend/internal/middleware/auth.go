@@ -118,9 +118,13 @@ func (a *Auth) resolveEmbedded(ctx context.Context, raw string) (*principal.Prin
 	if err != nil || sess.ExpiresAt.Before(time.Now()) {
 		return nil, false
 	}
-	return a.adminPrincipal(ctx, sess.TenantID, sess.AdminUserID, func(admin *models.AdminUser) bool {
+	p, ok := a.adminPrincipal(ctx, sess.TenantID, sess.AdminUserID, func(admin *models.AdminUser) bool {
 		return admin.ExternalSub != nil && *admin.ExternalSub == sess.ExternalSub
 	})
+	if ok {
+		p.Expires = sess.ExpiresAt
+	}
+	return p, ok
 }
 
 // adminPrincipal builds a member's principal from their role assignments, once

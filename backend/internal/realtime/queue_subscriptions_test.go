@@ -2,6 +2,7 @@ package realtime_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/realtime"
@@ -95,5 +96,66 @@ func TestRequesterLosesConversationsOfARemovedQueue(t *testing.T) {
 	}
 	if _, ok := subs[realtime.ConvChannel("c_old")]; ok {
 		t.Fatal("requester still subscribed to a conversation in a queue they no longer use")
+	}
+}
+
+func TestAQueueGrantFollowsALiveSocket(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+	if err := h.Store.Queues().Upsert(ctx, &models.Queue{TenantID: tenant.ID, Key: "triage", Webhooks: true}); err != nil {
+		t.Fatal(err)
+	}
+	agent := h.SeedAdmin(tenant.ID, "a@test", models.PlatformAgent)
+	triage := agent.ID + "→" + realtime.QueueChannel(tenant.ID, "triage")
+
+	h.Pub.Reset()
+	if err := h.Svc.RescopeRole(ctx, tenant.ID, agent.ID, models.PlatformAgent, models.RoleScope{Queues: []string{"support", "triage"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(h.Pub.Subscribed, []string{triage}) || len(h.Pub.Unsubscribed) != 0 {
+		t.Fatalf("grant: subscribed %v, unsubscribed %v", h.Pub.Subscribed, h.Pub.Unsubscribed)
+	}
+
+	if err := h.Svc.RescopeRole(ctx, tenant.ID, agent.ID, models.PlatformAgent, models.RoleScope{Queues: []string{"support"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(h.Pub.Unsubscribed, []string{triage}) {
+		t.Fatalf("revoke: unsubscribed %v", h.Pub.Unsubscribed)
+	}
+}
+
+func TestARequesterQueueGrantFollowsALiveSocket(t *testing.T) {
+	h := testutil.New(t)
+	tenant := h.SeedTenant()
+	ctx := context.Background()
+	for _, key := range []string{"triage", "billing"} {
+		if err := h.Store.Queues().Upsert(ctx, &models.Queue{TenantID: tenant.ID, Key: key, Webhooks: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marko := h.SeedAdminScoped(tenant.ID, "m@test", models.PlatformRequester, models.RoleScope{Queues: []string{"billing"}})
+	if err := h.DB.Create(&models.Conversation{ID: "c_tri", TenantID: tenant.ID, Queue: "triage", Status: models.ConversationOpen}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Store.Members().Add(ctx, &models.ConversationMember{TenantID: tenant.ID, ConversationID: "c_tri",
+		MemberKind: models.MemberAgent, InternalActorID: &marko.ID, ConvRole: models.RoleClient}); err != nil {
+		t.Fatal(err)
+	}
+	conv := marko.ID + "→" + realtime.ConvChannel("c_tri")
+
+	h.Pub.Reset()
+	if err := h.Svc.RescopeRole(ctx, tenant.ID, marko.ID, models.PlatformRequester, models.RoleScope{Queues: []string{"billing", "triage"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(h.Pub.Subscribed, []string{conv}) {
+		t.Fatalf("grant: subscribed %v", h.Pub.Subscribed)
+	}
+
+	if err := h.Svc.RescopeRole(ctx, tenant.ID, marko.ID, models.PlatformRequester, models.RoleScope{Queues: []string{"billing"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(h.Pub.Unsubscribed, []string{conv}) {
+		t.Fatalf("revoke: unsubscribed %v", h.Pub.Unsubscribed)
 	}
 }

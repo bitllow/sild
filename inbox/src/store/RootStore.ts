@@ -32,6 +32,7 @@ import { AttachmentQueue } from "./attachments";
 import { PeerStore } from "./peer";
 import { TRIAGE_QUEUE, TriageStore } from "./triage";
 import { TranslationsStore } from "./translations";
+import { EmbeddingStore } from "./embedding";
 import {
   buildConversation,
   buildQueueRow,
@@ -268,6 +269,7 @@ export class RootStore {
   appId = "";
   appIdCopied = false;
   snippetCopied = false;
+  embedSnippetCopied = false;
   peerAccess = false;
   // Every nav entry and the landing route come from the grants the backend
   // returns, so a principal is never shown a surface it would be refused.
@@ -282,11 +284,12 @@ export class RootStore {
   peer = new PeerStore(this);
   triage = new TriageStore(this);
   translations = new TranslationsStore();
+  embedding = new EmbeddingStore();
 
   constructor() {
     // `can` stays unannotated: as an action it would read `held` untracked, and
     // observers would not re-render when the grants change.
-    makeAutoObservable<RootStore, "scopeWrites">(this, { peer: false, triage: false, atts: false, translations: false, can: false, scopeWrites: false });
+    makeAutoObservable<RootStore, "scopeWrites">(this, { peer: false, triage: false, atts: false, translations: false, embedding: false, can: false, scopeWrites: false });
     if (typeof window !== "undefined") {
       this.soundOn = window.localStorage.getItem("sild_inbox_sound") !== "off";
       installAudioUnlock(); // prime notification audio on the agent's first gesture
@@ -1406,8 +1409,9 @@ export class RootStore {
 
   copyAppId = () => this.copyToClipboard(this.appId, "appIdCopied");
   copySnippet = (snippet: string) => this.copyToClipboard(snippet, "snippetCopied");
+  copyEmbedSnippet = (snippet: string) => this.copyToClipboard(snippet, "embedSnippetCopied");
 
-  private copyToClipboard(text: string, flag: "appIdCopied" | "snippetCopied") {
+  private copyToClipboard(text: string, flag: "appIdCopied" | "snippetCopied" | "embedSnippetCopied") {
     if (!text) return;
     try {
       void navigator.clipboard.writeText(text);
@@ -1744,6 +1748,9 @@ export class RootStore {
     if (this.scopeWrites.get(key) === write) this.scopeWrites.delete(key);
   };
 
+  /** Resolves once every scope write queued for this member's role has landed. */
+  scopeSaved = (memberId: string, role: PlatformRole) => this.scopeWrites.get(`${memberId}\n${role}`) ?? Promise.resolve();
+
   removeRole = async (memberId: string, role: PlatformRole) => {
     try {
       await adminApi.removeRole(memberId, role);
@@ -1754,6 +1761,18 @@ export class RootStore {
     await this.reloadTeam();
     runInAction(() => this.applyOwnPeerAccess(memberId));
     return true;
+  };
+
+  /** Links a member to their identity at the integrator; "" unlinks. Returns
+   *  the refusal's text, or null once the roster shows the change. */
+  setExternalSub = async (memberId: string, externalSub: string): Promise<string | null> => {
+    try {
+      await adminApi.setExternalSub(memberId, externalSub.trim());
+    } catch (e) {
+      return errorText(e);
+    }
+    await this.reloadTeam();
+    return null;
   };
 
   private reloadTeam = async () => {

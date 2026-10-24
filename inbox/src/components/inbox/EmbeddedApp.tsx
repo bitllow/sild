@@ -34,6 +34,17 @@ class DeniedError extends Error {
 // Ask the host for a fresh token this long before the session ends.
 const REFRESH_LEAD_MS = 60_000;
 const ASK_INTERVAL_MS = 5_000;
+const RETRY_MS = 15_000;
+
+// No answer, or the validator or Sild failing; a 401 or 403 is final.
+function transient(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 0 || e.status === 429 || e.status >= 500);
+}
+
+// Ends a session the frame is done with instead of leaving it valid until expiry.
+function endSession(token: string | null) {
+  if (token) adminApi.endEmbedded(token).catch(() => {});
+}
 
 async function exchange(embedKey: string, token: string): Promise<ApiEmbeddedSession> {
   try {
@@ -68,6 +79,8 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
     let origins: string[] = [];
     let parentOrigin: string | null = null;
     let adminId: string | null = null;
+    let bearer: string | null = null;
+    let expiresAt = 0;
     // A throttle, not a latch: a host that missed one request is asked again.
     let askedAt = 0;
     let refresh: ReturnType<typeof setTimeout> | null = null;
@@ -81,6 +94,8 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
 
     // The next token starts over: the store was disposed, so a refresh alone cannot restore it.
     const fail = (next: Phase) => {
+      endSession(bearer);
+      bearer = null;
       setBearer(null);
       store.dispose();
       adminId = null;
@@ -99,13 +114,18 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
         if (disposed) return;
         // Another person signed in on the host: start from a clean store.
         if (adminId !== null && s.admin_id !== adminId) {
+          endSession(bearer);
+          endSession(s.token);
+          bearer = null;
           window.location.reload();
           return;
         }
+        bearer = s.token;
+        expiresAt = new Date(s.expires_at).getTime();
         setBearer(s.token, askForToken);
         setHostOrigin(origin);
         if (refresh) clearTimeout(refresh);
-        const wait = Math.max(5_000, new Date(s.expires_at).getTime() - Date.now() - REFRESH_LEAD_MS);
+        const wait = Math.max(5_000, expiresAt - Date.now() - REFRESH_LEAD_MS);
         refresh = setTimeout(askForToken, wait);
         if (!first) return;
         adminId = s.admin_id;
@@ -119,6 +139,12 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
         setPhase({ kind: "ready" });
       } catch (e) {
         if (disposed) return;
+        // A refresh that hit a hiccup keeps the bearer it has and asks again.
+        if (!first && transient(e) && Date.now() < expiresAt) {
+          if (refresh) clearTimeout(refresh);
+          refresh = setTimeout(askForToken, RETRY_MS);
+          return;
+        }
         if (e instanceof DeniedError) fail({ kind: "denied", denied: e.denied });
         else fail({ kind: "error", message: e instanceof Error ? e.message : "Sign-in failed." });
       }
@@ -132,6 +158,8 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
       void signIn(d.token, e.origin);
     };
     window.addEventListener("message", onMessage);
+    const onPageHide = () => endSession(bearer);
+    window.addEventListener("pagehide", onPageHide);
 
     allowedOrigins(embedKey)
       .then((list) => {
@@ -147,7 +175,9 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
       disposed = true;
       setHostOrigin(null);
       window.removeEventListener("message", onMessage);
+      window.removeEventListener("pagehide", onPageHide);
       if (refresh) clearTimeout(refresh);
+      endSession(bearer);
       setBearer(null);
     };
   }, [store]);

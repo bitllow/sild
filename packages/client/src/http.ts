@@ -28,6 +28,8 @@ export type RequestOptions = {
   // Send this call without the credential: it precedes or establishes one.
   anonymous?: boolean;
   signal?: AbortSignal;
+  // Let the request outlive the page that sent it (pagehide, reload).
+  keepalive?: boolean;
 };
 
 // 204 and 304 carry no body: data is undefined.
@@ -114,6 +116,7 @@ export function createHttp(opts: HttpOptions): Http {
         credentials: cred.kind === 'cookie' ? 'include' : 'omit',
         body: o.body === undefined ? undefined : JSON.stringify(o.body),
         signal,
+        keepalive: o.keepalive,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

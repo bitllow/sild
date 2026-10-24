@@ -6,6 +6,7 @@ import { signRequest } from './kit/hmac.ts';
 import { REQUESTER_HEADER } from './kit/requester.ts';
 import { loadPublicKey, openDelivery } from './kit/jws.ts';
 import { clip, instructionsError } from './kit/server.ts';
+import type { JsonStore } from '../state.ts';
 import { errText } from '../util.ts';
 import { DECLINE_CODE, LIMITS, SOURCE_NAME, type Delivery, type InfoRequest, type WireFile } from './kit/types.ts';
 import { resolveTarget, send, systemResolver, type Resolver, type Response } from './net.ts';
@@ -20,6 +21,8 @@ export type AdapterClientConfig = {
   // Shared with the slot manager, which stores requester attachments in the same budget.
   files: FileStore;
   assert: Assert;
+  // Keeps outstanding requests and the deliveries cursor across a restart.
+  state?: JsonStore;
   // Permits http:// to localhost / 127.0.0.1 / ::1. Local development only.
   allowInsecureLocal?: boolean;
   catalogTtlMs?: number;
@@ -42,6 +45,9 @@ const POLL_WAIT_SECONDS = 30;
 // Retried sooner than the TTL after a failure: a session opened without them never gets them.
 const INSTRUCTIONS_RETRY_MS = 30_000;
 const PAGE_BYTES = 64 * 1024 * 1024;
+const STATE_KEY = 'adapter';
+
+type SavedState = { cursor: string; outstanding: Record<string, Outstanding> };
 
 export class AdapterClient {
   #cfg: AdapterClientConfig;
@@ -65,6 +71,12 @@ export class AdapterClient {
     this.#files = cfg.files;
     this.#resolve = cfg.resolve ?? systemResolver;
     this.#log = cfg.log ?? (() => {});
+    const saved = cfg.state?.get<SavedState>(STATE_KEY);
+    if (saved) {
+      this.#cursor = saved.cursor;
+      this.#outstanding = new Map(Object.entries(saved.outstanding));
+      if (this.#outstanding.size) this.#poll();
+    }
   }
 
   get files(): FileStore {
@@ -130,19 +142,19 @@ export class AdapterClient {
   async request(conv: string, req: Omit<InfoRequest, 'conversation_ref'>): Promise<Sent> {
     safeConv(conv);
     const body = JSON.stringify({ ...req, conversation_ref: conv } satisfies InfoRequest);
-    this.#outstanding.set(req.id, { conv, source: req.source });
+    this.#track(req.id, { conv, source: req.source });
     let assertion: string;
     try {
       assertion = await this.#cfg.assert(conv, body);
     } catch (err) {
-      this.#outstanding.delete(req.id);
+      this.#untrack(req.id);
       return { type: 'failed', reason: `Sild would not vouch for the requester: ${errText(err)}` };
     }
     let res: Response;
     try {
       res = await this.#call('POST', 'requests', body, PAGE_BYTES, { headers: { [REQUESTER_HEADER]: assertion } });
     } catch (err) {
-      this.#outstanding.delete(req.id);
+      this.#untrack(req.id);
       return { type: 'failed', reason: `adapter unreachable: ${errText(err)}` };
     }
     const parsed = parseJson(res.body);
@@ -150,14 +162,14 @@ export class AdapterClient {
       const result = await this.#accept(parsed.delivery);
       if (result) this.#emit(result);
       if (result?.requestId === req.id) return { type: 'pending' };
-      this.#outstanding.delete(req.id);
+      this.#untrack(req.id);
       return { type: 'failed', reason: 'adapter answered with a delivery for another request' };
     }
     if (res.status === 202) {
       this.#poll();
       return { type: 'pending' };
     }
-    this.#outstanding.delete(req.id);
+    this.#untrack(req.id);
     if (res.status === 403) {
       const reason = isRecord(parsed) && typeof parsed.reason === 'string' ? clip(parsed.reason) || 'declined' : 'declined';
       this.#emit({ requestId: req.id, conv, source: req.source, state: 'declined', reason, ...declineCode(parsed) });
@@ -169,13 +181,27 @@ export class AdapterClient {
 
   // A delivery that arrives after this is rejected.
   cancel(requestId: string): void {
-    this.#outstanding.delete(requestId);
+    this.#untrack(requestId);
   }
 
+  // Stops polling; what is outstanding stays saved for the next process.
   close(): void {
     this.#outstanding.clear();
     this.#polling?.abort();
     this.#polling = null;
+  }
+
+  #track(id: string, o: Outstanding): void {
+    this.#outstanding.set(id, o);
+    this.#save();
+  }
+
+  #untrack(id: string): void {
+    if (this.#outstanding.delete(id)) this.#save();
+  }
+
+  #save(): void {
+    this.#cfg.state?.set(STATE_KEY, { cursor: this.#cursor, outstanding: Object.fromEntries(this.#outstanding) } satisfies SavedState);
   }
 
   // Long-polls only while something is outstanding.
@@ -198,6 +224,7 @@ export class AdapterClient {
             if (result) this.#emit(result);
           }
           this.#cursor = page.next_cursor;
+          this.#save();
           backoff = 1000;
         } catch (err) {
           if (ctl.signal.aborted) break;
@@ -229,7 +256,7 @@ export class AdapterClient {
       this.#log(`delivery ${id} rejected: no outstanding request for that conversation`);
       return null;
     }
-    this.#outstanding.delete(id);
+    this.#untrack(id);
     const base = { requestId: id, conv, source: o.source };
     if (delivery.state !== 'delivered') {
       return {

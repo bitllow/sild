@@ -282,6 +282,35 @@ It logs what it created, including the API key once. Clear the password variable
 once you have signed in. Bootstrap is the convenience; `sild-admin` is the
 mechanism.
 
+## The triage bridge
+
+The bridge (`bridge/`) runs each assistant session in a throwaway runner
+container (`RUNNER_MODE=docker`, image `sild-runner:<cli version>` from
+`bridge/runner.Dockerfile`). That container has a read-only filesystem and no
+capabilities. Its network is restricted too: by default the bridge refuses to
+start unless the runner's network has no route out. The model proxy, served by
+the bridge itself, is then the only thing the runner can reach.
+
+```sh
+docker network create --internal sild-runners
+```
+
+| env | value |
+|---|---|
+| `RUNNER_NETWORK` | `sild-runners`. Startup checks it is `--internal`. |
+| `MODEL_PROXY_URL` | the proxy as runners reach it, e.g. `http://sild-bridge:8787` |
+| `MODEL_PROXY_HOST`, `MODEL_PROXY_PORT` | where the proxy listens, e.g. the bridge's address on `sild-runners`, and `8787` |
+
+The bridge container joins both `sild-runners` and a normal network, so it can
+reach Sild, the adapter and the model API. It also needs the Docker socket, to
+start runners. An internal network has no route to the Docker host, so
+`MODEL_PROXY_URL` must name the bridge on `sild-runners`, not
+`host.docker.internal`.
+
+`RUNNER_EGRESS=open` lifts the check, for local development where the bridge
+runs on the host (`scripts/triage-local.sh` sets it). `RUNNER_MODE=local` runs
+the CLI on the bridge's own machine and is for development only.
+
 ## Env matrix
 
 | Var | Dev | One container | Cloud Run | Split |

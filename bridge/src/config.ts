@@ -22,6 +22,8 @@ export type Config = {
   runnerMode: 'docker' | 'local';
   runnerImage: string;
   runnerNetwork?: string;
+  // internal: the runner may reach only the bridge's model proxy, over RUNNER_NETWORK.
+  runnerEgress: 'internal' | 'open';
   model: string;
   // Unset: the CLI's default for the model.
   effort?: EffortLevel;
@@ -65,6 +67,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const queue = str('BRIDGE_QUEUE', 'triage');
   if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(queue)) problems.push('BRIDGE_QUEUE is not a valid queue key');
 
+  const egress = str('RUNNER_EGRESS', 'internal');
+  if (egress !== 'internal' && egress !== 'open') problems.push('RUNNER_EGRESS must be internal or open');
+  if (mode === 'docker' && egress === 'internal' && (!env.RUNNER_NETWORK?.trim() || !env.MODEL_PROXY_URL?.trim())) {
+    problems.push('RUNNER_NETWORK (an internal docker network) and MODEL_PROXY_URL are required; RUNNER_EGRESS=open lifts this for local development');
+  }
+
   const effort = env.EFFORT?.trim() || undefined;
   if (effort && !EFFORTS.includes(effort as EffortLevel)) problems.push(`EFFORT must be one of ${EFFORTS.join(', ')}`);
 
@@ -86,6 +94,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     runnerMode: mode as Config['runnerMode'],
     runnerImage: str('RUNNER_IMAGE', 'sild-runner:2.1.296'),
     runnerNetwork: env.RUNNER_NETWORK?.trim() || undefined,
+    runnerEgress: egress as Config['runnerEgress'],
     model: str('MODEL', 'claude-sonnet-5-5'),
     effort: effort as EffortLevel | undefined,
     modelAuth: modelAuth ?? { kind: 'api_key', key: '' },

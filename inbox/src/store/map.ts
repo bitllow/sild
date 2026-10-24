@@ -217,6 +217,7 @@ export function mapTeamMember(t: ApiTeamMember): TeamMember {
     name: (service && t.first_name) || name || t.email,
     email: t.email,
     assignments: (t.assignments || []).map((a) => ({ role: a.role, scope: a.scope || {} })),
+    externalSub: t.external_sub ?? "",
   };
 }
 
