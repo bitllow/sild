@@ -88,32 +88,47 @@ func WithoutInternalParts(msg map[string]any) (map[string]any, bool) {
 	return out, true
 }
 
-// stripParts returns a copy of parts without internal step fields.
+// Part fields whose items may carry an internal field.
+var internalLists = []string{"steps", "evidence"}
+
+// stripParts returns a copy of parts without the internal fields of their items.
 func stripParts(parts []map[string]any) ([]map[string]any, bool) {
 	out := make([]map[string]any, 0, len(parts))
 	stripped := false
 	for _, p := range parts {
-		steps, ok := p["steps"].([]any)
-		if !ok {
-			out = append(out, p)
-			continue
-		}
-		clean := make([]any, 0, len(steps))
-		for _, s := range steps {
-			if st, ok := s.(map[string]any); ok {
-				if _, has := st["internal"]; has {
-					st = maps.Clone(st)
-					delete(st, "internal")
-					s, stripped = st, true
-				}
+		cp := p
+		for _, key := range internalLists {
+			items, ok := p[key].([]any)
+			if !ok {
+				continue
 			}
-			clean = append(clean, s)
+			clean, removed := withoutInternal(items)
+			if !removed {
+				continue
+			}
+			stripped = true
+			cp = maps.Clone(cp)
+			cp[key] = clean
 		}
-		cp := maps.Clone(p)
-		cp["steps"] = clean
 		out = append(out, cp)
 	}
 	return out, stripped
+}
+
+func withoutInternal(items []any) ([]any, bool) {
+	clean := make([]any, 0, len(items))
+	removed := false
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			if _, has := m["internal"]; has {
+				m = maps.Clone(m)
+				delete(m, "internal")
+				it, removed = m, true
+			}
+		}
+		clean = append(clean, it)
+	}
+	return clean, removed
 }
 
 // partList reads parts as rendered here or as decoded back from an archive.

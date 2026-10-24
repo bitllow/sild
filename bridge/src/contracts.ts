@@ -24,6 +24,9 @@ export type BrokerEvent =
   | { type: 'delivered'; conv: string; requestId: string; summary: string; files: DeliveredFile[] }
   | { type: 'not_available'; conv: string; requestId: string; reason: string };
 
+// The sources the session may ask for, and how much one conversation may ask.
+export type DataCatalog = { sources: Source[]; perConversation: number; distinctIds: number };
+
 // The integrator's text for the assistant (adapter contract GET /instructions); `from` is the adapter's host.
 export type IntegratorInstructions = { text: string; version?: string; from: string };
 
@@ -38,4 +41,6 @@ export interface InfoBroker {
   forget(conv: string): Promise<void>;
   // Null when the integrator has none or they cannot be had. Never throws.
   instructions(): Promise<IntegratorInstructions | null>;
+  // No sources when there are none or the catalog cannot be had. Never throws.
+  catalog(): Promise<DataCatalog>;
 }

@@ -4,7 +4,7 @@ export type Log = (msg: string, fields?: Record<string, unknown>) => void;
 export type Ops = {
   // Backs both reply and ask_for_details.
   reply(text: string): Promise<string>;
-  proposeFix(cause: string, fix: string[]): Promise<string>;
+  proposeFix(cause: string, fix: string[], evidence: Finding[]): Promise<string>;
   requestInfo(need: string, why: string): Promise<string>;
 };
 
@@ -32,3 +32,9 @@ export interface SessionRunner {
   // Conversations that still have something on disk.
   known(): Promise<string[]>;
 }
+
+// One reason behind a diagnosis; ref is for operators only.
+export type Finding = { finding: string; source: string; ref?: string };
+
+// request_info calls a session may make in one turn.
+export const REQUESTS_PER_TURN = 3;

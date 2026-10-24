@@ -1,4 +1,4 @@
-import type { HookCallback, McpSdkServerConfigWithInstance, Options } from '@anthropic-ai/claude-agent-sdk';
+import type { EffortLevel, HookCallback, McpSdkServerConfigWithInstance, Options } from '@anthropic-ai/claude-agent-sdk';
 import { decide, type Decision } from './guard.ts';
 
 export const BUILTIN_TOOLS = ['Read', 'Grep', 'Glob'];
@@ -32,6 +32,7 @@ export type SessionSpec = {
   maxTurns: number;
   maxBudgetUsd: number;
   model?: string;
+  effort?: EffortLevel;
   spawn?: Options['spawnClaudeCodeProcess'];
   abortController?: AbortController;
   onDecision?: (tool: string, input: unknown, decision: Decision) => void;
@@ -65,6 +66,7 @@ export function sessionOptions(spec: SessionSpec): Options {
     ...(spec.resume ? { resume: spec.sessionId } : { sessionId: spec.sessionId }),
     systemPrompt: spec.systemPrompt,
     model: spec.model,
+    ...(spec.effort && { effort: spec.effort }),
 
     settingSources: [],
     strictMcpConfig: true,

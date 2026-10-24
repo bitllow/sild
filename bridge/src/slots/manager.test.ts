@@ -70,6 +70,9 @@ class FakeBroker implements InfoBroker {
   async instructions() {
     return null;
   }
+  async catalog() {
+    return { sources: [], perConversation: 0, distinctIds: 0 };
+  }
   emit(e: BrokerEvent) {
     for (const cb of this.subs) cb(e);
   }
@@ -335,10 +338,20 @@ test('propose_fix posts a diagnosis part; tools stop once released', async () =>
   await waitFor(() => runner.sessions[0]?.pushes.length === 1, 'push');
   const s = runner.sessions[0];
   s.events.activity();
-  await s.ops.proposeFix('The push token expired.', ['Log out', 'Log back in']);
+  await s.ops.proposeFix('The push token expired.', ['Log out', 'Log back in'], [
+    { finding: 'Alerts fail since 08:01', source: 'your attachment', ref: 'data/m_1/1.csv' },
+    { finding: 'The app drops expired tokens', source: 'the driver app' },
+  ]);
   const [msg] = sild.botMessages(a);
-  assert.deepEqual(msg.parts, [{ type: 'diagnosis', cause: 'The push token expired.', fix: ['Log out', 'Log back in'] }]);
-  assert.equal(msg.body, 'The push token expired.\n\n1. Log out\n2. Log back in');
+  assert.deepEqual(msg.parts, [{
+    type: 'diagnosis', cause: 'The push token expired.', fix: ['Log out', 'Log back in'],
+    evidence: [
+      { finding: 'Alerts fail since 08:01', source: 'your attachment', internal: { ref: 'data/m_1/1.csv' } },
+      { finding: 'The app drops expired tokens', source: 'the driver app' },
+    ],
+  }]);
+  assert.equal(msg.body, 'The push token expired.\n\n1. Log out\n2. Log back in\n\nWhy I think so:\n'
+    + '- Alerts fail since 08:01 (your attachment)\n- The app drops expired tokens (the driver app)');
   s.events.turnEnd('success');
   await waitFor(() => s.closed, 'release');
   assert.match(await s.ops.reply('late'), /no longer assigned/);

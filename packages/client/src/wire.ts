@@ -92,9 +92,17 @@ export type Step = {
   internal?: { source: string; params?: Record<string, unknown> | null };
 };
 
+// A finding behind a diagnosis and where it came from.
+export type Evidence = {
+  finding: string;
+  source: string;
+  // The exact reference (file, request id); stripped like a step's internal fields.
+  internal?: { ref: string };
+};
+
 export type Part =
   | { type: 'steps'; steps: Step[] }
-  | { type: 'diagnosis'; cause: string; fix: string[] };
+  | { type: 'diagnosis'; cause: string; fix: string[]; evidence?: Evidence[] };
 
 export type Disposition = 'inline' | 'attachment';
 

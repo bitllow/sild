@@ -7,7 +7,7 @@ import {
 } from '@sild/client';
 import type { BrokerEvent, InfoBroker } from '../contracts.ts';
 import { errText, truncateUtf8 } from '../util.ts';
-import type { Log, Ops, SessionEvents, SessionHandle, SessionRunner } from './types.ts';
+import { REQUESTS_PER_TURN, type Log, type Ops, type SessionEvents, type SessionHandle, type SessionRunner } from './types.ts';
 
 export type SlotConfig = {
   queue: string;
@@ -21,7 +21,6 @@ export type SlotConfig = {
 };
 
 const WAIT_PREFIX = 'wait-';
-const REQUESTS_PER_TURN = 3;
 // Queued conversations told their place while every slot is held.
 const WAITING_NOTICES = 20;
 const TYPING_EVERY_MS = 4_000;
@@ -509,9 +508,15 @@ export class SlotManager {
   private ops(h: Held): Ops {
     return {
       reply: (text) => this.answer(h, { body: text }),
-      proposeFix: (cause, fix) => this.answer(h, {
-        body: [cause, '', ...fix.map((f, i) => `${i + 1}. ${f}`)].join('\n'),
-        parts: [{ type: 'diagnosis', cause, fix }],
+      proposeFix: (cause, fix, evidence) => this.answer(h, {
+        body: [
+          cause, '', ...fix.map((f, i) => `${i + 1}. ${f}`),
+          '', 'Why I think so:', ...evidence.map((e) => `- ${e.finding} (${e.source})`),
+        ].join('\n'),
+        parts: [{
+          type: 'diagnosis', cause, fix,
+          evidence: evidence.map((e) => ({ finding: e.finding, source: e.source, ...(e.ref && { internal: { ref: e.ref } }) })),
+        }],
       }),
       requestInfo: async (need, why) => {
         if (h.released) return RELEASED;

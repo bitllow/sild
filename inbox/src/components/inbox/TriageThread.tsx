@@ -114,6 +114,24 @@ function DiagnosisCard({ d }: { d: DiagnosisPart }) {
           ))}
         </div>
       )}
+      {!!d.evidence?.length && (
+        <details data-testid="triage-evidence" style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}>
+          <summary style={{ ...capsLabel, cursor: "pointer" }}>Why I think so</summary>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
+            {d.evidence.map((e, i) => (
+              <li key={i} style={{ fontSize: 13, lineHeight: 1.5 }}>
+                <span style={{ textWrap: "pretty" }}>{e.finding}</span>
+                <span style={{ display: "block", fontSize: 12, color: "var(--text-tertiary)" }}>{e.source}</span>
+                {e.internal && (
+                  <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)", wordBreak: "break-all" }}>
+                    {e.internal.ref}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

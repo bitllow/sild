@@ -61,6 +61,32 @@ func TestRequesterNeverReceivesInternalStepFields(t *testing.T) {
 	}
 }
 
+func TestRequesterNeverReceivesEvidenceReferences(t *testing.T) {
+	f := newRequesterFixture(t)
+	f.botMessage(t, []map[string]any{{
+		"type": "diagnosis", "cause": "Notifications are blocked", "fix": []string{"Allow notifications"},
+		"evidence": []map[string]any{{
+			"finding": "Alerts fail since 08:01", "source": "your attachment",
+			"internal": map[string]any{"ref": "data/m_1/1.csv"},
+		}},
+	}})
+
+	w := f.h.Request("GET", "/v1/conversations/"+f.own+"/messages").Cookie("sild_admin", f.marko).Do()
+	if strings.Contains(w.Body.String(), "data/m_1/1.csv") || !strings.Contains(w.Body.String(), "Alerts fail since 08:01") {
+		t.Fatalf("requester messages: %s", w.Body)
+	}
+	f.h.SeedAdmin(f.tenant.ID, "owner@test", models.PlatformOwner)
+	owner := loginAs(t, f.h, "owner@test")
+	if w := f.h.Request("GET", "/v1/conversations/"+f.own+"/messages").Cookie("sild_admin", owner).Do(); !strings.Contains(w.Body.String(), "data/m_1/1.csv") {
+		t.Fatalf("owner lost the evidence reference: %s", w.Body)
+	}
+}
+
+func TestPartLimitsCountCharactersNotBytes(t *testing.T) {
+	f := newRequesterFixture(t)
+	f.botMessage(t, []map[string]any{{"type": "diagnosis", "cause": strings.Repeat("я", 1000), "fix": []string{"x"}}})
+}
+
 func TestOnlyTheAssistantSendsParts(t *testing.T) {
 	f := newRequesterFixture(t)
 	w := f.h.Request("POST", "/v1/conversations/"+f.own+"/messages").Cookie("sild_admin", f.marko).
@@ -72,6 +98,8 @@ func TestOnlyTheAssistantSendsParts(t *testing.T) {
 		[]map[string]any{{"type": "html", "body": "<b>"}},
 		[]map[string]any{{"type": "steps", "steps": []map[string]any{{"label": "x", "state": "exploded"}}}},
 		[]map[string]any{{"type": "diagnosis", "cause": strings.Repeat("x", 2000)}},
+		[]map[string]any{{"type": "diagnosis", "cause": "x", "evidence": []map[string]any{{"finding": "y"}}}},
+		[]map[string]any{{"type": "steps", "steps": []map[string]any{{"label": "x", "state": "done"}}, "evidence": []map[string]any{{"finding": "y", "source": "z"}}}},
 	}
 	for _, parts := range bad {
 		w := f.h.Request("POST", "/v1/conversations/"+f.own+"/messages").Bearer(f.key).JSON(map[string]any{"body": "x", "parts": parts}).Do()

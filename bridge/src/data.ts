@@ -1,6 +1,6 @@
 import { AdapterClient } from './adapter/client.ts';
 import type { FileStore } from './adapter/files.ts';
-import { createBroker } from './broker/broker.ts';
+import { createBroker, DEFAULT_BROKER_LIMITS } from './broker/broker.ts';
 import { ConfigError, loadSecret, type Config } from './config.ts';
 import type { InfoBroker } from './contracts.ts';
 import { AnthropicRouter, DEFAULT_ROUTER_MODEL } from './router/anthropic.ts';
@@ -15,6 +15,8 @@ export type DataConfig = {
   allowInsecureLocal: boolean;
   router: 'anthropic' | 'fake';
   routerModel: string;
+  // Different ids one conversation may request data about.
+  maxRequestIds: number;
 };
 
 // Without ADAPTER_URL the bridge runs with no data provider.
@@ -27,6 +29,8 @@ export function loadDataConfig(env: NodeJS.ProcessEnv = process.env): DataConfig
   const publicKey = loadSecret(env, problems, 'ADAPTER_PUBLIC_KEY', { needed })?.value ?? '';
   const router = env.ROUTER?.trim() || 'anthropic';
   if (router !== 'anthropic' && router !== 'fake') problems.push('ROUTER must be anthropic or fake');
+  const maxIds = Number(env.MAX_REQUEST_IDS?.trim() || DEFAULT_BROKER_LIMITS.distinctIds);
+  if (!Number.isInteger(maxIds) || maxIds < 1) problems.push('MAX_REQUEST_IDS must be a whole number ≥ 1');
   if (problems.length) throw new ConfigError(`invalid data provider configuration:\n  ${problems.join('\n  ')}`);
   return {
     adapterUrl: url,
@@ -35,6 +39,7 @@ export function loadDataConfig(env: NodeJS.ProcessEnv = process.env): DataConfig
     allowInsecureLocal: env.ADAPTER_ALLOW_INSECURE_LOCAL === '1',
     router: router as DataConfig['router'],
     routerModel: env.ROUTER_MODEL?.trim() || DEFAULT_ROUTER_MODEL,
+    maxRequestIds: maxIds,
   };
 }
 
@@ -52,5 +57,5 @@ export function makeBroker(data: DataConfig, ctx: { config: Config; files: FileS
   const router: Router = data.router === 'fake'
     ? new FakeRouter()
     : new AnthropicRouter({ baseURL: ctx.modelBaseUrl, authToken: ctx.modelToken, model: data.routerModel });
-  return createBroker({ adapter, router, log });
+  return createBroker({ adapter, router, log, limits: { distinctIds: data.maxRequestIds } });
 }

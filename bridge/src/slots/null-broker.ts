@@ -1,4 +1,4 @@
-import type { InfoBroker } from '../contracts.ts';
+import type { DataCatalog, InfoBroker } from '../contracts.ts';
 
 // No data sources: requester text passes through, every request is not available.
 export class NullBroker implements InfoBroker {
@@ -14,5 +14,8 @@ export class NullBroker implements InfoBroker {
   async forget(): Promise<void> {}
   async instructions(): Promise<null> {
     return null;
+  }
+  async catalog(): Promise<DataCatalog> {
+    return { sources: [], perConversation: 0, distinctIds: 0 };
   }
 }

@@ -7,15 +7,15 @@ test('each ops tool calls its op and returns the op result as text', async () =>
   const calls: unknown[] = [];
   const ops: Ops = {
     reply: async (t) => (calls.push(['reply', t]), 'sent'),
-    proposeFix: async (c, f) => (calls.push(['fix', c, f]), 'sent'),
+    proposeFix: async (c, f, e) => (calls.push(['fix', c, f, e]), 'sent'),
     requestInfo: async (n, w) => (calls.push(['info', n, w]), 'requested r1'),
   };
   const [reply, ask, fix, info] = opsTools(ops);
   assert.deepEqual((await reply.handler({ text: 'hi' }, {})).content, [{ type: 'text', text: 'sent' }]);
   await ask.handler({ text: 'which?' }, {});
-  await fix.handler({ cause: 'c', fix: ['a', 'b'] }, {});
+  await fix.handler({ cause: 'c', fix: ['a', 'b'], evidence: [{ finding: 'f', source: 's' }] }, {});
   assert.deepEqual((await info.handler({ need: 'n', why: 'w' }, {})).content, [{ type: 'text', text: 'requested r1' }]);
-  assert.deepEqual(calls, [['reply', 'hi'], ['reply', 'which?'], ['fix', 'c', ['a', 'b']], ['info', 'n', 'w']]);
+  assert.deepEqual(calls, [['reply', 'hi'], ['reply', 'which?'], ['fix', 'c', ['a', 'b'], [{ finding: 'f', source: 's' }]], ['info', 'n', 'w']]);
   assert.deepEqual(OPS_TOOLS, ['mcp__ops__reply', 'mcp__ops__ask_for_details', 'mcp__ops__propose_fix', 'mcp__ops__request_info']);
 });
 
@@ -35,7 +35,7 @@ test('answer tools report a delivered answer; request_info and failures do not',
   const [reply, ask, fix, info] = opsTools({ reply: ok, proposeFix: ok, requestInfo: ok }, () => answered++);
   await reply.handler({ text: 'hi' }, {});
   await ask.handler({ text: 'which?' }, {});
-  await fix.handler({ cause: 'c', fix: ['a'] }, {});
+  await fix.handler({ cause: 'c', fix: ['a'], evidence: [{ finding: 'f', source: 's' }] }, {});
   await info.handler({ need: 'n', why: 'w' }, {});
   assert.equal(answered, 3);
 

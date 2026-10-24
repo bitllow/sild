@@ -19,8 +19,13 @@ export interface RealtimeHandlers {
 
 // The browser connects straight to the backend node (a cross-origin WebSocket,
 // allowed by the node's CheckOrigin); the cookie can't ride it, so auth is the
-// agent token. Override the endpoint with NEXT_PUBLIC_SILD_WS_URL.
-const WS_URL = process.env.NEXT_PUBLIC_SILD_WS_URL || "ws://localhost:8080/v1/ws";
+// agent token. Override the endpoint with NEXT_PUBLIC_SILD_WS_URL; unset, it is
+// port 8080 on the page's own host, so another device on the network works too.
+function wsUrl(): string {
+  if (process.env.NEXT_PUBLIC_SILD_WS_URL) return process.env.NEXT_PUBLIC_SILD_WS_URL;
+  const { protocol, hostname } = window.location;
+  return `${protocol === "https:" ? "wss" : "ws"}://${hostname}:8080/v1/ws`;
+}
 
 // An embedded bearer is renewed by the host, so only a cookie session ends here.
 const sessionEnded = (e: unknown) => e instanceof ApiError && e.status === 401 && !isEmbedded();
@@ -28,7 +33,7 @@ const sessionEnded = (e: unknown) => e instanceof ApiError && e.status === 401 &
 export function createRealtime(handlers: RealtimeHandlers): Realtime {
   return connect({
     Centrifuge,
-    url: WS_URL,
+    url: wsUrl(),
     getToken: async () => {
       try {
         return (await realtimeToken(http)).token;

@@ -1,11 +1,11 @@
 import {
   deleteSession as sdkDeleteSession, query as sdkQuery,
-  type SDKMessage, type SDKUserMessage,
+  type EffortLevel, type SDKMessage, type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { IntegratorInstructions } from '../contracts.ts';
+import type { DataCatalog, IntegratorInstructions } from '../contracts.ts';
 import type { Log, Ops, SessionEvents, SessionHandle, SessionRunner } from '../slots/types.ts';
 import { brief } from './brief.ts';
 import { CONFLUENCE_SERVER, type ConfluenceTools } from './confluence.ts';
@@ -21,6 +21,7 @@ export type ClaudeRunnerConfig = {
   image: string;
   network?: string;
   model: string;
+  effort?: EffortLevel;
   maxTurns: number;
   maxBudgetUsd: number;
   // The model proxy as the CLI reaches it, and the bearer it accepts.
@@ -30,6 +31,7 @@ export type ClaudeRunnerConfig = {
   confluence?: ConfluenceTools | null;
   // The integrator's assistant instructions; none when absent.
   instructions?: () => Promise<IntegratorInstructions | null>;
+  catalog?: () => Promise<DataCatalog>;
   query?: typeof sdkQuery;
   deleteSession?: typeof sdkDeleteSession;
 };
@@ -82,9 +84,10 @@ export class ClaudeSessionRunner implements SessionRunner {
     if (this.cfg.mode === 'local') env.HOME = p.config;
 
     // Composed on every open, but where the CLI records a session's prompt a resumed session keeps the one it started with.
-    const [kb, integrator] = await Promise.all([
+    const [kb, integrator, data] = await Promise.all([
       this.cfg.confluence?.session() ?? null,
       this.cfg.instructions?.() ?? null,
+      this.cfg.catalog?.() ?? null,
     ]);
     const inbox = new Inbox();
     let answered = false;
@@ -96,11 +99,12 @@ export class ClaudeSessionRunner implements SessionRunner {
         configDir: p.config,
         sessionId,
         resume,
-        systemPrompt: brief({ srcDir: this.cfg.srcDir, workDir: p.work, dataDir: p.data, confluence: kb !== null, integrator }),
+        systemPrompt: brief({ srcDir: this.cfg.srcDir, workDir: p.work, dataDir: p.data, confluence: kb !== null, integrator, data }),
         mcpServers: { [OPS_SERVER]: opsServer(ops, () => (answered = true)), ...(kb && { [CONFLUENCE_SERVER]: kb.server }) },
         mcpTools: [...OPS_TOOLS, ...(kb?.tools ?? [])],
         env,
         model: this.cfg.model,
+        effort: this.cfg.effort,
         maxTurns: this.cfg.maxTurns,
         maxBudgetUsd: this.cfg.maxBudgetUsd,
         endTurn: () => {

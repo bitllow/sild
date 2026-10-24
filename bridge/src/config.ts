@@ -1,3 +1,4 @@
+import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 import { readFileSync } from 'node:fs';
 import { wsUrl } from '@sild/client';
 import type { ConfluenceConfig } from './runner/confluence.ts';
@@ -22,12 +23,16 @@ export type Config = {
   runnerImage: string;
   runnerNetwork?: string;
   model: string;
+  // Unset: the CLI's default for the model.
+  effort?: EffortLevel;
   modelAuth: ModelAuth;
   proxy: { host: string; port: number; runnerUrl?: string };
   confluence?: ConfluenceConfig;
 };
 
 export class ConfigError extends Error {}
+
+const EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const problems: string[] = [];
@@ -60,6 +65,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const queue = str('BRIDGE_QUEUE', 'triage');
   if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(queue)) problems.push('BRIDGE_QUEUE is not a valid queue key');
 
+  const effort = env.EFFORT?.trim() || undefined;
+  if (effort && !EFFORTS.includes(effort as EffortLevel)) problems.push(`EFFORT must be one of ${EFFORTS.join(', ')}`);
+
   const modelAuth = loadModelAuth(env, problems);
   const cfg: Config = {
     sildUrl,
@@ -79,6 +87,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     runnerImage: str('RUNNER_IMAGE', 'sild-runner:2.1.296'),
     runnerNetwork: env.RUNNER_NETWORK?.trim() || undefined,
     model: str('MODEL', 'claude-sonnet-5-5'),
+    effort: effort as EffortLevel | undefined,
     modelAuth: modelAuth ?? { kind: 'api_key', key: '' },
     proxy: {
       host: str('MODEL_PROXY_HOST', '127.0.0.1'),

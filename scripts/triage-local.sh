@@ -5,9 +5,10 @@
 #
 #   scripts/triage-local.sh            start everything; Ctrl-C stops it all
 #   RUNNER_MODE=local ...              run the CLI on the host instead of docker
-#   ROUTER=anthropic ...               route requester text with a model (default: rules)
+#   ROUTER=fake ...                    route requests with keyword rules (default: Claude Haiku)
 #   FRESH=1 ...                        start from an empty database
 #   SRC_REPOS="/path/a /path/b" ...    the code the assistant reads (default: this repo)
+#   MODEL=... EFFORT=high ...          the session model and effort (default: opus, CLI default effort)
 #
 # Model auth: ANTHROPIC_API_KEY, or a token file at bridge/.secrets/oauth-token
 # (`claude setup-token`, local testing only).
@@ -73,8 +74,12 @@ if [ "$(cat "$STATE/src/.repos" 2>/dev/null)" != "$repos" ]; then
   # Committed key material goes entirely; credential values elsewhere are redacted in place.
   grep -rlE --null -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|"private_key"[[:space:]]*:' "$STATE/src" | xargs -0 rm -f
   cred='AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|sk_live_[0-9A-Za-z]{20,}|rk_live_[0-9A-Za-z]{20,}|xox[abp]-[0-9A-Za-z-]{10,}|ghp_[A-Za-z0-9]{30,}|glpat-[A-Za-z0-9_-]{20}|sk-ant-[a-z0-9]+-[A-Za-z0-9_-]{20,}'
-  grep -rlE --null -- "$cred|(PASSWORD|SECRET|API_KEY|TOKEN)[A-Z_]*[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9/+_-]{16,}" "$STATE/src" |
-    xargs -0 perl -pi -e "s/($cred)/REDACTED/g; s/((?:PASSWORD|SECRET|API_KEY|TOKEN)[A-Z_]*[\"']?\\s*[:=]\\s*[\"']?)[A-Za-z0-9\\/+_-]{16,}/\${1}REDACTED/g"
+  names='(passw(or)?d|pwd|secret|api_?key|token|credential)[A-Za-z0-9_]*'
+  grep -rliE --null -- "$cred|$names[\"']?[[:space:]]*[:=][[:space:]]*([\"'][^\"']{4,}[\"']|[A-Za-z0-9/+_-]{16,})" "$STATE/src" |
+    CRED="$cred" xargs -0 perl -pi -e '
+      s/($ENV{CRED})/REDACTED/g;
+      s/((?:passw(?:or)?d|pwd|secret|api_?key|token|credential)\w*["\x27]?\s*[:=]\s*(["\x27]))[^"\x27\n]{4,}\2/${1}REDACTED${2}/gi;
+      s/((?:passw(?:or)?d|pwd|secret|api_?key|token|credential)\w*["\x27]?\s*[:=]\s*)[A-Za-z0-9\/+_-]{16,}/${1}REDACTED/gi'
   echo "$repos" >"$STATE/src/.repos"
 fi
 
@@ -108,15 +113,18 @@ echo "starting the bridge (${RUNNER_MODE} runner)…"
 (cd "$ROOT/bridge" && exec env \
   SILD_URL="http://localhost:$SILD_PORT" SILD_SERVICE_KEY="$(cat "$STATE/assistant.key")" \
   WORK_ROOT="$STATE/work" SRC_DIR="$STATE/src" RUNNER_MODE="$RUNNER_MODE" RUNNER_IMAGE="$RUNNER_IMAGE" \
-  IDLE_RELEASE_SECONDS="${IDLE_RELEASE_SECONDS:-120}" MODEL="${MODEL:-claude-opus-5-5}" \
+  IDLE_RELEASE_SECONDS="${IDLE_RELEASE_SECONDS:-120}" MODEL="${MODEL:-claude-opus-5-5}" EFFORT="${EFFORT:-}" \
   ADAPTER_URL="http://127.0.0.1:$ADAPTER_PORT" ADAPTER_SECRET="$adapter_secret" ADAPTER_PUBLIC_KEY="$adapter_key" \
-  ADAPTER_ALLOW_INSECURE_LOCAL=1 ROUTER="${ROUTER:-fake}" \
+  ADAPTER_ALLOW_INSECURE_LOCAL=1 ROUTER="${ROUTER:-anthropic}" \
   "${model_auth[@]}" node src/main.ts >"$STATE/logs/bridge.log" 2>&1) &
 pids+=($!)
 
 echo "starting the inbox on :${INBOX_PORT}…"
+# The inbox finds realtime on port 8080 of whatever host it was opened on, so a phone on the LAN works.
+ws_url=""
+[ "$SILD_PORT" = 8080 ] || ws_url="ws://localhost:$SILD_PORT/v1/ws"
 (cd "$ROOT/inbox" && exec env SILD_API_URL="http://localhost:$SILD_PORT" \
-  NEXT_PUBLIC_SILD_WS_URL="ws://localhost:$SILD_PORT/v1/ws" \
+  NEXT_PUBLIC_SILD_WS_URL="$ws_url" \
   npx next dev -p "$INBOX_PORT" >"$STATE/logs/inbox.log" 2>&1) &
 pids+=($!)
 wait_for "http://localhost:$INBOX_PORT" inbox "$STATE/logs/inbox.log"

@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { BrokerEvent, InfoBroker, Source } from '../contracts.ts';
 import type { AdapterClient, Received } from '../adapter/client.ts';
 import { safeConv } from '../adapter/files.ts';
-import { validate } from '../adapter/kit/schema.ts';
+import { isRecord, validate } from '../adapter/kit/schema.ts';
 import { redact } from '../router/redact.ts';
 import type { Proposal, Router } from '../router/router.ts';
 import { errText } from '../util.ts';
@@ -12,13 +12,15 @@ import { errText } from '../util.ts';
 export type BrokerLimits = {
   perMessage: number;
   perConversation: number;
+  // Different ids (drivers, vehicles, trips, names) one conversation may ask about.
+  distinctIds: number;
   // Ceiling on a source's own max_wait_seconds.
   maxWaitSeconds: number;
   // Extra time for the adapter's own `expired` to arrive before we give up.
   graceSeconds: number;
 };
 
-export const DEFAULT_BROKER_LIMITS: BrokerLimits = { perMessage: 3, perConversation: 12, maxWaitSeconds: 300, graceSeconds: 5 };
+export const DEFAULT_BROKER_LIMITS: BrokerLimits = { perMessage: 3, perConversation: 12, distinctIds: 4, maxWaitSeconds: 300, graceSeconds: 5 };
 
 export type BrokerConfig = {
   adapter: AdapterClient;
@@ -32,6 +34,7 @@ export type Broker = InfoBroker & { close(): void };
 type Inflight = { source: string; key: string; timer: NodeJS.Timeout };
 type Conv = {
   issued: number;
+  ids: Set<string>;
   inflight: Map<string, Inflight>;
   // key (source + params) → request id, for everything delivered so far.
   delivered: Map<string, { source: string; requestId: string }>;
@@ -46,7 +49,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
   const state = (conv: string): Conv => {
     let c = convs.get(conv);
     if (!c) {
-      convs.set(conv, (c = { issued: 0, inflight: new Map(), delivered: new Map() }));
+      convs.set(conv, (c = { issued: 0, ids: new Set(), inflight: new Map(), delivered: new Map() }));
       cfg.adapter.files.reopen(conv);
     }
     return c;
@@ -113,6 +116,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
     }, wait * 1000);
     timer.unref();
     c.issued++;
+    for (const id of idsOf(source, p.params)) c.ids.add(id);
     c.inflight.set(requestId, { source: p.source, key: keyOf(p), timer });
     emit({ type: 'requested', conv, requestId, label: redact(p.label).text, source: p.source, params: p.params });
     cfg.adapter
@@ -127,11 +131,13 @@ export function createBroker(cfg: BrokerConfig): Broker {
   };
 
   // Null when the proposal is usable, otherwise why not.
-  const reject = (sources: Map<string, Source>, p: Proposal): string | null => {
+  const reject = (c: Conv, sources: Map<string, Source>, p: Proposal): string | null => {
     const s = sources.get(p.source);
     if (!s) return `no source ${p.source}`;
     const errors = validate(s.params, p.params);
-    return errors.length ? `params do not fit ${p.source}: ${errors.join('; ')}` : null;
+    if (errors.length) return `params do not fit ${p.source}: ${errors.join('; ')}`;
+    const ids = new Set([...c.ids, ...idsOf(s, p.params)]);
+    return ids.size > limits.distinctIds ? `this conversation may ask about at most ${limits.distinctIds} different ids` : null;
   };
 
   return {
@@ -154,7 +160,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
       for (const p of proposals) {
         if (issued >= budget || !convs.has(conv)) break;
         if (taken.has(p.source)) continue;
-        const why = reject(sources, p);
+        const why = reject(c, sources, p);
         if (why) {
           log(`router proposal dropped: ${why}`);
           continue;
@@ -181,7 +187,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
         return { notAvailable: 'could not match the need to a data source' };
       }
       if (!p) return { notAvailable: 'no data source offers this' };
-      const problem = reject(sources, p);
+      const problem = reject(c, sources, p);
       if (problem) return { notAvailable: problem };
       const key = keyOf(p);
       const done = c.delivered.get(key);
@@ -208,6 +214,8 @@ export function createBroker(cfg: BrokerConfig): Broker {
 
     instructions: () => cfg.adapter.instructions(),
 
+    catalog: async () => ({ sources: await catalog(), perConversation: limits.perConversation, distinctIds: limits.distinctIds }),
+
     close() {
       unsubscribe();
       for (const c of convs.values()) for (const f of c.inflight.values()) clearTimeout(f.timer);
@@ -215,6 +223,16 @@ export function createBroker(cfg: BrokerConfig): Broker {
       cfg.adapter.close();
     },
   };
+}
+
+// The values of a request's free-text params, which name what it is about. Enums and numbers do not.
+function idsOf(source: Source, params: Record<string, unknown>): string[] {
+  const props = isRecord(source.params.properties) ? source.params.properties : {};
+  return Object.entries(params).flatMap(([name, v]) => {
+    const schema = props[name];
+    const free = isRecord(schema) && schema.type === 'string' && !Array.isArray(schema.enum);
+    return free && typeof v === 'string' && v.trim() ? [v.trim().toLowerCase()] : [];
+  });
 }
 
 function keyOf(p: { source: string; params: Record<string, unknown> }): string {

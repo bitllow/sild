@@ -43,12 +43,14 @@ export async function startBridge(cfg: Config, makeBroker: BrokerFactory = () =>
     image: cfg.runnerImage,
     network: cfg.runnerNetwork,
     model: cfg.model,
+    effort: cfg.effort,
     maxTurns: cfg.maxTurns,
     maxBudgetUsd: cfg.maxBudgetUsd,
     baseUrl: cfg.proxy.runnerUrl ?? `http://${proxyHost}:${proxy.port}`,
     proxyToken,
     confluence,
     instructions: () => broker.instructions(),
+    catalog: () => broker.catalog(),
     log,
   });
 

@@ -82,12 +82,18 @@ test.describe("tech support triage", () => {
         await bot.post(`/v1/conversations/${conv.id}/messages`, {
           data: {
             body: "His phone stopped accepting notifications.",
-            parts: [{ type: "diagnosis", cause: "The push token expired at 07:42 after app 5.12.0.", fix: ["Ask Andres to sign in again."] }],
+            parts: [{
+              type: "diagnosis", cause: "The push token expired at 07:42 after app 5.12.0.", fix: ["Ask Andres to sign in again."],
+              evidence: [{ finding: "His token stopped working at 07:42", source: "his phone registration", internal: { ref: "data/req_devices/1.json" } }],
+            }],
           },
         })
       ).status(),
     ).toBe(201);
     await expect(marko.getByTestId("triage-diagnosis")).toContainText("Ask Andres to sign in again.");
+    await marko.getByTestId("triage-evidence").locator("summary").click();
+    await expect(marko.getByTestId("triage-evidence")).toContainText("His token stopped working at 07:42");
+    await expect(marko.getByTestId("triage-evidence"), "the requester never gets evidence references").not.toContainText("req_devices");
 
     // The operator (the suite's signed-in owner) watches every chat and sees the data requests.
     await page.goto("/");
@@ -95,6 +101,8 @@ test.describe("tech support triage", () => {
     await page.locator(`[data-testid="triage-row"][data-conversation="${conv.id}"]`).click();
     await page.getByTestId("triage-requests-toggle").click();
     await expect(page.getByTestId("triage-steps")).toContainText("driver.devices");
+    await page.getByTestId("triage-evidence").locator("summary").click();
+    await expect(page.getByTestId("triage-evidence")).toContainText("data/req_devices/1.json");
 
     await marko.getByTestId("triage-resolve").click();
     await expect

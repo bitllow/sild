@@ -120,6 +120,16 @@ describe('request_info', () => {
     assert.equal(done!.requestId, r.requestId);
   });
 
+  test('a conversation asks about a capped number of different ids; repeats and enums are free', async () => {
+    const { broker } = setup({ distinctIds: 2 });
+    assert.ok('requestId' in await broker.request('c_ids', 'u1', 'push token state of drv_1 devices', 'x'));
+    assert.ok('requestId' in await broker.request('c_ids', 'u1', 'push token state of drv_2 devices', 'x'));
+    assert.deepEqual(await broker.request('c_ids', 'u1', 'push token state of drv_3 devices', 'x'),
+      { notAvailable: 'this conversation may ask about at most 2 different ids' });
+    assert.ok('requestId' in await broker.request('c_ids', 'u1', 'pending trips of drv_1', 'x'));
+    assert.ok('requestId' in await broker.request('c_ids', 'u1', 'service status', 'x'));
+  });
+
   test('a need nothing matches is not available', async () => {
     const { broker } = setup();
     assert.deepEqual(await broker.request('c_none', 'u1', 'the weather in Tartu', 'curious'), { notAvailable: 'no data source offers this' });

@@ -18,6 +18,7 @@ test('defaults', () => {
   assert.equal(c.runnerMode, 'docker');
   assert.equal(c.runnerImage, 'sild-runner:2.1.296');
   assert.equal(c.model, 'claude-sonnet-5-5');
+  assert.equal(c.effort, undefined);
   assert.equal(c.sildWsUrl, 'wss://chat.example.com/v1/ws');
   assert.deepEqual(c.modelAuth, { kind: 'api_key', key: 'sk-x' });
   assert.equal(c.proxy.host, '127.0.0.1');
@@ -85,4 +86,9 @@ test('confluence needs a token and an explicit tool list', () => {
     (e: unknown) => e instanceof ConfigError
       && ['CONFLUENCE_MCP_URL must be', 'CONFLUENCE_READ_TOOLS is required', 'CONFLUENCE_TOKEN or CONFLUENCE_TOKEN_FILE is required'].every((s) => e.message.includes(s)),
   );
+});
+
+test('EFFORT is passed through, and only a known level', () => {
+  assert.equal(loadConfig({ ...base, EFFORT: 'high' }).effort, 'high');
+  assert.throws(() => loadConfig({ ...base, EFFORT: 'extreme' }), /EFFORT must be one of low, medium, high, xhigh, max/);
 });
