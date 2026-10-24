@@ -108,7 +108,7 @@ func (h *Handler) postMessage(c *gin.Context) {
 
 	in := domain.SendInput{
 		Body: req.Body, Visibility: req.Visibility, Channel: req.Channel,
-		AllowInternal: apiutil.Can(c, policy.NotesWrite), Conv: conv, Parts: req.Parts,
+		AllowInternal: apiutil.InternalOn(c, h.svc, policy.NotesWrite, convID), Conv: conv, Parts: req.Parts,
 	}
 	if req.ClientMsgID != "" {
 		in.ClientMsgID = &req.ClientMsgID
@@ -174,7 +174,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 	if !apiutil.AuthorizeConversation(c, h.svc, policy.MessagesRead, convID) {
 		return
 	}
-	includeInternal := apiutil.Can(c, policy.NotesRead)
+	includeInternal := apiutil.InternalOn(c, h.svc, policy.NotesRead, convID)
 	urlFn := h.attachmentURL(c)
 	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
 
@@ -211,7 +211,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 			return
 		}
 		apiutil.RespondCatchUp(c, store.Page[map[string]any]{
-			Items:   h.renderMessagesAuthored(c, msgs, urlFn),
+			Items:   h.renderMessagesAuthored(c, msgs, urlFn, includeInternal),
 			HasMore: hasMore,
 		})
 		return
@@ -222,7 +222,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 		apiutil.Fail(c, err)
 		return
 	}
-	rendered := h.renderMessagesAuthored(c, res.Messages, urlFn)
+	rendered := h.renderMessagesAuthored(c, res.Messages, urlFn, includeInternal)
 	out := store.Page[map[string]any]{Items: rendered, HasMore: res.HasMore}
 	if res.HasMore && len(res.Messages) > 0 {
 		out.NextCursor = &store.Cursor{
@@ -379,9 +379,9 @@ func (h *Handler) attachmentURL(c *gin.Context) views.URLFunc {
 // ones with the operator's display name (author_name), so the web widget shows a
 // real first name in place of "Support". Names are resolved once per distinct
 // actor per page.
-func (h *Handler) renderMessagesAuthored(c *gin.Context, msgs []models.Message, urlFn views.URLFunc) []map[string]any {
+func (h *Handler) renderMessagesAuthored(c *gin.Context, msgs []models.Message, urlFn views.URLFunc, full bool) []map[string]any {
 	render := views.Message
-	if apiutil.Can(c, policy.NotesRead) {
+	if full {
 		render = views.MessageFull
 	}
 	out := make([]map[string]any, 0, len(msgs))

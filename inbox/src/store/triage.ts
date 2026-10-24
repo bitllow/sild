@@ -2,11 +2,13 @@ import { computed, makeAutoObservable, runInAction, type IComputedValue } from "
 import {
   ApiError,
   approveDataAccess,
+  BEFORE_FIRST_MESSAGE,
   closeConversation,
   createConversation,
   getConversation,
   listConversations,
   listMessages,
+  messagesSince,
   sendMessage,
   type Assignment,
   type CloseReason,
@@ -205,14 +207,15 @@ export class TriageStore {
 
   private readRow = async (id: string) => {
     try {
-      const [conv, page] = await Promise.all([
+      // A new row reads the whole thread, since its title comes from the first message; a held row merges the newest page.
+      const [conv, history] = await Promise.all([
         getConversation(http, id, { expand: WITH_PROFILES }),
-        listMessages(http, id),
+        this.owns(id) ? listMessages(http, id).then((p) => p.items) : messagesSince(http, id, BEFORE_FIRST_MESSAGE),
       ]);
       if (conv.queue && conv.queue !== TRIAGE_QUEUE) return;
       runInAction(() => {
         const held = this.rows.find((c) => c.id === id);
-        const fresh = toRow(conv, page.items);
+        const fresh = toRow(conv, history);
         if (!held) {
           this.rows.unshift(fresh);
           return;

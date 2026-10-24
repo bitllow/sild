@@ -45,7 +45,23 @@ func Authorize(p *principal.Principal, a Action, r ResourceAttrs) error {
 	if !conversationScoped(a) {
 		return nil
 	}
-	return authorizeConversation(p, r)
+	return authorizeConversation(p, a, r)
+}
+
+// Internal reports whether p may use a (notes.read or notes.write) in this
+// conversation: only as someone who operates it, never through a requester's
+// access to their own request.
+func Internal(p *principal.Principal, a Action, r ResourceAttrs) bool {
+	if !holds(p, a) {
+		return false
+	}
+	switch p.Kind {
+	case principal.KindAPIKey:
+		return true
+	case principal.KindAdmin:
+		return operates(p, r) == nil
+	}
+	return false
 }
 
 // Holds reports whether the principal carries an action at all, for a handler
@@ -90,42 +106,20 @@ func conversationScoped(a Action) bool {
 }
 
 // authorizeConversation applies the per-conversation rules (§4.2, §7).
-func authorizeConversation(p *principal.Principal, r ResourceAttrs) error {
+func authorizeConversation(p *principal.Principal, a Action, r ResourceAttrs) error {
 	switch p.Kind {
 	case principal.KindAPIKey:
 		return nil
 
 	case principal.KindAdmin:
-		// A requester reaches their own requests, whatever other role they hold.
-		ownRequest := p.HasRole(models.PlatformRequester) && r.Kind != models.KindPeer && r.IsMember &&
-			p.RequesterReaches(r.Queue)
+		// A requester reaches their own requests for what the requester role
+		// grants; anything their other roles add needs the operator rules below.
+		ownRequest := capabilities[a].requester && p.HasRole(models.PlatformRequester) &&
+			r.Kind != models.KindPeer && r.IsMember && p.RequesterReaches(r.Queue)
 		if ownRequest {
 			return nil
 		}
-		if p.RequesterOnly() {
-			if r.Kind == models.KindPeer || !r.IsMember {
-				return denied("not_a_member", "not a member of this conversation")
-			}
-			return denied("queue_out_of_scope", "this conversation is in a queue you do not use")
-		}
-		// Peer takes precedence over every other role: it is the agent
-		// assignment's own grant, and no other role implies it.
-		if r.Kind == models.KindPeer {
-			if p.PeerAccess() {
-				return nil
-			}
-			return denied("peer_access_required", "peer access is not enabled for this operator")
-		}
-		if p.Privileged() {
-			return nil
-		}
-		if !p.ReachesQueue(r.Queue) {
-			return denied("queue_out_of_scope", "this conversation is in a queue you do not work")
-		}
-		if r.SupportReachable {
-			return nil
-		}
-		return denied("support_only", "agents may only access support conversations")
+		return operates(p, r)
 
 	case principal.KindUser:
 		if r.IsMember {
@@ -134,4 +128,32 @@ func authorizeConversation(p *principal.Principal, r ResourceAttrs) error {
 		return denied("not_a_member", "not a member of this conversation")
 	}
 	return denied("forbidden", "insufficient capability")
+}
+
+// operates applies the operator rules for an admin, without a requester's own-request access.
+func operates(p *principal.Principal, r ResourceAttrs) error {
+	if p.RequesterOnly() {
+		if r.Kind == models.KindPeer || !r.IsMember {
+			return denied("not_a_member", "not a member of this conversation")
+		}
+		return denied("queue_out_of_scope", "this conversation is in a queue you do not use")
+	}
+	// Peer takes precedence over every other role: it is the agent
+	// assignment's own grant, and no other role implies it.
+	if r.Kind == models.KindPeer {
+		if p.PeerAccess() {
+			return nil
+		}
+		return denied("peer_access_required", "peer access is not enabled for this operator")
+	}
+	if p.Privileged() {
+		return nil
+	}
+	if !p.ReachesQueue(r.Queue) {
+		return denied("queue_out_of_scope", "this conversation is in a queue you do not work")
+	}
+	if r.SupportReachable {
+		return nil
+	}
+	return denied("support_only", "agents may only access support conversations")
 }

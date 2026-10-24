@@ -14,6 +14,8 @@ type IdentityRepo interface {
 	UpsertProvider(ctx context.Context, p *models.TenantIdentityProvider) error
 	// DeleteProvider also ends every embedded session of the tenant.
 	DeleteProvider(ctx context.Context, tenantID string) error
+	// EndTenantSessions ends every embedded session of the tenant.
+	EndTenantSessions(ctx context.Context, tenantID string) error
 
 	// AdminBySub finds the member linked to an integrator identity.
 	AdminBySub(ctx context.Context, tenantID, sub string) (*models.AdminUser, error)

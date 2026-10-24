@@ -130,6 +130,9 @@ func (s *Service) ApproveDataAccess(ctx context.Context, tenantID, convID, actor
 	if err != nil {
 		return nil, err
 	}
+	if len(items) == 0 {
+		return nil, conflict(CodeNothingToApprove, "nothing waits for approval")
+	}
 	parts, err := json.Marshal([]messagePart{{Type: "approval", Items: items}})
 	if err != nil {
 		return nil, err

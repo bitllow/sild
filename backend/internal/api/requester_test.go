@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/store/models"
@@ -191,6 +192,27 @@ func TestAgentWhoIsAlsoARequesterReachesOwnRequests(t *testing.T) {
 	only(t, f.list(t, cookie, ""), f.support)
 	if code := f.read(cookie, f.triage); code != http.StatusForbidden {
 		t.Fatalf("agent+requester read someone else's triage request: %d", code)
+	}
+
+	// Their agent role works support, not triage: on their own request they are only its requester.
+	f.h.Request("POST", "/v1/conversations/"+own.ID+"/messages").Bearer(f.key).
+		JSON(map[string]any{"body": "provider ids: drv_2207", "visibility": "internal"}).Do()
+	if body := f.h.Request("GET", "/v1/conversations/"+own.ID+"/messages").Cookie("sild_admin", cookie).Do().Body.String(); strings.Contains(body, "drv_2207") {
+		t.Fatalf("agent+requester read an internal note on their own request: %s", body)
+	}
+	w = f.h.Request("POST", "/v1/conversations/"+own.ID+"/messages").Cookie("sild_admin", cookie).JSON(map[string]any{"body": "x", "visibility": "internal"}).Do()
+	if w.Code == http.StatusCreated && strings.Contains(w.Body.String(), `"visibility":"internal"`) {
+		t.Fatal("agent+requester wrote an internal note on their own request")
+	}
+	var conv struct {
+		Assignment struct {
+			ID string `json:"id"`
+		} `json:"assignment"`
+	}
+	testutil.DecodeJSON(t, f.h.Request("GET", "/v1/conversations/"+own.ID).Cookie("sild_admin", cookie).Do(), &conv)
+	if w := f.h.Request("PATCH", "/v1/assignments/"+conv.Assignment.ID).Cookie("sild_admin", cookie).
+		JSON(map[string]any{"assignee_actor_id": "me"}).Do(); w.Code < 400 {
+		t.Fatalf("agent+requester claimed the assistant's assignment on their own request: %d %s", w.Code, w.Body)
 	}
 }
 

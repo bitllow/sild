@@ -43,6 +43,10 @@ func (r *identityRepo) UpsertProvider(ctx context.Context, p *models.TenantIdent
 	}).Create(p).Error
 }
 
+func (r *identityRepo) EndTenantSessions(ctx context.Context, tenantID string) error {
+	return r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Delete(&models.EmbedSession{}).Error
+}
+
 func (r *identityRepo) DeleteProvider(ctx context.Context, tenantID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("tenant_id = ?", tenantID).Delete(&models.EmbedSession{}).Error; err != nil {

@@ -140,6 +140,20 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, a policy.Action,
 	return true
 }
 
+// InternalOn reports whether the caller may read or write (a) internal notes in
+// this conversation, which takes operating it, not only being its requester.
+func InternalOn(c *gin.Context, svc *domain.Service, a policy.Action, convID string) bool {
+	p := middleware.Get(c)
+	return p != nil && policy.Internal(p, a, conversationAttrs(c, svc, p, convID))
+}
+
+// InternalInLists reports whether lists and search may include internal notes.
+// A member who is also a requester sees their own requests there, so not them.
+func InternalInLists(c *gin.Context) bool {
+	p := middleware.Get(c)
+	return Can(c, policy.NotesRead) && (p == nil || !p.HasRole(models.PlatformRequester))
+}
+
 // TranslationNarrowing is the scope a collection filters by, and whether it
 // filters at all. The scope rides on the session, so this costs no query.
 func TranslationNarrowing(c *gin.Context, a policy.Action) (models.RoleScope, bool) {

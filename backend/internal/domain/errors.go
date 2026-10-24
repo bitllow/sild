@@ -50,6 +50,7 @@ const (
 	CodeRequesterNotLinked      = "requester_not_linked"
 	CodeRequestLimit            = "request_limit"
 	CodeEmbeddedOnly            = "embedded_only"
+	CodeNothingToApprove        = "nothing_to_approve"
 )
 
 func conflict(code, msg string) error { return &ConflictError{Code: code, Msg: msg} }

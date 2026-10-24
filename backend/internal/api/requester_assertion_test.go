@@ -123,6 +123,9 @@ func TestOnlyTheRequesterApprovesDataAccess(t *testing.T) {
 	if got := approve(f.h.Request("POST", path).Cookie("sild_admin", f.liis)); got < 400 {
 		t.Fatalf("another requester approved: %d", got)
 	}
+	if got := approve(f.h.Request("POST", path).Cookie("sild_admin", f.marko)); got != http.StatusConflict {
+		t.Fatalf("approved with nothing waiting: want 409, got %d", got)
+	}
 	f.botMessage(t, []map[string]any{{"type": "steps", "steps": []map[string]any{
 		{"label": "Checked his phones", "state": "needs_approval"}, {"label": "Checked his trips", "state": "done"},
 	}}})

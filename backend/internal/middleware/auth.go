@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -107,7 +108,10 @@ func (a *Auth) resolveAdmin(ctx context.Context, rawCookie string) (*principal.P
 			return true
 		}
 		p, err := a.store.Identity().GetProvider(ctx, admin.TenantID)
-		return err != nil || !p.EmbeddedOnly
+		if err != nil {
+			return errors.Is(err, store.ErrNotFound)
+		}
+		return !p.EmbeddedOnly
 	})
 }
 

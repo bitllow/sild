@@ -35,6 +35,8 @@ class DeniedError extends Error {
 const REFRESH_LEAD_MS = 60_000;
 const ASK_INTERVAL_MS = 5_000;
 const RETRY_MS = 15_000;
+// A replaced bearer stays valid this long so requests already sent with it can finish.
+const RETIRE_MS = 30_000;
 
 // No answer, or the validator or Sild failing; a 401 or 403 is final.
 function transient(e: unknown): boolean {
@@ -85,6 +87,21 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
     let askedAt = 0;
     let refresh: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
+    const retiring = new Map<string, ReturnType<typeof setTimeout>>();
+    const retire = (token: string | null) => {
+      if (!token) return;
+      retiring.set(token, setTimeout(() => {
+        retiring.delete(token);
+        endSession(token);
+      }, RETIRE_MS));
+    };
+    const endRetiring = () => {
+      for (const [token, timer] of retiring) {
+        clearTimeout(timer);
+        endSession(token);
+      }
+      retiring.clear();
+    };
 
     const askForToken = () => {
       if (!parentOrigin || Date.now() - askedAt < ASK_INTERVAL_MS) return;
@@ -120,6 +137,7 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
           window.location.reload();
           return;
         }
+        if (bearer !== s.token) retire(bearer);
         bearer = s.token;
         expiresAt = new Date(s.expires_at).getTime();
         setBearer(s.token, askForToken);
@@ -158,7 +176,10 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
       void signIn(d.token, e.origin);
     };
     window.addEventListener("message", onMessage);
-    const onPageHide = () => endSession(bearer);
+    const onPageHide = () => {
+      endRetiring();
+      endSession(bearer);
+    };
     window.addEventListener("pagehide", onPageHide);
 
     allowedOrigins(embedKey)
@@ -177,6 +198,7 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("pagehide", onPageHide);
       if (refresh) clearTimeout(refresh);
+      endRetiring();
       endSession(bearer);
       setBearer(null);
     };

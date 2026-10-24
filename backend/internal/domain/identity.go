@@ -141,6 +141,12 @@ func (s *Service) SetIdentityProvider(ctx context.Context, tenantID string, in I
 	if err := s.store.Identity().UpsertProvider(ctx, p); err != nil {
 		return nil, err
 	}
+	// Sessions vouched for by a validator the tenant no longer trusts end with it.
+	if prev != nil && (prev.ValidatorURL != p.ValidatorURL || in.ValidatorToken != nil) {
+		if err := s.store.Identity().EndTenantSessions(ctx, tenantID); err != nil {
+			return nil, err
+		}
+	}
 	return identityView(p), nil
 }
 

@@ -496,6 +496,21 @@ func TestEmbeddedSessionEnds(t *testing.T) {
 			t.Fatalf("logged-out session: want 401, got %d", w.Code)
 		}
 	})
+	t.Run("validator kept", func(t *testing.T) {
+		bearer := f.signIn(t, "tok-marko")
+		f.configure(t, map[string]any{"validator_url": f.validator.srv.URL + "/validate", "allowed_origins": []string{hostOrigin, "https://other.example"}})
+		if w := f.h.Request("GET", "/v1/principal").Bearer(bearer).Do(); w.Code != http.StatusOK {
+			t.Fatalf("session after an origins-only change: want 200, got %d", w.Code)
+		}
+	})
+	t.Run("validator token rotated", func(t *testing.T) {
+		bearer := f.signIn(t, "tok-marko")
+		f.configure(t, map[string]any{"validator_url": f.validator.srv.URL + "/validate", "validator_token": validatorToken,
+			"allowed_origins": []string{hostOrigin}})
+		if w := f.h.Request("GET", "/v1/principal").Bearer(bearer).Do(); w.Code != http.StatusUnauthorized {
+			t.Fatalf("session after token rotation: want 401, got %d", w.Code)
+		}
+	})
 	t.Run("provider removed", func(t *testing.T) {
 		bearer := f.signIn(t, "tok-marko")
 		if w := f.h.Request("DELETE", "/v1/identity-provider").Cookie("sild_admin", f.owner).Do(); w.Code != http.StatusNoContent {

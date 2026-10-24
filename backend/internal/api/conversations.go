@@ -43,7 +43,7 @@ func (h *Handler) listConversations(c *gin.Context) {
 		Query:           q,
 		Search:          c.Query("q"),
 		CallerActorID:   adminIDOf(c),
-		IncludeInternal: apiutil.Can(c, policy.NotesRead),
+		IncludeInternal: apiutil.InternalInLists(c),
 		WithProfiles:    wantsProfiles(expansion),
 	}
 	// Only messenger surfaces render unread counts; the queue shows assignment
