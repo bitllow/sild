@@ -131,7 +131,7 @@ function AssistantBlock({ showName, time, children }: { showName: boolean; time?
     <div data-testid="triage-assistant" style={{ display: "flex", gap: 10, alignItems: "flex-start", maxWidth: 640 }}>
       <span style={{ width: 28, flex: "none" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        {showName && <img src="/assets/sild-mark-tile.svg" width={28} height={28} alt="" style={{ borderRadius: 8, display: "block" }} />}
+        {showName && <img src="/assets/sild-mark-tile.png" width={28} height={28} alt="" style={{ borderRadius: 8, display: "block" }} />}
       </span>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
         {showName && (

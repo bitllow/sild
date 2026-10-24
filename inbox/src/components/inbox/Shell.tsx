@@ -40,7 +40,7 @@ export const Shell = observer(function Shell() {
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/assets/sild-mark-tile.svg" width={34} alt="Sild" style={{ borderRadius: 10, marginBottom: 8 }} />
+        <img src="/assets/sild-mark-tile.png" width={34} alt="Sild" style={{ borderRadius: 10, marginBottom: 8 }} />
         {nav.includes("triage") && (
           <button
             data-testid="triage-nav"

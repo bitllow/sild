@@ -241,7 +241,7 @@ function DeniedScreen({ denied, host }: { denied: Denied; host: string }) {
   return (
     <Centered width={460}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/assets/sild-mark-tile.svg" width={40} alt="" style={{ borderRadius: 11 }} />
+      <img src="/assets/sild-mark-tile.png" width={40} alt="" style={{ borderRadius: 11 }} />
       <div>
         <h1 style={{ fontSize: 22, letterSpacing: "-0.02em", margin: 0 }}>You don&apos;t have access to support</h1>
         <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--text-secondary)", marginTop: 6, textWrap: "pretty" }}>
