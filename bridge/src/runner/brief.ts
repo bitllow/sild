@@ -15,7 +15,7 @@ export function brief(ctx: BriefContext): string {
 
 What you can read
 - The product's source code, read-only, under ${ctx.srcDir}. Use Read, Grep and Glob.
-- Data delivered for this conversation, under ${ctx.dataDir}. Nothing outside these two places is readable.${ctx.confluence ? `
+- Data delivered for this conversation and files the requester attaches, under ${ctx.dataDir}. Nothing outside these two places is readable.${ctx.confluence ? `
 - The company's Confluence, read-only, through the confluence tools: search it for runbooks and product docs.` : ''}
 
 Getting data

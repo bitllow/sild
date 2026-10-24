@@ -5,8 +5,9 @@ import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { AlertIcon, Badge, Button, CheckIcon, ComposerBar, MessageBubble, Spinner, StatusPill, Textarea } from "@/components/ds";
 import type { Message, Step } from "@sild/client";
-import { clockTime } from "@/store/map";
+import { clockTime, mapAttachments } from "@/store/map";
 import type { TriageConversation, TriageStore } from "@/store/triage";
+import { PendingAttachments, useFilePicker } from "./PendingAttachments";
 import {
   TRIAGE_PILL,
   describeRequest,
@@ -147,6 +148,8 @@ function AssistantBlock({ showName, time, children }: { showName: boolean; time?
 }
 
 const DescribeForm = observer(function DescribeForm({ t }: { t: TriageStore }) {
+  const picker = useFilePicker(t.atts);
+  const empty = !t.composer.trim() && t.atts.pending.length === 0;
   return (
     <div style={card}>
       <Textarea
@@ -157,8 +160,13 @@ const DescribeForm = observer(function DescribeForm({ t }: { t: TriageStore }) {
         onChange={(e) => t.setComposer(e.target.value)}
         placeholder="e.g. A driver hasn't received new trips since 8:00"
       />
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <Button size="sm" onClick={() => void t.send()} disabled={!t.composer.trim()} loading={t.sending} data-testid="triage-send">
+      <PendingAttachments atts={t.atts} />
+      {picker.input}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <Button size="sm" variant="secondary" onClick={picker.open} data-testid="triage-attach">
+          Attach files
+        </Button>
+        <Button size="sm" onClick={() => void t.send()} disabled={empty || t.atts.isUploading} loading={t.sending} data-testid="triage-send">
           Send to assistant
         </Button>
       </div>
@@ -201,6 +209,7 @@ function threadItems(t: TriageStore, c: TriageConversation, own: boolean): React
           author={own ? undefined : owner}
           time={clockTime(m.created_at)}
           body={m.body}
+          attachments={mapAttachments(m)}
         />
       );
     else
@@ -211,6 +220,7 @@ function threadItems(t: TriageStore, c: TriageConversation, own: boolean): React
           author={m.author_name || "Support"}
           time={clockTime(m.created_at)}
           body={m.body}
+          attachments={mapAttachments(m)}
           internal={m.visibility === "internal"}
         />
       );
@@ -236,6 +246,7 @@ export const TriageThread = observer(function TriageThread() {
   const t = useStore().triage;
   const c = t.active;
   const scroller = useRef<HTMLDivElement>(null);
+  const picker = useFilePicker(t.atts);
   const last = c?.messages[c.messages.length - 1];
 
   useEffect(() => {
@@ -281,12 +292,16 @@ export const TriageThread = observer(function TriageThread() {
               </Button>
             </div>
           )}
+          <PendingAttachments atts={t.atts} />
+          {picker.input}
           <ComposerBar
             value={t.composer}
             onChange={(v) => t.setComposer(v)}
             onSend={() => void t.send()}
+            onAttach={picker.open}
             placeholder="Ask a follow-up question…"
-            disabled={t.sending}
+            canSendEmpty={t.atts.pending.length > 0}
+            disabled={t.sending || t.atts.isUploading}
           />
         </>
       );

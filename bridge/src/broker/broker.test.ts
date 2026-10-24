@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { BrokerEvent } from '../contracts.ts';
 import { startFakeAdapter, type FakeAdapter } from '../../fake-adapter/server.ts';
 import { AdapterClient } from '../adapter/client.ts';
+import { DEFAULT_FILE_LIMITS, FileStore } from '../adapter/files.ts';
 import { FakeRouter } from '../router/fake.ts';
 import type { Router } from '../router/router.ts';
 import { createBroker, type Broker, type BrokerLimits } from './broker.ts';
@@ -28,7 +29,7 @@ after(async () => {
 });
 
 function setup(limits: Partial<BrokerLimits> = {}, router: Router = new FakeRouter()) {
-  const adapter = new AdapterClient({ url: fake.url, secret: SECRET, publicKey: fake.publicKey, workRoot: root, allowInsecureLocal: true });
+  const adapter = new AdapterClient({ url: fake.url, secret: SECRET, publicKey: fake.publicKey, files: new FileStore(root, DEFAULT_FILE_LIMITS), allowInsecureLocal: true });
   const broker = createBroker({ adapter, router, limits });
   open.push(broker);
   const events: BrokerEvent[] = [];

@@ -1,4 +1,4 @@
-import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DeliveredFile } from '../contracts.ts';
 
@@ -24,7 +24,18 @@ const EXT: Record<string, string> = {
   'text/csv': 'csv',
   'text/markdown': 'md',
   'application/x-ndjson': 'ndjson',
+  'application/pdf': 'pdf',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
 };
+const NAME_EXT = /\.([a-z0-9]{1,8})$/i;
+
+// The session's Read tool picks how to open a file by its extension.
+function extension(mime: string, name: string): string {
+  return EXT[mime] ?? NAME_EXT.exec(name)?.[1].toLowerCase() ?? 'bin';
+}
 
 export function safeConv(conv: string): string {
   if (!CONV.test(conv)) throw new Error('bad conversation id');
@@ -92,6 +103,8 @@ export class FileStore {
 
     const data = this.dataDir(conv);
     const final = path.join(data, requestId);
+    const kept = await stored(final);
+    if (kept) return kept;
     const tmp = path.join(data, `.tmp-${requestId}`);
     await rm(tmp, { recursive: true, force: true });
     await mkdir(tmp, { recursive: true });
@@ -99,7 +112,7 @@ export class FileStore {
     const manifest = [];
     for (const [i, f] of files.entries()) {
       const mime = MIME.test(f.mime) ? f.mime.toLowerCase() : 'application/octet-stream';
-      const file = `${i + 1}.${EXT[mime] ?? 'bin'}`;
+      const file = `${i + 1}.${extension(mime, f.name)}`;
       // The runner container may run as another uid; the directory is this conversation's alone.
       await writeFile(path.join(tmp, file), f.data, { mode: 0o644 });
       out.push({ path: path.join(final, file), name: f.name, mime, size: f.data.length });
@@ -138,6 +151,17 @@ export class FileStore {
     this.#used.set(conv, used);
     return used;
   }
+}
+
+// A write already made under this id, replayed after a restart.
+async function stored(dir: string): Promise<DeliveredFile[] | null> {
+  let manifest: { files: { file: string; name: string; mime: string; size: number }[] };
+  try {
+    manifest = JSON.parse(await readFile(path.join(dir, 'manifest.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  return manifest.files.map((f) => ({ path: path.join(dir, f.file), name: f.name, mime: f.mime, size: f.size }));
 }
 
 async function du(dir: string): Promise<number> {

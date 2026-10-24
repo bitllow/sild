@@ -1,8 +1,9 @@
+import type { FileStore, IncomingFile } from '../adapter/files.ts';
 import { isRecord } from '../adapter/kit/schema.ts';
 import * as sild from '@sild/client';
 import {
-  ApiError, BEFORE_FIRST_MESSAGE, pages,
-  type Conversation, type ConversationQuery, type Envelope, type Http, type Message, type NewMessage, type Part, type Step,
+  ApiError, BEFORE_FIRST_MESSAGE, pages, signedUrl,
+  type Attachment, type Conversation, type ConversationQuery, type Envelope, type Http, type Message, type NewMessage, type Part, type Step,
 } from '@sild/client';
 import type { BrokerEvent, InfoBroker } from '../contracts.ts';
 import { errText, truncateUtf8 } from '../util.ts';
@@ -24,6 +25,7 @@ const REQUESTS_PER_TURN = 3;
 // Queued conversations told their place while every slot is held.
 const WAITING_NOTICES = 20;
 const TYPING_EVERY_MS = 4_000;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
 const PART_TEXT_MAX_BYTES = 1024;
 const NOT_FINISHED = "I couldn't finish looking into this. Send a message to try again.";
 const UNAVAILABLE = 'The assistant is unavailable right now. Please try again later.';
@@ -71,6 +73,7 @@ export class SlotManager {
   private readonly me: string;
   private readonly runner: SessionRunner;
   private readonly broker: InfoBroker;
+  private readonly files: FileStore;
   private readonly cfg: SlotConfig;
   private readonly log: Log;
 
@@ -86,11 +89,12 @@ export class SlotManager {
   private unsubscribe?: () => void;
   private stopped = false;
 
-  constructor(http: Http, me: string, runner: SessionRunner, broker: InfoBroker, cfg: SlotConfig) {
+  constructor(http: Http, me: string, runner: SessionRunner, broker: InfoBroker, files: FileStore, cfg: SlotConfig) {
     this.http = http;
     this.me = me;
     this.runner = runner;
     this.broker = broker;
+    this.files = files;
     this.cfg = cfg;
     this.log = cfg.log;
   }
@@ -387,10 +391,35 @@ export class SlotManager {
         this.state(h.conv).seen = m.id;
         return;
       }
+      const attached = await this.attachments(h.conv, m);
       if (h.released) return;
-      this.push(h, requesterMessage(text));
+      this.push(h, requesterMessage(text) + attached);
       this.state(h.conv).seen = m.id;
     });
+  }
+
+  // Requester files land in the conversation's data directory; the session is told where.
+  private async attachments(conv: string, m: Message): Promise<string> {
+    if (!m.attachments?.length) return '';
+    try {
+      const incoming = await Promise.all(m.attachments.map((a) => this.download(a)));
+      const saved = await this.files.write(conv, m.id, { source: 'requester', summary: 'attached by the requester' }, incoming);
+      return saved.map((f) => `\nThe requester attached ${JSON.stringify(clip(f.name))} (${f.mime}, ${f.size} bytes): ${f.path}`).join('');
+    } catch (e) {
+      this.log('attachments failed', { conv, message: m.id, error: errText(e) });
+      return `\nThe requester attached ${m.attachments.length} file(s) that could not be stored: ${clip(errText(e))}`;
+    }
+  }
+
+  private async download(a: Attachment): Promise<IncomingFile> {
+    const limit = this.files.limits.bytesPerDelivery;
+    if (!a.url) throw new Error('an attachment has no download link');
+    if (a.size_bytes > limit) throw new Error(`an attachment is larger than ${limit} bytes`);
+    const res = await fetch(signedUrl(this.http, a.url).url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`attachment download failed: ${res.status}`);
+    const data = Buffer.from(await res.arrayBuffer());
+    if (data.length > limit) throw new Error(`an attachment is larger than ${limit} bytes`);
+    return { name: a.filename, mime: a.mime_type, data };
   }
 
   private enqueue(h: Held, text: string): void {

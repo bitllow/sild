@@ -98,11 +98,13 @@ export const issueUpload = (http: Http, file: { mime_type: string; size_bytes: n
   http.post<UploadGrant>('/v1/uploads', file);
 
 // The local dev backend signs URLs on its configured public origin; route them
-// through this client's base instead so uploads work from any host.
-export function uploadUrl(http: Http, grant: UploadGrant): { url: string; local: boolean } {
-  const at = grant.upload_url.indexOf('/v1/uploads/local/');
-  return at < 0 ? { url: grant.upload_url, local: false } : { url: http.baseUrl + grant.upload_url.slice(at), local: true };
+// through this client's base instead so they work from any host.
+export function signedUrl(http: Http, url: string): { url: string; local: boolean } {
+  const at = url.indexOf('/v1/uploads/local/');
+  return at < 0 ? { url, local: false } : { url: http.baseUrl + url.slice(at), local: true };
 }
+
+export const uploadUrl = (http: Http, grant: UploadGrant) => signedUrl(http, grant.upload_url);
 
 // With appId the read is anonymous: styling a launcher must not mint a user.
 export const activeBrand = (http: Http, appId?: string) =>

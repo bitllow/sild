@@ -17,6 +17,7 @@ type FakeConv = {
 export class FakeSild {
   readonly convs = new Map<string, FakeConv>();
   readonly requests: string[] = [];
+  readonly blobs = new Map<string, Buffer>();
   url = '';
   private seq = 0;
   private server?: Server;
@@ -62,6 +63,20 @@ export class FakeSild {
     return m;
   }
 
+  // A requester message with files; each is served at a signed local URL.
+  sayWithFiles(conv: string, text: string, files: { name: string; mime: string; data: Buffer }[]): Message {
+    const m = this.say(conv, text);
+    m.attachments = files.map((f) => {
+      const key = `t_1/${this.id('obj')}/${f.name}`;
+      this.blobs.set(key, f.data);
+      return {
+        object_key: key, disposition: 'attachment', mime_type: f.mime, size_bytes: f.data.length, filename: f.name,
+        url: `http://public.invalid/v1/uploads/local/${key}?sig=1`,
+      };
+    });
+    return m;
+  }
+
   // A message the bot posted earlier, e.g. before a restart.
   botSaid(conv: string, text: string, parts?: Part[]): Message {
     return this.addMessage(this.conv(conv), { sender_kind: 'bot', internal_actor_id: BOT, body: text, parts });
@@ -95,6 +110,14 @@ export class FakeSild {
     const url = new URL(req.url ?? '/', 'http://x');
     const method = req.method ?? 'GET';
     this.requests.push(`${method} ${url.pathname}`);
+    // The signature is the credential, as in Sild.
+    if (method === 'GET' && url.pathname.startsWith('/v1/uploads/local/')) {
+      const blob = this.blobs.get(decodeURIComponent(url.pathname.slice('/v1/uploads/local/'.length)));
+      if (!blob || url.searchParams.get('sig') !== '1') return send(res, 404, err('not found'));
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      res.end(blob);
+      return;
+    }
     if (req.headers.authorization !== 'Bearer sild_live_test') return send(res, 401, err('unauthorized'));
     const body = method === 'GET' ? {} : await readJSON(req);
     const parts = url.pathname.split('/').filter(Boolean);

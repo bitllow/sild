@@ -1,6 +1,6 @@
 import { createHash, type KeyObject } from 'node:crypto';
 import type { DeliveredFile, IntegratorInstructions, Source } from '../contracts.ts';
-import { DEFAULT_FILE_LIMITS, FileStore, nameError, safeConv, type FileLimits, type IncomingFile } from './files.ts';
+import { nameError, safeConv, type FileStore, type IncomingFile } from './files.ts';
 import { checkSchema, isRecord } from './kit/schema.ts';
 import { signRequest } from './kit/hmac.ts';
 import { loadPublicKey, openDelivery } from './kit/jws.ts';
@@ -13,10 +13,10 @@ export type AdapterClientConfig = {
   url: string; // the adapter's registered base URL
   secret: string;
   publicKey: string; // pinned Ed25519 key, base64url raw or PEM
-  workRoot: string;
+  // Shared with the slot manager, which stores requester attachments in the same budget.
+  files: FileStore;
   // Permits http:// to localhost / 127.0.0.1 / ::1. Local development only.
   allowInsecureLocal?: boolean;
-  limits?: Partial<FileLimits>;
   catalogTtlMs?: number;
   instructionsTtlMs?: number;
   timeoutMs?: number;
@@ -57,7 +57,7 @@ export class AdapterClient {
     this.#cfg = cfg;
     this.#base = new URL(cfg.url.endsWith('/') ? cfg.url : `${cfg.url}/`);
     this.#key = loadPublicKey(cfg.publicKey);
-    this.#files = new FileStore(cfg.workRoot, { ...DEFAULT_FILE_LIMITS, ...cfg.limits });
+    this.#files = cfg.files;
     this.#resolve = cfg.resolve ?? systemResolver;
     this.#log = cfg.log ?? (() => {});
   }

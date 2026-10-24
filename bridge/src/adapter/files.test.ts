@@ -24,6 +24,20 @@ describe('FileStore', () => {
     assert.equal(manifest.summary, 'sum');
     assert.equal(statSync(out[0]!.path).mode & 0o777, 0o644);
   });
+  test('keeps an extension the session can open: by mime, else from the name', async () => {
+    const store = new FileStore(root, { filesPerDelivery: 5, bytesPerDelivery: 100, bytesPerConversation: 1000 });
+    const out = await store.write('c-ext', 'req_00000003', { source: 's', summary: '' }, [
+      file('a.pdf', 1, 'application/pdf'), file('b.LOG', 1, 'application/octet-stream'), file('c', 1, 'application/octet-stream'),
+    ]);
+    assert.deepEqual(out.map((f) => path.basename(f.path)), ['1.pdf', '2.log', '3.bin']);
+  });
+  test('a repeated write under the same id returns what was stored', async () => {
+    const store = new FileStore(root, { filesPerDelivery: 5, bytesPerDelivery: 100, bytesPerConversation: 1000 });
+    const first = await store.write('c-replay', 'req_00000004', { source: 's', summary: '' }, [file('a.json', 4)]);
+    const again = await store.write('c-replay', 'req_00000004', { source: 's', summary: '' }, [file('a.json', 4)]);
+    assert.deepEqual(again, first);
+    assert.equal(await store.remaining('c-replay'), 996);
+  });
   test('enforces files and bytes per delivery', async () => {
     const store = new FileStore(root, { filesPerDelivery: 1, bytesPerDelivery: 10, bytesPerConversation: 1000 });
     await assert.rejects(store.write('c2', 'req_00000002', { source: 's', summary: '' }, [file('a', 1), file('b', 1)]), /too many files/);

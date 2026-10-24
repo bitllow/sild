@@ -1,4 +1,5 @@
 import { AdapterClient } from './adapter/client.ts';
+import type { FileStore } from './adapter/files.ts';
 import { createBroker } from './broker/broker.ts';
 import { ConfigError, loadSecret, type Config } from './config.ts';
 import type { InfoBroker } from './contracts.ts';
@@ -38,13 +39,13 @@ export function loadDataConfig(env: NodeJS.ProcessEnv = process.env): DataConfig
 }
 
 // The router reaches the model through the bridge's own proxy, so it holds only the proxy token.
-export function makeBroker(data: DataConfig, ctx: { config: Config; modelBaseUrl: string; modelToken: string; log: Log }): InfoBroker {
+export function makeBroker(data: DataConfig, ctx: { config: Config; files: FileStore; modelBaseUrl: string; modelToken: string; log: Log }): InfoBroker {
   const log = (msg: string) => ctx.log(msg);
   const adapter = new AdapterClient({
     url: data.adapterUrl,
     secret: data.adapterSecret,
     publicKey: data.adapterPublicKey,
-    workRoot: ctx.config.workRoot,
+    files: ctx.files,
     allowInsecureLocal: data.allowInsecureLocal,
     log,
   });

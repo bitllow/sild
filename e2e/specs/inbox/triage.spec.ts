@@ -52,10 +52,15 @@ test.describe("tech support triage", () => {
     await marko.getByTestId("triage-nav").click();
     await marko.getByTestId("triage-new").click();
     await marko.getByPlaceholder("e.g. A driver hasn't received new trips since 8:00").fill(problem);
+    const log = `${uid("alerts")}.csv`;
+    await marko.locator('input[type="file"]').setInputFiles({ name: log, mimeType: "text/csv", buffer: Buffer.from("ts,event\n08:01,push_token_invalid\n") });
+    await expect(marko.getByText(log)).toBeVisible();
     await marko.getByTestId("triage-send").click();
 
     const conv = await queuedWith(bot, problem);
     expect((await bot.patch(`/v1/assignments/${conv.assignment!.id}`, { data: { assignee_actor_id: "me" } })).status()).toBe(200);
+    const sent = (await (await bot.get(`/v1/conversations/${conv.id}/messages`)).json()) as { items: { attachments: { filename: string; url?: string }[] }[] };
+    expect(sent.items.flatMap((m) => m.attachments).map((a) => [a.filename, !!a.url]), "the assistant can download the requester's file").toEqual([[log, true]]);
 
     const step = { label: "Checked his phone registration", internal: { source: "driver.devices", params: { driver_id: "drv_2207" } } };
     const steps = await bot.post(`/v1/conversations/${conv.id}/messages`, {

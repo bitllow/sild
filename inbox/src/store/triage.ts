@@ -16,6 +16,7 @@ import {
   type Message,
 } from "@sild/client";
 import { errorText, http, WITH_PROFILES } from "@/api/client";
+import { AttachmentQueue } from "./attachments";
 import { relativeTime } from "./map";
 import { isFromRequester, isTriageActive, requesterOf, triageStatus, type TriageStatus } from "./triageStatus";
 
@@ -73,6 +74,7 @@ export class TriageStore {
   composer = "";
   sending = false;
   error: string | null = null;
+  atts = new AttachmentQueue((msg) => runInAction(() => (this.error = msg)));
   // Message ids whose data requests are expanded.
   openRequests = new Set<string>();
   private listSeq = 0;
@@ -83,6 +85,7 @@ export class TriageStore {
   constructor(private root: TriageRoot) {
     makeAutoObservable<TriageStore, "refreshing" | "refreshAgain" | "statuses">(this, {
       owns: false,
+      atts: false,
       refreshing: false,
       refreshAgain: false,
       statuses: false,
@@ -107,6 +110,7 @@ export class TriageStore {
     this.hasMore = false;
     this.composer = "";
     this.error = null;
+    this.atts.reset();
     this.openRequests.clear();
   }
 
@@ -302,6 +306,7 @@ export class TriageStore {
     this.activeId = id;
     this.composer = "";
     this.error = null;
+    this.atts.reset();
     if (id !== DRAFT_ID) void this.refresh(id);
   };
 
@@ -328,7 +333,7 @@ export class TriageStore {
 
   send = async () => {
     const body = this.composer.trim();
-    if (!body || this.sending) return;
+    if ((!body && this.atts.pending.length === 0) || this.sending || this.atts.isUploading) return;
     this.sending = true;
     this.error = null;
     try {
@@ -343,9 +348,10 @@ export class TriageStore {
         id = conv.id;
       }
       if (!id) return;
-      const msg = await sendMessage(http, id, { body, visibility: "participants", attachments: [] });
+      const msg = await sendMessage(http, id, { body, visibility: "participants", attachments: this.atts.refs() });
       runInAction(() => {
         this.composer = "";
+        this.atts.clear();
         const row = this.rows.find((c) => c.id === id);
         if (row) this.append(row, msg);
       });
@@ -367,6 +373,7 @@ export class TriageStore {
       this.drafting = false;
       this.activeId = null;
       this.composer = "";
+      this.atts.reset();
       this.ensureSelection();
       return;
     }

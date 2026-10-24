@@ -4,12 +4,13 @@ import { useEffect, useRef } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { Avatar, Badge, Banner, Button, ComposerBar, MessageBubble, PanelIcon, StatusPill } from "@/components/ds";
+import { PendingAttachments, useFilePicker } from "./PendingAttachments";
 import { panelStyle } from "./styles";
 
 export const ConversationView = observer(function ConversationView() {
   const store = useStore();
   const active = store.active;
-  const fileRef = useRef<HTMLInputElement>(null);
+  const picker = useFilePicker(store.atts);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const newestId = active?.messages.length ? active.messages[active.messages.length - 1].id : "";
 
@@ -150,44 +151,13 @@ export const ConversationView = observer(function ConversationView() {
           </Banner>
         ) : (
           <>
-            {(store.atts.pending.length > 0 || store.atts.uploading > 0) && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                {store.atts.pending.map((a, i) => (
-                  <span
-                    key={i}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 220, fontSize: 12, color: "var(--text-secondary)", background: "var(--surface-sunken)", border: "1px solid var(--border-default)", borderRadius: 8, padding: "5px 8px" }}
-                  >
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.filename}</span>
-                    <button
-                      onClick={() => store.atts.remove(i)}
-                      aria-label="Remove attachment"
-                      style={{ border: 0, background: "transparent", cursor: "pointer", color: "var(--text-tertiary)", padding: 0, display: "flex", lineHeight: 1 }}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-                {store.atts.uploading > 0 && (
-                  <span style={{ fontSize: 12, color: "var(--text-tertiary)", alignSelf: "center" }}>Uploading…</span>
-                )}
-              </div>
-            )}
-            <input
-              ref={fileRef}
-              type="file"
-              multiple
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const files = Array.from(e.target.files || []);
-                e.target.value = "";
-                if (files.length) void store.atts.attach(files);
-              }}
-            />
+            <PendingAttachments atts={store.atts} />
+            {picker.input}
             <ComposerBar
               value={store.composer}
               onChange={(v) => store.setComposer(v)}
               onSend={store.sendMessage}
-              onAttach={() => fileRef.current?.click()}
+              onAttach={picker.open}
               canSendEmpty={store.atts.pending.length > 0}
               disabled={store.atts.uploading > 0}
               showInternalToggle
