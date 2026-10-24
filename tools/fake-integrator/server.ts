@@ -5,11 +5,13 @@
 // for them (docs/embedded-sign-in.md). Never deploy it.
 
 import { createServer, type IncomingMessage } from "node:http";
-import { generateKeyPairSync, sign, verify } from "node:crypto";
+import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
+import { challenge, check, credentialIds, register, type Ceremony } from "./passkeys.ts";
 
 const PORT = Number(process.env.PORT ?? 4400);
-const INBOX_URL = (process.env.INBOX_URL ?? "http://localhost:3000").replace(/\/$/, "");
-const INBOX_ORIGIN = new URL(INBOX_URL).origin;
+// Unset: the inbox on port 3000 of whatever host this page was opened on, so a phone on the LAN works.
+const INBOX_URL = process.env.INBOX_URL?.replace(/\/$/, "") || undefined;
+const inboxUrl = (req: IncomingMessage) => INBOX_URL ?? `http://${new URL(`http://${req.headers.host ?? "localhost"}`).hostname}:3000`;
 const EMBED_KEY = process.env.EMBED_KEY ?? "emb_dev_fleetline";
 const TOKEN_TTL = Number(process.env.TOKEN_TTL ?? 3600);
 // Matches devValidatorToken in backend/cmd/sild-dev/embed.go.
@@ -115,21 +117,44 @@ createServer(async (req, res) => {
   switch (url.pathname) {
     case "/":
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(page());
+      res.end(page(inboxUrl(req)));
       return;
     case "/token": {
       const persona = PERSONAS[url.searchParams.get("user") ?? "admin"];
       if (!persona) return json(404, { error: `unknown user; one of ${Object.keys(PERSONAS).join(", ")}` });
       return json(200, { ...mint(persona), sub: `${NAMESPACE}.${persona.i}`, persona: persona.name });
     }
+    case "/passkey/register-options":
+    case "/passkey/register":
+    case "/passkey/options":
     case "/step-up": {
-      // A real integrator verifies the passkey assertion here before recording anything.
       if (req.method !== "POST") return json(405, { error: "POST only" });
-      const body = (await readJSON(req).catch(() => null)) as { user?: unknown; conversation?: unknown } | null;
-      const persona = typeof body?.user === "string" ? PERSONAS[body.user] : undefined;
-      if (!persona || typeof body?.conversation !== "string") return json(400, { error: "user and conversation are required" });
-      elevations.set(`${NAMESPACE}.${persona.i}:${body.conversation}`, Date.now() + STEP_UP_TTL_MS);
-      console.log(`step-up → ${NAMESPACE}.${persona.i} approved data access in ${body.conversation} for ${STEP_UP_TTL_MS / 1000}s`);
+      const body = ((await readJSON(req).catch(() => null)) ?? {}) as Record<string, unknown>;
+      const persona = typeof body.user === "string" ? PERSONAS[body.user] : undefined;
+      if (!persona) return json(400, { error: "user is required" });
+      const sub = `${NAMESPACE}.${persona.i}`;
+      // Plain http is a secure context only on localhost, the one place passkeys work here.
+      const host = new URL(`http://${req.headers.host ?? "localhost"}`);
+      const c: Ceremony = { origin: host.origin, rpId: host.hostname };
+      if (url.pathname === "/passkey/register-options") {
+        return json(200, { challenge: challenge(`reg:${sub}`), userId: createHash("sha256").update(sub).digest("base64url"), userName: sub, displayName: persona.name });
+      }
+      if (url.pathname === "/passkey/register") {
+        const why = register(sub, c, body);
+        if (why) return json(400, { error: why });
+        console.log(`passkey registered for ${sub}`);
+        return json(200, { ok: true });
+      }
+      if (typeof body.conversation !== "string") return json(400, { error: "conversation is required" });
+      const purpose = `auth:${sub}:${body.conversation}`;
+      if (url.pathname === "/passkey/options") return json(200, { challenge: challenge(purpose), credentials: credentialIds(sub) });
+      // Someone with a passkey must use it; without one the page falls back to a simulated prompt.
+      if (credentialIds(sub).length) {
+        const why = check(sub, purpose, c, body);
+        if (why) return json(403, { error: why });
+      }
+      elevations.set(`${sub}:${body.conversation}`, Date.now() + STEP_UP_TTL_MS);
+      console.log(`step-up → ${sub} approved data access in ${body.conversation} for ${STEP_UP_TTL_MS / 1000}s (${credentialIds(sub).length ? "passkey" : "simulated"})`);
       return json(200, { ok: true });
     }
     case "/elevation": {
@@ -155,7 +180,7 @@ createServer(async (req, res) => {
   json(404, { error: "not found" });
 }).listen(PORT, () => {
   const origin = `http://localhost:${PORT}`;
-  console.log(`Fleetline (fake integrator) on ${origin} — embeds ${INBOX_URL}/embed?key=${EMBED_KEY}`);
+  console.log(`Fleetline (fake integrator) on ${origin} — embeds ${INBOX_URL ?? "the inbox on this host's port 3000"}/embed?key=${EMBED_KEY}`);
   console.log(`Validator: POST ${origin}/validate, Authorization: Bearer ${VALIDATOR_TOKEN}`);
   console.log(`\nsild-dev seeds this validator, the embed key and the member links with SILD_DEV_TRIAGE=1.`);
   console.log(`Configure a tenant by hand instead (cd backend):`);
@@ -167,11 +192,11 @@ createServer(async (req, res) => {
   console.log(`  (then restart this server with EMBED_KEY=<printed embed_key>)`);
 });
 
-function page(): string {
+function page(inbox: string): string {
   const personas = JSON.stringify(
     Object.fromEntries(Object.entries(PERSONAS).map(([id, p]) => [id, { ...p, sub: `${NAMESPACE}.${p.i}` }])),
   );
-  const src = `${INBOX_URL}/embed?key=${encodeURIComponent(EMBED_KEY)}`;
+  const src = `${inbox}/embed?key=${encodeURIComponent(EMBED_KEY)}`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -223,7 +248,7 @@ function page(): string {
   </div>
 </div>
 <script>
-  const INBOX_ORIGIN = ${JSON.stringify(INBOX_ORIGIN)};
+  const INBOX_ORIGIN = ${JSON.stringify(new URL(inbox).origin)};
   const SRC = ${JSON.stringify(src)};
   const PERSONAS = ${personas};
   const frame = document.getElementById("sild");
@@ -252,19 +277,61 @@ function page(): string {
     if (e.data && e.data.type === "sild:step-up" && typeof e.data.conversation === "string") stepUp(e.data);
   });
 
-  // A real host calls navigator.credentials.get() against its own backend here.
+  // Passkeys need a secure context: https, or plain http on localhost.
+  const PASSKEYS = window.isSecureContext && !!window.PublicKeyCredential;
+  const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const fromB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+  const post = async (path, body) => (await fetch(path, { method: "POST", body: JSON.stringify({ user: current, ...body }) })).json();
+
+  async function createPasskey() {
+    const o = await post("/passkey/register-options", {});
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: fromB64u(o.challenge), rp: { id: location.hostname, name: "Fleetline (dev)" },
+      user: { id: fromB64u(o.userId), name: o.userName, displayName: o.displayName },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      authenticatorSelection: { residentKey: "preferred", userVerification: "required" }, attestation: "none", timeout: 60000,
+    } });
+    const r = cred.response;
+    const done = await post("/passkey/register", {
+      id: cred.id, alg: r.getPublicKeyAlgorithm(), publicKey: b64u(r.getPublicKey()),
+      clientDataJSON: b64u(r.clientDataJSON), authenticatorData: b64u(r.getAuthenticatorData()),
+    });
+    if (!done.ok) throw new Error(done.error);
+  }
+
+  async function usePasskey(conversation) {
+    let o = await post("/passkey/options", { conversation });
+    if (!o.credentials.length) {
+      await createPasskey();
+      o = await post("/passkey/options", { conversation });
+    }
+    const a = await navigator.credentials.get({ publicKey: {
+      challenge: fromB64u(o.challenge), rpId: location.hostname, userVerification: "required", timeout: 60000,
+      allowCredentials: o.credentials.map((id) => ({ type: "public-key", id: fromB64u(id) })),
+    } });
+    const r = a.response;
+    const done = await post("/step-up", {
+      conversation, id: a.id, clientDataJSON: b64u(r.clientDataJSON), authenticatorData: b64u(r.authenticatorData), signature: b64u(r.signature),
+    });
+    if (!done.ok) throw new Error(done.error);
+    return true;
+  }
+
   function stepUp({ conversation, reason }) {
     const veil = document.createElement("div");
     veil.className = "veil";
     veil.innerHTML = '<div class="sheet"><b>Confirm with your passkey</b>' +
-      '<span style="color:#475569">Simulated. The support assistant asks to check:</span>' +
+      '<span style="color:#475569">' + (PASSKEYS
+        ? "Fleetline asks for your passkey (the first time, it creates one). The support assistant asks to check:"
+        : "Simulated: passkeys need https or localhost. The support assistant asks to check:") + "</span>" +
       '<span id="why" style="font-size:13px"></span>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end"><button id="no">Cancel</button><button class="go" id="yes">Use passkey</button></div></div>';
     veil.querySelector("#why").textContent = String(reason || "");
     document.body.appendChild(veil);
     const answer = async (ok) => {
       veil.remove();
-      if (ok) ok = (await fetch("/step-up", { method: "POST", body: JSON.stringify({ user: current, conversation }) })).ok;
+      if (ok && PASSKEYS) ok = await usePasskey(conversation).catch((e) => (console.warn("passkey:", e), false));
+      else if (ok) ok = (await post("/step-up", { conversation })).ok === true;
       frame.contentWindow.postMessage({ type: "sild:step-up-done", conversation, ok }, INBOX_ORIGIN);
     };
     veil.querySelector("#yes").addEventListener("click", () => void answer(true));

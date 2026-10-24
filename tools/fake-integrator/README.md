@@ -46,19 +46,31 @@ and links the three members above.
   tokens without a staff role (admin, taxiCompanyAdmin, dispatcher) with
   `role_not_allowed`; otherwise answers `active` with `sub` = `{n}.{i}`.
 
+## Step-up with a passkey
+
+With `STEP_UP=1 scripts/triage-local.sh`, data waits for the requester's
+approval. Approve in the Fleetline page and it asks for a real passkey (Touch
+ID, a password manager, or a phone via QR). The first time, it creates one for
+the persona. It records the approval for 15 minutes (`STEP_UP_TTL`), and the
+fake adapter checks it at `GET /elevation`. Passkeys need a secure context: on
+`http://localhost:4400` they work. On a LAN address over plain http the page
+falls back to a labelled simulated prompt, since a passkey also cannot belong to
+a raw IP address. Passkeys live in memory, so restart and create one again.
+
 ## Environment
 
 | var                    | default                         |                                         |
 |------------------------|---------------------------------|-----------------------------------------|
 | `PORT`                 | `4400`                          | host origin is `http://localhost:$PORT` |
-| `INBOX_URL`            | `http://localhost:3000`         | where the inbox runs                    |
+| `INBOX_URL`            | port 3000 of the page's host    | where the inbox runs                    |
 | `EMBED_KEY`            | `emb_dev_fleetline`             | the tenant's embed key                  |
 | `TOKEN_TTL`            | `3600`                          | seconds; lower it to watch re-exchange  |
 | `FAKE_VALIDATOR_TOKEN` | `fleetline-dev-validator-token` | the API token Sild must present         |
 
-A host on another port also needs `SILD_DEV_EMBED_ORIGIN=http://localhost:<port>`
-for sild-dev (the validator URL follows it); a different validator token needs
-`SILD_DEV_EMBED_VALIDATOR_TOKEN`.
+A host on another port or address also needs its origin in sild-dev's
+`SILD_DEV_EMBED_ORIGIN`, a comma-separated list whose first entry also gives the
+validator URL (`scripts/triage-local.sh` adds this machine's LAN address). A
+different validator token needs `SILD_DEV_EMBED_VALIDATOR_TOKEN`.
 
 ## Configuring a tenant by hand
 

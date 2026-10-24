@@ -108,8 +108,11 @@ fi
 echo "starting sild-dev on :${SILD_PORT}…"
 (cd "$ROOT/backend" && go build -o "$STATE/sild-dev" ./cmd/sild-dev)
 # exec, so the pid the cleanup kills is the server itself.
+# The fake integrator may also be opened from this machine's LAN address.
+lan_ip="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
 (cd "$STATE" && exec env SILD_HTTP_ADDR=":$SILD_PORT" DB_DSN="$STATE/sild.db" \
   SILD_DEV_TRIAGE=1 SILD_DEV_TRIAGE_KEY_FILE="$STATE/assistant.key" \
+  SILD_DEV_EMBED_ORIGIN="http://localhost:4400${lan_ip:+,http://$lan_ip:4400}" \
   ./sild-dev >"$STATE/logs/sild.log" 2>&1) &
 pids+=($!)
 wait_for "http://localhost:$SILD_PORT/healthz" sild-dev "$STATE/logs/sild.log"
@@ -153,7 +156,10 @@ wait_for "http://localhost:$INBOX_PORT" inbox "$STATE/logs/inbox.log"
 
 # The dev seed registers this host's validator and origin at :4400.
 echo "starting the fake integrator on :4400…"
-(cd "$ROOT/tools/fake-integrator" && exec env INBOX_URL="http://localhost:$INBOX_PORT" \
+# Unset, the integrator frames the inbox on the host it was opened on, so the LAN address works too.
+inbox_url=""
+[ "$INBOX_PORT" = 3000 ] || inbox_url="http://localhost:$INBOX_PORT"
+(cd "$ROOT/tools/fake-integrator" && exec env INBOX_URL="$inbox_url" \
   node server.ts >"$STATE/logs/integrator.log" 2>&1) &
 pids+=($!)
 wait_for "http://localhost:4400" "fake integrator" "$STATE/logs/integrator.log"

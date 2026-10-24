@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/store"
@@ -23,12 +24,13 @@ func devSeedEmbed(ctx context.Context, st store.Store, svc *domain.Service, tena
 	if os.Getenv("SILD_DEV_EMBED") == "0" {
 		return
 	}
-	origin := envOr("SILD_DEV_EMBED_ORIGIN", "http://localhost:4400")
-	validator := envOr("SILD_DEV_EMBED_VALIDATOR_URL", origin+"/validate")
+	// A comma-separated list; the first also serves the validator, which must stay on loopback.
+	origins := strings.Split(envOr("SILD_DEV_EMBED_ORIGIN", "http://localhost:4400"), ",")
+	validator := envOr("SILD_DEV_EMBED_VALIDATOR_URL", origins[0]+"/validate")
 	token := envOr("SILD_DEV_EMBED_VALIDATOR_TOKEN", devValidatorToken)
 	if _, err := svc.SetIdentityProvider(ctx, tenantID, domain.IdentityProviderInput{
 		ValidatorURL: validator, ValidatorToken: &token,
-		AllowedOrigins: []string{origin}, EmbedKey: devEmbedKey,
+		AllowedOrigins: origins, EmbedKey: devEmbedKey,
 	}); err != nil {
 		log.Printf("dev seed embed: %v", err)
 		return
@@ -56,7 +58,7 @@ func devSeedEmbed(ctx context.Context, st store.Store, svc *domain.Service, tena
 			log.Printf("dev seed embed link %s: %v", email, err)
 		}
 	}
-	log.Printf("│ embedded  : key %s, framed by %s, validated by %s (tools/fake-integrator)", devEmbedKey, origin, validator)
+	log.Printf("│ embedded  : key %s, framed by %s, validated by %s (tools/fake-integrator)", devEmbedKey, strings.Join(origins, " "), validator)
 }
 
 func envOr(key, fallback string) string {
