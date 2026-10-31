@@ -45,11 +45,7 @@ func LoadChannelInputs(ctx context.Context, st store.Store, tenantID, adminID st
 }
 
 // AgentChannels is the server-side channel set of an inbox connection (§5.2),
-// nil when policy admits nothing. Peer reach comes from policy.Scope; queue
-// channels from the same queue scope REST's ReachesQueue decides with.
-//
-// The set does not grow with the queue, so a conversation created after
-// connect needs no re-subscription.
+// nil when policy admits nothing. It does not grow with new conversations.
 func AgentChannels(p *principal.Principal, in ChannelInputs) map[string]bool {
 	scope := policy.Scope(p, policy.ConversationsList)
 	if scope.DenyAll() {

@@ -4,7 +4,6 @@ import {
   connect,
   createConversation,
   createHttp,
-  issueUpload,
   listConversations,
   listMessages,
   messagesSincePage,
@@ -14,7 +13,7 @@ import {
   sseUrl,
   translationBundle,
   translationManifest,
-  uploadUrl,
+  uploadFile,
   type ActiveBrand,
   type Envelope,
   type Http,
@@ -530,21 +529,8 @@ export class SildClient implements WidgetClient {
     void this.loadConversations();
   }
 
-  // upload sends a file direct to the bucket via a signed PUT (§11) and returns a
-  // reference to attach to a message. Images default to inline (rendered in the
-  // thread); everything else is an attachment (listed below the message).
-  async upload(file: File): Promise<PendingAttachment> {
-    const mime = file.type || "application/octet-stream";
-    const grant = await issueUpload(this.http, { mime_type: mime, size_bytes: file.size, filename: file.name });
-    const putUrl = uploadUrl(this.http, grant).url;
-    const res = await fetch(putUrl, { method: "PUT", body: file, headers: { "Content-Type": mime } });
-    if (!res.ok) throw new Error("upload failed");
-    return {
-      objectKey: grant.object_key,
-      disposition: mime.startsWith("image/") ? "inline" : "attachment",
-      mimeType: mime,
-      filename: file.name,
-    };
+  upload(file: File): Promise<PendingAttachment> {
+    return uploadFile(this.http, file);
   }
 
   async send(text: string, attachments: PendingAttachment[] = []) {

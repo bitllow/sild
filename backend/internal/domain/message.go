@@ -284,7 +284,7 @@ func (s *Service) UpdateMessageParts(ctx context.Context, tenantID, convID, msgI
 		return nil, mapStoreErr(err)
 	}
 	if conv.Status == models.ConversationClosed {
-		return nil, conflict("conversation_closed", "the conversation is closed")
+		return nil, conflict(CodeConversationClosed, "the conversation is closed")
 	}
 	parts, err := validateParts(raw, models.SenderBot)
 	if err != nil {

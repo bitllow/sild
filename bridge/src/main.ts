@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { connect, createHttp, principal as getPrincipal, realtimeToken, requesterAssertion, type Http } from '@sild/client';
+import { connect, createHttp, principal as getPrincipal, realtimeToken, requesterAssertion } from '@sild/client';
 import { Centrifuge } from 'centrifuge';
 import type { Assert } from './adapter/client.ts';
 import { DEFAULT_FILE_LIMITS, FileStore } from './adapter/files.ts';
@@ -17,8 +17,6 @@ import { JsonStore } from './state.ts';
 import type { Log } from './slots/types.ts';
 
 export type BrokerFactory = (ctx: {
-  config: Config;
-  sild: Http;
   files: FileStore;
   assert: Assert;
   // Where broker and adapter state that outlives the process lives.
@@ -51,7 +49,7 @@ export async function startBridge(cfg: Config, makeBroker: BrokerFactory = () =>
   const files = new FileStore(cfg.workRoot, DEFAULT_FILE_LIMITS);
   const assert = async (conv: string, body: string) => (await requesterAssertion(sild, conv, body)).assertion;
   const stateRoot = path.join(cfg.workRoot, '.bridge');
-  const broker = await makeBroker({ config: cfg, sild, files, assert, stateRoot, modelBaseUrl: `http://127.0.0.1:${proxy.port}`, modelToken: proxyToken, log });
+  const broker = await makeBroker({ files, assert, stateRoot, modelBaseUrl: `http://${cfg.proxy.host}:${proxy.port}`, modelToken: proxyToken, log });
   const runner = new ClaudeSessionRunner({
     workRoot: cfg.workRoot,
     srcDir: cfg.srcDir,

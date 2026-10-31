@@ -49,6 +49,20 @@ describe('FileStore', () => {
     const fresh = new FileStore(root, limits);
     await assert.rejects(fresh.write('c3', 'req_00000005', { source: 's', summary: '' }, [file('a', 3)]), /budget/);
   });
+  test('a replay of what is stored passes a full conversation budget', async () => {
+    const limits = { filesPerDelivery: 5, bytesPerDelivery: 100, bytesPerConversation: 10 };
+    const store = new FileStore(root, limits);
+    await store.write('c5', 'req_00000008', { source: 's', summary: '' }, [file('a', 8)]);
+    await store.admit('c5', 'req_00000008', 1, 8);
+    assert.equal((await store.write('c5', 'req_00000008', { source: 's', summary: '' }, [file('a', 8)])).length, 1);
+    await assert.rejects(store.admit('c5', 'req_00000009', 1, 8), /budget/);
+  });
+  test('a discarded delivery gives its bytes back', async () => {
+    const store = new FileStore(root, { filesPerDelivery: 5, bytesPerDelivery: 100, bytesPerConversation: 10 });
+    await store.write('c6', 'req_00000010', { source: 's', summary: '' }, [file('a', 8)]);
+    await store.discard('c6', 'req_00000010');
+    assert.equal(await store.remaining('c6'), 10);
+  });
   test('refuses an unsafe conversation id', async () => {
     const store = new FileStore(root, { filesPerDelivery: 5, bytesPerDelivery: 100, bytesPerConversation: 1000 });
     await assert.rejects(store.write('../c', 'req_00000006', { source: 's', summary: '' }, []), /conversation/);

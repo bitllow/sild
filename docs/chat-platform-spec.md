@@ -674,7 +674,7 @@ STORAGE_REGION  = <region>        # s3
   message is read. `message_attachments.object_key` is the only stored reference.
 - `disposition` is a render hint, not storage: `inline` → show in the message body; `attachment` →
   list below it. Both point at the same object.
-- Enforce `mime_type`/`size_bytes` limits at upload-URL issuance. Default **10 MB/file**, per-tenant
+- Enforce `mime_type`/`size_bytes` limits at upload-URL issuance. Default **25 MB/file**, per-tenant
   override (`max_attachment_bytes`).
 
 ---

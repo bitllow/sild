@@ -1,6 +1,9 @@
 // JSON shapes as the backend renders them (backend/internal/views and the api
 // handlers that extend those views). Field names are the wire's own.
 
+// client_msg_id prefix of the assistant's waiting notices, which are not answers.
+export const WAIT_PREFIX = 'wait-';
+
 export type SenderKind = 'user' | 'agent' | 'bot' | 'system';
 export type Visibility = 'participants' | 'internal';
 export type Channel = 'app' | 'email';

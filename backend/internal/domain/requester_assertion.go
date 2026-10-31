@@ -152,9 +152,7 @@ func (s *Service) awaitingApproval(ctx context.Context, tenantID, convID string)
 	}
 	var approvedAt time.Time
 	for _, m := range page.Messages {
-		var parts []messagePart
-		if m.SenderKind == models.SenderSystem && json.Unmarshal(m.Parts, &parts) == nil &&
-			len(parts) > 0 && parts[0].Type == "approval" && m.CreatedAt.After(approvedAt) {
+		if m.SenderKind == models.SenderSystem && m.CreatedAt.After(approvedAt) && hasApproval(m.Parts) {
 			approvedAt = m.CreatedAt
 		}
 	}

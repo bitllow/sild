@@ -73,7 +73,6 @@ export class TriageStore {
   filter: TriageFilter = "all";
   loaded = false;
   cursor: string | null = null;
-  hasMore = false;
   loadingMore = false;
   composer = "";
   sending = false;
@@ -113,7 +112,6 @@ export class TriageStore {
     this.filter = "all";
     this.loaded = false;
     this.cursor = null;
-    this.hasMore = false;
     this.composer = "";
     this.error = null;
     this.atts.reset();
@@ -154,7 +152,6 @@ export class TriageStore {
       runInAction(() => {
         this.rows = rows;
         this.cursor = page.has_more ? page.next_cursor : null;
-        this.hasMore = page.has_more;
         this.loaded = true;
         this.ensureSelection();
       });
@@ -168,7 +165,7 @@ export class TriageStore {
   };
 
   loadMore = async () => {
-    if (!this.hasMore || this.loadingMore || !this.cursor) return;
+    if (this.loadingMore || !this.cursor) return;
     const seq = this.listSeq;
     this.loadingMore = true;
     try {
@@ -178,7 +175,6 @@ export class TriageStore {
       runInAction(() => {
         for (const r of rows) if (!this.owns(r.id)) this.rows.push(r);
         this.cursor = page.has_more ? page.next_cursor : null;
-        this.hasMore = page.has_more;
       });
     } catch {
       /* transient; scrolling again retries */
@@ -224,9 +220,7 @@ export class TriageStore {
         // history, or a message that arrived live while this read was in flight — stays.
         const have = new Set(fresh.messages.map((m) => m.id));
         const kept = held.messages.filter((m) => !have.has(m.id));
-        const messages = [...kept, ...fresh.messages].sort((a, b) =>
-          a.created_at === b.created_at ? a.id.localeCompare(b.id) : a.created_at.localeCompare(b.created_at),
-        );
+        const messages = [...kept, ...fresh.messages].sort(byTime);
         Object.assign(held, { ...fresh, messages });
       });
     } catch {

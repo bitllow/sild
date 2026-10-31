@@ -28,7 +28,7 @@ func (s *Service) IssueUpload(ctx context.Context, tenantID string, in IssueUplo
 	}
 	limit := tenant.MaxAttachmentBytes
 	if limit <= 0 {
-		limit = 10 << 20
+		limit = defaultMaxAttachmentBytes
 	}
 	if in.SizeBytes > limit {
 		return nil, invalid("attachment exceeds the tenant size limit")

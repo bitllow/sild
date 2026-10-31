@@ -9,7 +9,7 @@ import (
 
 // defaultMaxAttachmentBytes is the per-file upload cap a new tenant starts with
 // (§11). Set here so the value holds on every dialect, not just via the DDL.
-const defaultMaxAttachmentBytes = 10 << 20
+const defaultMaxAttachmentBytes = 25 << 20
 
 // CreateTenant registers a new tenant (§8).
 func (s *Service) CreateTenant(ctx context.Context, name string) (*models.Tenant, error) {

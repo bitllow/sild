@@ -111,8 +111,7 @@ func (p *Principal) PeerAccess() bool {
 }
 
 // Queues returns the queues an operator reaches, and all=true when every queue
-// is reachable. An agent assignment without a queues dimension keeps the
-// support queue it has always had.
+// is reachable. An agent assignment without a queues dimension reaches support.
 func (p *Principal) Queues() (queues []string, all bool) {
 	if p.Privileged() {
 		return nil, true

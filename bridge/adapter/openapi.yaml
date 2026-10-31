@@ -94,8 +94,8 @@ info:
     | `summary`                    | one line, ≤ 1 KiB UTF-8                       |
     | inline file                  | ≤ 1 MiB decoded; larger files go by `url`     |
     | files per delivery           | bridge-configured, default 10                 |
-    | bytes per delivery           | bridge-configured, default 8 MiB              |
-    | bytes per conversation       | bridge-configured, default 64 MiB             |
+    | bytes per delivery           | bridge-configured, default 32 MiB             |
+    | bytes per conversation       | bridge-configured, default 128 MiB            |
     | request body                 | ≤ 64 KiB                                      |
     | `wait` on `/deliveries`      | ≤ 30 s                                        |
     | `text` of `/instructions`    | ≤ 8 KiB UTF-8                                 |

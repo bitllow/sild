@@ -1,8 +1,5 @@
-// Fleetline: a dev-only host app that embeds the Sild inbox the way an
-// integrator would. It signs tokens shaped like the reference integrator's
-// (ES256; claims i = account id, n = namespace, r = roles; no sub/iss/aud),
-// hands them to the iframe over postMessage, and answers Sild's validator calls
-// for them (docs/embedded-sign-in.md). Never deploy it.
+// Fleetline: a dev-only host app embedding the inbox the way an integrator would
+// (docs/embedded-sign-in.md). Its ES256 tokens carry i, n, r. Never deploy it.
 
 import { createServer, type IncomingMessage } from "node:http";
 import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";

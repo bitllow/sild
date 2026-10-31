@@ -27,7 +27,7 @@ import {
 } from "@/api/admin";
 import { errorText, http, WITH_PROFILES } from "@/api/client";
 import { createRealtime, type Realtime, type RealtimeState } from "@/api/realtime";
-import { putUpload } from "@/api/upload";
+import { uploadFile } from "@/api/upload";
 import { AttachmentQueue } from "./attachments";
 import { PeerStore } from "./peer";
 import { TRIAGE_QUEUE, TriageStore } from "./triage";
@@ -314,19 +314,9 @@ export class RootStore {
       const kinds = scope?.kinds;
       const queues = scope?.queues;
       const reaches = (queue: string) => !!list && (!queues || queues.includes(queue));
-      let memberOnly: boolean;
-      let canStart: boolean;
-      if (scope && (scope.member_only !== undefined || scope.own_queues !== undefined)) {
-        memberOnly = !!scope.member_only;
-        const own = scope.own_queues ?? [];
-        canStart = own.includes(TRIAGE_QUEUE) || own.includes("all");
-      } else {
-        // A backend that predates member_only/own_queues: read the role names.
-        const roles = new Set((me.subject?.assignments ?? []).map((a) => a.role));
-        const operator = roles.has("owner") || roles.has("admin") || roles.has("agent");
-        memberOnly = !operator;
-        canStart = roles.has("requester");
-      }
+      const memberOnly = !!scope?.member_only;
+      const own = scope?.own_queues ?? [];
+      const canStart = own.includes(TRIAGE_QUEUE) || own.includes("all");
       const viewAll = !memberOnly && reaches(TRIAGE_QUEUE);
       this.canReadConversations = !!list;
       this.memberOnly = !!list && memberOnly;
@@ -340,8 +330,6 @@ export class RootStore {
     // route to the peer store — otherwise, until the surface is opened once,
     // peer.owns() is false and peer arrivals are dropped into a queue refetch.
     if (this.peerAccess) void this.peer.loadConversations();
-    // Loaded up front so realtime events have rows to land on.
-    if (this.triageAccess) void this.triage.load();
   };
 
   /** Does this principal hold the grant for `action`? */
@@ -733,17 +721,16 @@ export class RootStore {
   };
 
   private handleEvent = (channel: string, env: Envelope) => {
-    // A profile changed somewhere in the tenant. The event names no one — a
-    // profile is only readable through a conversation this operator's scope
-    // admits — so re-read: the queue for the list, the open thread for the row
-    // that may sit beyond page one.
     // Triage events arrive on the queue channel (operators) or the requester's
     // own conversation channels; a member-only principal receives nothing else.
     const cid = env.conversation_id;
-    if (channel.startsWith("queue:") || (cid && this.triage.owns(cid)) || this.memberOnly) {
+    const triageQueue = channel.startsWith("queue:") && channel.endsWith(`:${TRIAGE_QUEUE}`);
+    if (triageQueue || (cid && this.triage.owns(cid)) || this.memberOnly) {
       this.triage.onRealtime(env);
       return;
     }
+    // The event names no one, and a profile is only readable through a conversation
+    // in scope, so re-read the queue and the open thread.
     if (env.type === "contact.updated") {
       void this.syncQueue();
       void this.refreshActiveMessages();
@@ -1352,7 +1339,7 @@ export class RootStore {
   // Upload a logo/icon to the bucket via the shared signed-PUT flow (same as
   // message attachments) and return the object key to store on the config —
   // assets live in storage, not as base64 in the brand row.
-  uploadBrandAsset = (file: File): Promise<string> => putUpload(file, file.type || "application/octet-stream");
+  uploadBrandAsset = async (file: File): Promise<string> => (await uploadFile(file)).objectKey;
 
   // New brand clones the active config (minus logo) and opens rename immediately.
   // The temp id (no br_ prefix) tells the backend to mint a real id on save.

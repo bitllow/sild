@@ -23,11 +23,12 @@ export type SlotConfig = {
   state?: JsonStore;
 };
 
-const WAIT_PREFIX = 'wait-';
 // Queued conversations told their place while every slot is held.
 const WAITING_NOTICES = 20;
 const TYPING_EVERY_MS = 4_000;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
+// Sild refuses a larger step, and with it every later update to that message.
+const MAX_INTERNAL_BYTES = 1024;
 const PART_TEXT_MAX_BYTES = 1024;
 const NOT_FINISHED = "I couldn't finish looking into this. Send a message to try again.";
 const UNAVAILABLE = 'The assistant is unavailable right now. Please try again later.';
@@ -227,7 +228,7 @@ export class SlotManager {
       // client_msg_id makes the notice idempotent across restarts.
       await sild.sendMessage(this.http, row.id, {
         body: `Waiting for the assistant · ${ahead} ahead`,
-        client_msg_id: WAIT_PREFIX + key,
+        client_msg_id: sild.WAIT_PREFIX + key,
       });
     } catch (e) {
       this.noticed.delete(key);
@@ -262,10 +263,6 @@ export class SlotManager {
         : msgs.slice(msgs.findLastIndex((m) => this.isAnswer(m)) + 1).filter((m) => this.fromRequester(h, m));
 
       h.handle = await this.runner.open(row.id, this.ops(h), this.events(h));
-      if (h.released) {
-        await h.handle.close();
-        return;
-      }
       h.max = setTimeout(() => void this.run(() => this.release(h, 'max_claim')), this.cfg.maxClaimMs);
       this.armIdle(h);
       this.log('claimed', { conv: row.id, assignment: assignmentId, unanswered: unanswered.length });
@@ -282,7 +279,6 @@ export class SlotManager {
 
   private async catchUp(h: Held): Promise<void> {
     const msgs = await sild.messagesSince(this.http, h.conv, h.lastSeen);
-    if (h.released) return;
     for (const m of msgs) {
       h.lastSeen = m.id;
       if (!this.fromRequester(h, m)) continue;
@@ -293,7 +289,7 @@ export class SlotManager {
 
   // Our own decision to give the conversation back. Sild re-queues it on the next requester message.
   private async release(h: Held, why: string): Promise<void> {
-    if (h.released || this.held.get(h.conv) !== h) return;
+    if (h.released) return;
     // Their next message re-queues the conversation; say so rather than go quiet.
     if (h.busy && !h.answered) await this.answer(h, { body: NOT_FINISHED }).catch(() => {});
     await this.free(h, why);
@@ -305,7 +301,8 @@ export class SlotManager {
   // A requester message that landed while the assignment was still ours did not re-queue the conversation.
   private async requeueIfMissed(h: Held): Promise<void> {
     try {
-      const msgs = await sild.messagesSince(this.http, h.conv, h.lastSeen);
+      // lastSeen moves when a message is queued for the session; seen, when the session gets it.
+      const msgs = await sild.messagesSince(this.http, h.conv, this.state(h.conv).seen ?? h.lastSeen);
       if (msgs.some((m) => this.fromRequester(h, m))) await this.requeue(h.conv);
     } catch (e) {
       this.log('release check failed', { conv: h.conv, error: errText(e) });
@@ -333,7 +330,7 @@ export class SlotManager {
     clearTimeout(h.idle);
     clearTimeout(h.max);
     clearTimeout(h.turn);
-    if (this.held.get(h.conv) === h) this.held.delete(h.conv);
+    this.held.delete(h.conv);
     this.log('released', { conv: h.conv, why });
     try {
       await h.handle?.close();
@@ -421,6 +418,7 @@ export class SlotManager {
   private async attachments(conv: string, m: Message): Promise<string> {
     if (!m.attachments?.length) return '';
     try {
+      await this.files.admit(conv, m.id, m.attachments.length, m.attachments.reduce((n, a) => n + a.size_bytes, 0));
       const incoming = await Promise.all(m.attachments.map((a) => this.download(a)));
       const saved = await this.files.write(conv, m.id, { source: 'requester', summary: 'attached by the requester' }, incoming);
       return saved.map((f) => `\nThe requester attached ${JSON.stringify(clip(f.name))} (${f.mime}, ${f.size} bytes): ${f.path}`).join('');
@@ -433,7 +431,6 @@ export class SlotManager {
   private async download(a: Attachment): Promise<IncomingFile> {
     const limit = this.files.limits.bytesPerDelivery;
     if (!a.url) throw new Error('an attachment has no download link');
-    if (a.size_bytes > limit) throw new Error(`an attachment is larger than ${limit} bytes`);
     const res = await fetch(signedUrl(this.http, a.url).url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`attachment download failed: ${res.status}`);
     const data = Buffer.from(await res.arrayBuffer());
@@ -567,8 +564,11 @@ export class SlotManager {
         }
         const msg = st.open ?? { steps: [] };
         st.open = msg;
+        const internal = { source: e.source, params: e.params };
         const index = msg.steps.push({
-          label: clip(e.label), state: 'running', internal: { source: e.source, params: e.params },
+          label: clip(e.label),
+          state: 'running',
+          internal: Buffer.byteLength(JSON.stringify(internal)) > MAX_INTERNAL_BYTES ? { source: e.source } : internal,
         }) - 1;
         st.byRequest.set(e.requestId, { msg, index });
         await this.writeSteps(e.conv, msg);
@@ -697,7 +697,7 @@ export class SlotManager {
   // A message that answered the requester. Waiting notices and steps messages do not.
   private isAnswer(m: Message): boolean {
     if (m.internal_actor_id !== this.me) return false;
-    if (m.client_msg_id?.startsWith(WAIT_PREFIX)) return false;
+    if (m.client_msg_id?.startsWith(sild.WAIT_PREFIX)) return false;
     return !m.parts?.some((p) => p.type === 'steps');
   }
 

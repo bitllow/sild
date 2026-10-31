@@ -3,15 +3,14 @@
 import * as React from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { adminApi, type ApiEmbeddedSession } from "@/api/admin";
+import { adminApi } from "@/api/admin";
 import { ApiError, setBearer } from "@/api/client";
 import { setHostOrigin } from "@/api/host";
 import { CheckIcon, Spinner } from "@/components/ds";
 import { Shell } from "./Shell";
 
-// The inbox framed by a host app. The host posts its own user token; only the
-// tenant's allowed origins are listened to, and the session bearer that token
-// buys lives in memory for the life of the frame.
+// The inbox framed by a host app. Only the tenant's allowed origins are listened
+// to, and the session bearer lives in memory for the life of the frame.
 
 interface Denied {
   reason: string;
@@ -24,12 +23,6 @@ type Phase =
   | { kind: "ready" }
   | { kind: "denied"; denied: Denied }
   | { kind: "error"; message: string };
-
-class DeniedError extends Error {
-  constructor(readonly denied: Denied) {
-    super(denied.message);
-  }
-}
 
 // Ask the host for a fresh token this long before the session ends.
 const REFRESH_LEAD_MS = 60_000;
@@ -46,17 +39,6 @@ function transient(e: unknown): boolean {
 // Ends a session the frame is done with instead of leaving it valid until expiry.
 function endSession(token: string | null) {
   if (token) adminApi.endEmbedded(token).catch(() => {});
-}
-
-async function exchange(embedKey: string, token: string): Promise<ApiEmbeddedSession> {
-  try {
-    return await adminApi.exchangeEmbedded(embedKey, token);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 403) {
-      throw new DeniedError({ reason: e.fields?.reason ?? "access_denied", sub: e.fields?.sub ?? "", message: e.message });
-    }
-    throw e;
-  }
 }
 
 async function allowedOrigins(embedKey: string): Promise<string[]> {
@@ -131,7 +113,7 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
       const seq = ++latest;
       let exchanged = false;
       try {
-        const s = await exchange(embedKey, token);
+        const s = await adminApi.exchangeEmbedded(embedKey, token);
         exchanged = true;
         if (disposed || seq !== latest) {
           endSession(s.token);
@@ -171,8 +153,9 @@ export const EmbeddedApp = observer(function EmbeddedApp() {
           refresh = setTimeout(askForToken, RETRY_MS);
           return;
         }
-        if (e instanceof DeniedError) fail({ kind: "denied", denied: e.denied });
-        else fail({ kind: "error", message: e instanceof Error ? e.message : "Sign-in failed." });
+        if (e instanceof ApiError && e.status === 403) {
+          fail({ kind: "denied", denied: { reason: e.fields?.reason ?? "access_denied", sub: e.fields?.sub ?? "", message: e.message } });
+        } else fail({ kind: "error", message: e instanceof Error ? e.message : "Sign-in failed." });
       }
     };
 

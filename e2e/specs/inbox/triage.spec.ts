@@ -68,6 +68,7 @@ test.describe("tech support triage", () => {
     });
     expect(steps.status()).toBe(201);
     await expect(marko.getByTestId("triage-steps")).toContainText("Checked his phone registration");
+    await expect(marko.locator("[data-triage-status]"), "progress is not an answer").toHaveAttribute("data-triage-status", "diagnosing");
 
     const { id: stepsId } = (await steps.json()) as { id: string };
     const done = await bot.patch(`/v1/conversations/${conv.id}/messages/${stepsId}`, {

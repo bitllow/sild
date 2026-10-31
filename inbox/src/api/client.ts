@@ -1,7 +1,5 @@
-// The one HTTP client for the Sild API. Requests go to /v1/* which Next proxies
-// to the Go backend (see next.config.mjs), so they're same-origin and carry the
-// HttpOnly admin session cookie automatically — or, embedded in a host app, the
-// in-memory session bearer instead.
+// The one HTTP client for the Sild API. /v1/* is proxied by Next, so requests
+// carry the HttpOnly session cookie, or the in-memory bearer when embedded.
 
 import { createHttp } from "@sild/client";
 

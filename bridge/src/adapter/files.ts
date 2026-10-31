@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DeliveredFile } from '../contracts.ts';
+import { REQUEST_ID } from './kit/types.ts';
 
 export type FileLimits = {
   filesPerDelivery: number;
@@ -10,8 +11,8 @@ export type FileLimits = {
 
 export const DEFAULT_FILE_LIMITS: FileLimits = {
   filesPerDelivery: 10,
-  bytesPerDelivery: 8 * 1024 * 1024,
-  bytesPerConversation: 64 * 1024 * 1024,
+  bytesPerDelivery: 32 * 1024 * 1024,
+  bytesPerConversation: 128 * 1024 * 1024,
 };
 
 export type IncomingFile = { name: string; mime: string; data: Buffer };
@@ -77,10 +78,26 @@ export class FileStore {
     return this.#limits.bytesPerConversation - (await this.#usage(conv));
   }
 
+  // Refuses a delivery by its declared size, before its bytes are fetched. A stored one is already paid for.
+  async admit(conv: string, requestId: string, files: number, bytes: number): Promise<void> {
+    if (await stored(path.join(this.dataDir(conv), requestId))) return;
+    if (files > this.#limits.filesPerDelivery) throw new Error('too many files');
+    if (bytes > this.#limits.bytesPerDelivery) throw new Error('delivery too large');
+    if (bytes > (await this.remaining(conv))) throw new Error('conversation data budget exhausted');
+  }
+
   write(conv: string, requestId: string, meta: { source: string; summary: string }, files: IncomingFile[]): Promise<DeliveredFile[]> {
     return this.#serial(conv, () => {
       if (this.#closed.has(conv)) throw new Error('conversation closed');
       return this.#write(conv, requestId, meta, files);
+    });
+  }
+
+  // Removes a delivery nobody waits for any more; usage is measured again on next use.
+  discard(conv: string, requestId: string): Promise<void> {
+    return this.#serial(conv, async () => {
+      await rm(path.join(this.dataDir(conv), requestId), { recursive: true, force: true });
+      this.#used.delete(conv);
     });
   }
 
@@ -95,11 +112,9 @@ export class FileStore {
     meta: { source: string; summary: string },
     files: IncomingFile[],
   ): Promise<DeliveredFile[]> {
-    if (!/^[A-Za-z0-9_-]{8,64}$/.test(requestId)) throw new Error('bad request id');
+    if (!REQUEST_ID.test(requestId)) throw new Error('bad request id');
     const total = files.reduce((n, f) => n + f.data.length, 0);
-    if (files.length > this.#limits.filesPerDelivery) throw new Error('too many files');
-    if (total > this.#limits.bytesPerDelivery) throw new Error('delivery too large');
-    if (total > (await this.remaining(conv))) throw new Error('conversation data budget exhausted');
+    await this.admit(conv, requestId, files.length, total);
 
     const data = this.dataDir(conv);
     const final = path.join(data, requestId);

@@ -1,4 +1,4 @@
-import type { Conversation, Member, Message, Part, Step } from "@sild/client";
+import { WAIT_PREFIX, type Conversation, type Member, type Message, type Part, type Step } from "@sild/client";
 import type { Status } from "@/components/ds";
 
 export type TriageStatus =
@@ -67,9 +67,10 @@ export function describeRequest(internal: NonNullable<Step["internal"]>): string
   return params ? `${internal.source} · ${params}` : internal.source;
 }
 
-// A steps-only message is the assistant's progress on a turn, not its answer.
+// Steps and waiting notices are the assistant's progress on a turn, not its answer.
 function isAnswer(m: Message): boolean {
-  return m.sender_kind === "bot" && (!!m.body.trim() || !!diagnosisOf(m));
+  if (m.sender_kind !== "bot" || m.client_msg_id?.startsWith(WAIT_PREFIX)) return false;
+  return !!diagnosisOf(m) || (!!m.body.trim() && stepsOf(m).length === 0);
 }
 
 /** The derived status of a triage conversation (no column backs it). */

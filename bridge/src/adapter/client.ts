@@ -33,8 +33,8 @@ export type AdapterClientConfig = {
 };
 
 export type Received =
-  | { requestId: string; conv: string; source: string; state: 'delivered'; summary: string; files: DeliveredFile[]; approvedUntil?: number }
-  | { requestId: string; conv: string; source: string; state: 'declined' | 'expired' | 'invalid'; reason: string; code?: string };
+  | { requestId: string; conv: string; state: 'delivered'; summary: string; files: DeliveredFile[]; approvedUntil?: number }
+  | { requestId: string; conv: string; state: 'declined' | 'expired' | 'invalid'; reason: string; code?: string };
 
 // Unless the request failed, its outcome arrives through onReceived, even one answered in the response.
 export type Sent = { type: 'pending' } | { type: 'failed'; reason: string };
@@ -172,7 +172,7 @@ export class AdapterClient {
     this.#untrack(req.id);
     if (res.status === 403) {
       const reason = isRecord(parsed) && typeof parsed.reason === 'string' ? clip(parsed.reason) || 'declined' : 'declined';
-      this.#emit({ requestId: req.id, conv, source: req.source, state: 'declined', reason, ...declineCode(parsed) });
+      this.#emit({ requestId: req.id, conv, state: 'declined', reason, ...declineCode(parsed) });
       return { type: 'pending' };
     }
     const error = isRecord(parsed) && typeof parsed.error === 'string' ? `: ${clip(parsed.error)}` : '';
@@ -257,7 +257,7 @@ export class AdapterClient {
       return null;
     }
     this.#untrack(id);
-    const base = { requestId: id, conv, source: o.source };
+    const base = { requestId: id, conv };
     if (delivery.state !== 'delivered') {
       return {
         ...base, state: delivery.state, ...declineCode(delivery),
@@ -277,21 +277,17 @@ export class AdapterClient {
     if (Buffer.byteLength(d.summary) > LIMITS.summaryBytes || /[\u0000-\u001f\u007f]/.test(d.summary)) {
       throw new Error('summary is not a single line within 1 KiB');
     }
-    const limits = this.#files.limits;
-    if (d.files.length > limits.filesPerDelivery) throw new Error('too many files');
-    const declared = d.files.reduce((n, f) => n + f.size, 0);
-    if (declared > limits.bytesPerDelivery) throw new Error('delivery too large');
-    if (declared > (await this.#files.remaining(conv))) throw new Error('conversation data budget exhausted');
-
-    const incoming: IncomingFile[] = [];
+    await this.#files.admit(conv, id, d.files.length, d.files.reduce((n, f) => n + f.size, 0));
     for (const f of d.files) {
       const bad = nameError(f.name);
       if (bad) throw new Error(bad);
+    }
+    const incoming: IncomingFile[] = await Promise.all(d.files.map(async (f) => {
       const data = f.inline !== undefined ? inline(f) : await this.#fetchFile(f);
       if (data.length !== f.size) throw new Error(`${f.name}: size mismatch`);
       if (createHash('sha256').update(data).digest('hex') !== f.sha256) throw new Error(`${f.name}: sha256 mismatch`);
-      incoming.push({ name: f.name, mime: f.mime, data });
-    }
+      return { name: f.name, mime: f.mime, data };
+    }));
     return this.#files.write(conv, id, { source, summary: d.summary }, incoming);
   }
 
@@ -308,7 +304,8 @@ export class AdapterClient {
     const res = await send(target, {
       method: 'GET',
       headers: signRequest(this.#cfg.secret, { method: 'GET', target: path, body: '' }),
-      timeoutMs: this.#cfg.timeoutMs ?? 10_000,
+      // Covers the whole body, so it grows with the file: 1 MiB/s at worst.
+      timeoutMs: (this.#cfg.timeoutMs ?? 10_000) + f.size / 1024,
       maxBytes: f.size,
     });
     if (res.status !== 200) throw new Error(`${f.name}: HTTP ${res.status}`);

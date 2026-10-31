@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { rm } from 'node:fs/promises';
-import path from 'node:path';
 import type { BrokerEvent, InfoBroker, Source } from '../contracts.ts';
 import type { AdapterClient, Received } from '../adapter/client.ts';
 import { safeConv } from '../adapter/files.ts';
@@ -42,7 +40,6 @@ type Inflight = {
   requester: string;
   proposal: Proposal;
   reason: string;
-  key: string;
   wire: string;
   // When the attempt under way gives up (ms); unset while parked until the requester approves.
   deadline?: number;
@@ -133,18 +130,18 @@ export function createBroker(cfg: BrokerConfig): Broker {
     if (!c || !requestId) {
       // Forgotten or timed out while the files were being written.
       if (r.state === 'delivered' && r.files.length) {
-        await rm(path.join(cfg.adapter.files.dataDir(r.conv), r.requestId), { recursive: true, force: true });
+        await cfg.adapter.files.discard(r.conv, r.requestId);
       }
       return;
     }
     if (r.state === 'declined' && r.code === STEP_UP_REQUIRED) {
       settle(c, requestId, false);
       save(r.conv, c);
-      emit({ type: 'parked', conv: r.conv, requestId, reason: r.reason });
+      emit({ type: 'parked', conv: r.conv, requestId });
       return;
     }
     const f = settle(c, requestId, true)!;
-    if (r.state === 'delivered') c.delivered.set(f.key, { source: f.proposal.source, dir: r.requestId });
+    if (r.state === 'delivered') c.delivered.set(keyOf(f.proposal), { source: f.proposal.source, dir: r.requestId });
     save(r.conv, c);
     if (r.state === 'delivered') {
       emit({ type: 'delivered', conv: r.conv, requestId, summary: r.summary, files: r.files, approvedUntil: r.approvedUntil });
@@ -190,7 +187,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
     c.issued++;
     for (const id of idsOf(source, p.params)) c.ids.add(id);
     const waitSeconds = Math.min(source.max_wait_seconds, limits.maxWaitSeconds) + limits.graceSeconds;
-    const f: Inflight = { waitSeconds, requester, proposal: p, reason, key: keyOf(p), wire: '' };
+    const f: Inflight = { waitSeconds, requester, proposal: p, reason, wire: '' };
     c.inflight.set(requestId, f);
     emit({ type: 'requested', conv, requestId, label: redact(p.label).text, source: p.source, params: p.params });
     send(conv, c, requestId, f);
@@ -230,7 +227,8 @@ export function createBroker(cfg: BrokerConfig): Broker {
       // A requester the provider cannot identify gets no data: fail closed.
       if (requester) {
         try {
-          proposals = (await cfg.router.route({ text, catalog: [...sources.values()], delivered: [...taken], max: Math.max(budget, 0) })).requests;
+          const catalog = [...sources.values()].filter((s) => !taken.has(s.source));
+          proposals = (await cfg.router.route({ text, catalog, delivered: [...taken], max: Math.max(budget, 0) })).requests;
         } catch (err) {
           log(`router failed: ${errText(err)}`);
         }
@@ -272,7 +270,7 @@ export function createBroker(cfg: BrokerConfig): Broker {
       const done = c.delivered.get(key);
       if (done) return { notAvailable: `already delivered in data/${done.dir}/` };
       for (const [requestId, f] of c.inflight) {
-        if (f.key !== key) continue;
+        if (keyOf(f.proposal) !== key) continue;
         return f.timer ? { requestId } : { notAvailable: 'already asked; it waits for the requester to approve data access and is retried then' };
       }
       if (!convs.has(conv)) return { notAvailable: 'conversation closed' };

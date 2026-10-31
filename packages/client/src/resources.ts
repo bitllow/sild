@@ -76,9 +76,6 @@ export const patchMessage = (http: Http, conv: string, id: string, parts: Part[]
 
 export const typing = (http: Http, conv: string) => http.post<void>(`/v1/conversations/${enc(conv)}/typing`);
 
-export const markRead = (http: Http, conv: string, lastReadMessageId: string) =>
-  http.post<void>(`/v1/conversations/${enc(conv)}/read`, { last_read_message_id: lastReadMessageId });
-
 // "me" is the only assignee the API accepts.
 export const claimAssignment = (http: Http, id: string) =>
   http.patch<Assignment>(`/v1/assignments/${enc(id)}`, { assignee_actor_id: 'me' });
@@ -113,6 +110,27 @@ export function signedUrl(http: Http, url: string): { url: string; local: boolea
 }
 
 export const uploadUrl = (http: Http, grant: UploadGrant) => signedUrl(http, grant.upload_url);
+
+// A signed PUT direct to the bucket (§11). Only the local backend's URL may get
+// credentials; images default to inline, the rest to attachments.
+export async function uploadFile(http: Http, file: File, localCredentials?: RequestCredentials) {
+  const mime = file.type || 'application/octet-stream';
+  const grant = await issueUpload(http, { mime_type: mime, size_bytes: file.size, filename: file.name });
+  const { url, local } = uploadUrl(http, grant);
+  const res = await fetch(url, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': mime },
+    credentials: local ? localCredentials : 'omit',
+  });
+  if (!res.ok) throw new Error('upload failed');
+  return {
+    objectKey: grant.object_key,
+    disposition: mime.startsWith('image/') ? ('inline' as const) : ('attachment' as const),
+    mimeType: mime,
+    filename: file.name,
+  };
+}
 
 // With appId the read is anonymous: styling a launcher must not mint a user.
 export const activeBrand = (http: Http, appId?: string) =>

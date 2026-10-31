@@ -277,6 +277,7 @@ export class PeerStore {
         getConversation(http, id, { expand: WITH_PROFILES }),
         listMessages(http, id),
       ]);
+      if (conv.kind === "support") return null;
       const participants = mapParticipants(conv.members, profilesOf(conv.contacts));
       const messages = [...page.items]
         .sort((a, b) => a.id.localeCompare(b.id))

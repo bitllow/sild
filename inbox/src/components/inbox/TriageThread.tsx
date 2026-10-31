@@ -3,7 +3,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { AlertIcon, Badge, Button, CheckIcon, ComposerBar, MessageBubble, Spinner, StatusPill, Textarea } from "@/components/ds";
+import { AlertIcon, Badge, Banner, Button, CheckIcon, ComposerBar, MessageBubble, Spinner, StatusPill, Textarea } from "@/components/ds";
 import type { Message, Step } from "@sild/client";
 import { clockTime, mapAttachments } from "@/store/map";
 import type { TriageConversation, TriageStore } from "@/store/triage";
@@ -428,9 +428,9 @@ function Frame({
         <div style={{ flex: "none", padding: "12px 20px 16px", background: "var(--surface-card)", borderTop: "1px solid var(--border-default)" }}>
           <div style={{ maxWidth: 740, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
             {error && (
-              <div role="alert" style={{ fontSize: 12, color: "var(--danger-600, #c0362c)" }}>
+              <Banner variant="danger" role="alert">
                 {error}
-              </div>
+              </Banner>
             )}
             {footer}
           </div>

@@ -21,6 +21,11 @@ const nextConfig = {
   outputFileTracingRoot: fileURLToPath(new URL(".", import.meta.url)),
   // @sild/client ships TypeScript source through a symlink (file:../packages/client).
   transpilePackages: ["@sild/client"],
+  // Middleware reads it at runtime, where the image has no such variable.
+  env: { SILD_API_URL: API },
+  // Rewrites proxy a clone of the body that Next cuts at this size (default 10MB);
+  // match the backend's upload route (BodyLimitUpload).
+  experimental: { middlewareClientMaxBodySize: "50mb" },
   async rewrites() {
     return [
       { source: "/v1/:path*", destination: `${API}/v1/:path*` },

@@ -61,7 +61,7 @@ export function checkRouterAuth(cfg: Config, data: DataConfig): void {
 // Without its own key the router reaches the model through the bridge's proxy, holding only the proxy token.
 export function makeBroker(
   data: DataConfig,
-  ctx: { config: Config; files: FileStore; assert: Assert; stateRoot: string; modelBaseUrl: string; modelToken: string; log: Log },
+  ctx: { files: FileStore; assert: Assert; stateRoot: string; modelBaseUrl: string; modelToken: string; log: Log },
 ): InfoBroker {
   const log = (msg: string) => ctx.log(msg);
   const adapter = new AdapterClient({

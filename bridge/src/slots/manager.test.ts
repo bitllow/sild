@@ -53,8 +53,10 @@ class FakeBroker implements InfoBroker {
   requests: { requester: string; need: string; why: string }[] = [];
   textRequesters: string[] = [];
   next: { requestId: string } | { notAvailable: string } = { requestId: 'req_1' };
+  gate: Promise<void> = Promise.resolve();
   async onRequesterText(_c: string, requester: string, text: string) {
     this.textRequesters.push(requester);
+    await this.gate;
     return { text: text.replace(/\+?\d{7,}/g, '{phone}') };
   }
   async request(_c: string, requester: string, need: string, why: string) {
@@ -445,6 +447,34 @@ test('a requester message that lands just before a release re-queues the convers
   assert.deepEqual(runner.of(a)[1].pushes, [requesterMessage('one more thing')]);
 });
 
+test('a message still on its way to the session at a release re-queues the conversation', async () => {
+  const { sild, runner, broker, mgr } = await setup({ idleReleaseMs: 100 });
+  const a = sild.open('adm_r1', 'first');
+  mgr.start();
+  await waitFor(() => runner.sessions[0]?.pushes.length === 1, 'push');
+  runner.sessions[0].events.turnEnd('success');
+  let open!: () => void;
+  broker.gate = new Promise((r) => { open = r; });
+  sild.say(a, 'one more thing');
+  nudge(mgr, a);
+  await waitFor(() => runner.of(a).length === 2, 're-claim');
+  open();
+  await waitFor(() => runner.of(a)[1].pushes.length === 1, 'push after re-claim');
+  assert.deepEqual(runner.of(a)[1].pushes, [requesterMessage('one more thing')]);
+  assert.equal(runner.of(a)[0].pushes.length, 1);
+});
+
+test('a step whose params are too long for Sild keeps its source only', async () => {
+  const { sild, runner, broker, mgr } = await setup();
+  const a = sild.open('adm_r1', 'first');
+  mgr.start();
+  await waitFor(() => runner.sessions[0]?.pushes.length === 1, 'push');
+  const step = () => sild.botMessages(a).flatMap((m) => m.parts ?? []).flatMap((p) => (p.type === 'steps' ? p.steps : []));
+  broker.emit({ type: 'requested', conv: a, requestId: 'r1', label: 'Looked it up', source: 'driver.devices', params: { note: 'x'.repeat(2000) } });
+  await waitFor(() => step().length === 1, 'step');
+  assert.deepEqual(step()[0].internal, { source: 'driver.devices' });
+});
+
 test('a waiting notice is forgotten once its assignment leaves the queue', async () => {
   const { sild, runner, mgr } = await setup({ idleReleaseMs: 100 });
   sild.open('adm_r1', 'first');
@@ -509,6 +539,20 @@ test('an attachment that cannot be downloaded is reported to the session', async
     + '\nThe requester attached 1 file(s) that could not be stored: attachment download failed: 404');
 });
 
+test('attachments over the delivery limit together are refused before any download', async () => {
+  const { sild, runner, mgr } = await setup();
+  const a = sild.open('adm_r1', 'first');
+  mgr.start();
+  await waitFor(() => runner.sessions[0]?.pushes.length === 1, 'first push');
+  const big = Buffer.alloc(20 * 1024 * 1024);
+  sild.sayWithFiles(a, 'two dumps', [{ name: 'a.bin', mime: 'application/octet-stream', data: big }, { name: 'b.bin', mime: 'application/octet-stream', data: big }]);
+  sild.blobs.clear();
+  nudge(mgr, a);
+  await waitFor(() => runner.sessions[0].pushes.length === 2, 'push');
+  assert.equal(runner.sessions[0].pushes[1], requesterMessage('two dumps')
+    + '\nThe requester attached 2 file(s) that could not be stored: delivery too large');
+});
+
 test('a request waiting for approval shows as such, and the approval retries it on the same step', async () => {
   const { sild, runner, broker, mgr } = await setup();
   const a = sild.open('adm_r1', 'first');
@@ -517,7 +561,7 @@ test('a request waiting for approval shows as such, and the approval retries it 
   const step = () => sild.botMessages(a).flatMap((m) => m.parts ?? []).flatMap((p) => (p.type === 'steps' ? p.steps : []));
 
   broker.emit({ type: 'requested', conv: a, requestId: 'r1', label: 'Checked his phones', source: 'driver.devices', params: {} });
-  broker.emit({ type: 'parked', conv: a, requestId: 'r1', reason: 'Approve data access' });
+  broker.emit({ type: 'parked', conv: a, requestId: 'r1' });
   await waitFor(() => step()[0]?.state === 'needs_approval', 'needs approval');
   await waitFor(() => runner.sessions[0].pushes.some((p) => p.includes('waits for the requester to approve')), 'session told');
 
@@ -539,7 +583,7 @@ test('an approval with nothing left to retry stops showing the steps as waiting'
   await waitFor(() => runner.sessions[0]?.pushes.length === 1, 'push');
   const step = () => sild.botMessages(a).flatMap((m) => m.parts ?? []).flatMap((p) => (p.type === 'steps' ? p.steps : []));
   broker.emit({ type: 'requested', conv: a, requestId: 'r1', label: 'Checked his phones', source: 'driver.devices', params: {} });
-  broker.emit({ type: 'parked', conv: a, requestId: 'r1', reason: 'Approve data access' });
+  broker.emit({ type: 'parked', conv: a, requestId: 'r1' });
   await waitFor(() => step()[0]?.state === 'needs_approval', 'needs approval');
 
   broker.retries = 0;
