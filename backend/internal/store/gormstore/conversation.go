@@ -24,16 +24,11 @@ func (r *conversationRepo) Get(ctx context.Context, tenantID, id string) (*model
 	return &c, nil
 }
 
-func (r *conversationRepo) UpdateStatus(ctx context.Context, tenantID, id string, status models.ConversationStatus) error {
+func (r *conversationRepo) Close(ctx context.Context, tenantID, id, reason string) (bool, error) {
 	res := r.db.WithContext(ctx).Model(&models.Conversation{}).
-		Where("tenant_id = ? AND id = ?", tenantID, id).Update("status", status)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return store.ErrNotFound
-	}
-	return nil
+		Where("tenant_id = ? AND id = ? AND status <> ?", tenantID, id, models.ConversationClosed).
+		Updates(map[string]any{"status": models.ConversationClosed, "close_reason": reason})
+	return res.RowsAffected > 0, res.Error
 }
 
 func (r *conversationRepo) TouchLastMessage(ctx context.Context, tenantID, convID string, at time.Time, preview string) error {
@@ -49,11 +44,21 @@ func (r *conversationRepo) CountOpen(ctx context.Context, tenantID string) (int6
 	return n, err
 }
 
+func (r *conversationRepo) CountOpenForActor(ctx context.Context, tenantID, actorID, queue string) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where("tenant_id = ? AND status = ? AND queue = ?", tenantID, models.ConversationOpen, queue).
+		Where(`EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = conversations.id
+			AND m.internal_actor_id = ? AND m.left_at IS NULL)`, actorID).
+		Count(&n).Error
+	return n, err
+}
+
 func (r *conversationRepo) CountOpenSupport(ctx context.Context, tenantID string) (int64, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&models.Conversation{}).
-		Where("tenant_id = ? AND status = ? AND kind = ?",
-			tenantID, models.ConversationOpen, models.KindSupport).Count(&n).Error
+		Where("tenant_id = ? AND status = ? AND kind = ? AND queue = ?",
+			tenantID, models.ConversationOpen, models.KindSupport, models.QueueSupport).Count(&n).Error
 	return n, err
 }
 
@@ -218,6 +223,24 @@ func (r *memberRepo) ListActiveForUser(ctx context.Context, tenantID, externalUs
 	return ms, err
 }
 
+func (r *memberRepo) IsActiveActorMember(ctx context.Context, tenantID, convID, actorID string) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.ConversationMember{}).
+		Where("tenant_id = ? AND conversation_id = ? AND internal_actor_id = ? AND left_at IS NULL",
+			tenantID, convID, actorID).Count(&n).Error
+	return n > 0, err
+}
+
+func (r *memberRepo) ListActiveConversationsForActor(ctx context.Context, tenantID, actorID string) ([]store.ActorConversation, error) {
+	var out []store.ActorConversation
+	err := r.db.WithContext(ctx).Table("conversation_members AS m").
+		Select("m.conversation_id, c.queue, c.kind").
+		Joins("JOIN conversations c ON c.tenant_id = m.tenant_id AND c.id = m.conversation_id").
+		Where("m.tenant_id = ? AND m.internal_actor_id = ? AND m.left_at IS NULL", tenantID, actorID).
+		Scan(&out).Error
+	return out, err
+}
+
 func (r *memberRepo) CountActive(ctx context.Context, tenantID, convID string) (int, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&models.ConversationMember{}).
@@ -306,7 +329,7 @@ func (r *assignmentRepo) CountQueue(ctx context.Context, tenantID, actorID strin
 	err := r.db.WithContext(ctx).Table("assignments AS a").
 		Select("c.status AS conv_status, a.status AS status, a.assignee_actor_id AS assignee, COUNT(*) AS n").
 		Joins("JOIN conversations c ON c.id = a.conversation_id").
-		Where("a.tenant_id = ?", tenantID).
+		Where("a.tenant_id = ? AND c.queue = ?", tenantID, models.QueueSupport).
 		Where(`NOT EXISTS (SELECT 1 FROM assignments a2
 			WHERE a2.conversation_id = a.conversation_id
 			  AND (a2.created_at > a.created_at OR (a2.created_at = a.created_at AND a2.id > a.id)))`).
@@ -374,7 +397,7 @@ func (r *assignmentRepo) ListQueue(ctx context.Context, tenantID string, p store
 	q := r.db.WithContext(ctx).Table("assignments AS a").
 		Select("a.*").
 		Joins("JOIN conversations c ON c.id = a.conversation_id").
-		Where("a.tenant_id = ?", tenantID).
+		Where("a.tenant_id = ? AND c.queue = ?", tenantID, models.QueueSupport).
 		// One row per conversation: a conversation can carry several assignments
 		// (AddAssignment), but the queue is per-conversation. Keep only the latest
 		// assignment (its current state) — the representative — before status
@@ -527,6 +550,19 @@ func (r *uploadRepo) MarkCompleted(ctx context.Context, tenantID, objectKey stri
 	return r.db.WithContext(ctx).Model(&models.Upload{}).
 		Where("tenant_id = ? AND object_key = ?", tenantID, objectKey).
 		Update("status", models.UploadCompleted).Error
+}
+
+type requesterAssertionRepo struct{ db *gorm.DB }
+
+func (r *requesterAssertionRepo) Create(ctx context.Context, a *models.RequesterAssertion) error {
+	return r.db.WithContext(ctx).Create(a).Error
+}
+
+func (r *requesterAssertionRepo) CountByConversation(ctx context.Context, tenantID, convID string) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&models.RequesterAssertion{}).
+		Where("tenant_id = ? AND conversation_id = ?", tenantID, convID).Count(&n).Error
+	return n, err
 }
 
 type pushTokenRepo struct{ db *gorm.DB }

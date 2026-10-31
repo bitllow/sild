@@ -13,8 +13,8 @@ type Tenant struct {
 	ID   string `gorm:"primaryKey;size:40"`
 	Name string `gorm:"size:255;not null"`
 
-	// MaxAttachmentBytes overrides the default 10MB/file upload cap (§11).
-	MaxAttachmentBytes int64 `gorm:"not null;default:10485760"`
+	// MaxAttachmentBytes overrides the default 25MB/file upload cap (§11).
+	MaxAttachmentBytes int64 `gorm:"not null;default:26214400"`
 	// PushIncludeBody toggles message-body inclusion in push payloads (§5.5).
 	PushIncludeBody bool `gorm:"not null;default:false"`
 	// PushIncludeSender toggles naming the sender. Separate from the body so a

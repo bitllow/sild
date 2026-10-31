@@ -13,21 +13,8 @@ import (
 // channels, not to the conversations on them, so what must hold is that an event
 // reaches an operator iff policy would let them read it. The publish side — which
 // conversations reach a tenant channel — is domain/agent_fanout_test.go.
-//
-// operatorChannels mirrors agentSubscriptions off the same policy.Scope.
 func operatorChannels(p *principal.Principal) map[string]bool {
-	scope := policy.Scope(p, policy.ConversationsList)
-	if scope.DenyAll() {
-		return nil
-	}
-	subs := map[string]bool{
-		UserChannel(p.AdminID):    true,
-		AgentsChannel(p.TenantID): true,
-	}
-	if scope.AllowsKind(models.KindPeer) {
-		subs[PeerChannel(p.TenantID)] = true
-	}
-	return subs
+	return AgentChannels(p, ChannelInputs{})
 }
 
 func operator(role models.PlatformRole, peer bool) *principal.Principal {
@@ -47,7 +34,7 @@ func operator(role models.PlatformRole, peer bool) *principal.Principal {
 // canRead asks policy the REST question for the same conversation.
 func canRead(p *principal.Principal, kind models.ConversationKind, reachable bool) bool {
 	return policy.Authorize(p, policy.ConversationsRead, policy.ResourceAttrs{
-		Kind: kind, SupportReachable: reachable,
+		Kind: kind, SupportReachable: reachable, Queue: models.QueueSupport,
 	}) == nil
 }
 

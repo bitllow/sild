@@ -28,6 +28,8 @@ type AgentAccess struct {
 	// SupportOK is true when the conversation is a support conversation the agent
 	// may access: a live assignment, or an archived formerly-support conversation.
 	SupportOK bool
+	// Queue is the conversation's queue, for the operator's queue scope.
+	Queue string
 }
 
 // ClassifyAgentAccess resolves an agent's access to a conversation in ONE pass —
@@ -44,7 +46,8 @@ type AgentAccess struct {
 func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID string, needSupport bool) AgentAccess {
 	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
 	if err != nil {
-		return AgentAccess{}
+		// No row to read a queue from: decide as the support queue would.
+		return AgentAccess{Queue: models.QueueSupport}
 	}
 	return s.classifyConv(ctx, tenantID, conv, needSupport)
 }
@@ -52,15 +55,15 @@ func (s *Service) ClassifyAgentAccess(ctx context.Context, tenantID, convID stri
 // classifyConv is the rule itself, for callers that already hold the row.
 func (s *Service) classifyConv(ctx context.Context, tenantID string, conv *models.Conversation, needSupport bool) AgentAccess {
 	if conv.Kind == models.KindPeer {
-		return AgentAccess{Peer: true}
+		return AgentAccess{Peer: true, Queue: conv.Queue}
 	}
 	// Archived formerly-support is open to any agent; a hot one needs an
 	// assignment to exist (anyone's). Archival retains the row, so this is one
 	// lookup rather than a hot read plus a tombstone read.
 	if conv.ArchivedAt != nil {
-		return AgentAccess{SupportOK: true}
+		return AgentAccess{SupportOK: true, Queue: conv.Queue}
 	}
-	return AgentAccess{SupportOK: needSupport && s.HasAssignment(ctx, tenantID, conv.ID)}
+	return AgentAccess{SupportOK: needSupport && s.HasAssignment(ctx, tenantID, conv.ID), Queue: conv.Queue}
 }
 
 // PeerPage is one keyset-paginated page of peer conversations for the inbox: the

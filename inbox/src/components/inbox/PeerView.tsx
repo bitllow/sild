@@ -5,6 +5,7 @@ import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
 import { AttachmentChips, AvatarStack, Badge, ComposerBar, InlineImages, PanelIcon } from "@/components/ds";
 import { RolePill } from "./PeerBits";
+import { PendingAttachments, useFilePicker } from "./PendingAttachments";
 import type { PeerMessage } from "@/store/peer";
 
 export const PeerView = observer(function PeerView() {
@@ -140,36 +141,11 @@ function PeerBubble({ m, peer }: { m: PeerMessage; peer: ReturnType<typeof useSt
 // note toggle — peer conversations have no agent-only notes.
 const PeerComposer = observer(function PeerComposer() {
   const peer = useStore().peer;
-  const fileRef = useRef<HTMLInputElement>(null);
+  const picker = useFilePicker(peer.atts);
   return (
     <>
-      {(peer.atts.pending.length > 0 || peer.atts.uploading > 0) && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-          {peer.atts.pending.map((a, i) => (
-            <span
-              key={i}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 220, fontSize: 12, color: "var(--text-secondary)", background: "var(--surface-sunken)", border: "1px solid var(--border-default)", borderRadius: 8, padding: "5px 8px" }}
-            >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.filename}</span>
-              <button onClick={() => peer.atts.remove(i)} aria-label="Remove attachment" style={{ border: 0, background: "transparent", cursor: "pointer", color: "var(--text-tertiary)", padding: 0, display: "flex", lineHeight: 1 }}>
-                ✕
-              </button>
-            </span>
-          ))}
-          {peer.atts.uploading > 0 && <span style={{ fontSize: 12, color: "var(--text-tertiary)", alignSelf: "center" }}>Uploading…</span>}
-        </div>
-      )}
-      <input
-        ref={fileRef}
-        type="file"
-        multiple
-        style={{ display: "none" }}
-        onChange={(e) => {
-          const files = Array.from(e.target.files || []);
-          e.target.value = "";
-          if (files.length) peer.atts.attach(files);
-        }}
-      />
+      <PendingAttachments atts={peer.atts} />
+      {picker.input}
       {peer.sendError && (
         <div role="alert" style={{ marginBottom: 8, fontSize: 12, color: "var(--danger-600, #c0362c)" }}>
           {peer.sendError}
@@ -179,7 +155,7 @@ const PeerComposer = observer(function PeerComposer() {
         value={peer.composer}
         onChange={(v) => peer.setComposer(v)}
         onSend={() => void peer.send()}
-        onAttach={() => fileRef.current?.click()}
+        onAttach={picker.open}
         placeholder="Message everyone in this conversation…"
         canSendEmpty={peer.atts.pending.length > 0}
         disabled={peer.atts.uploading > 0}

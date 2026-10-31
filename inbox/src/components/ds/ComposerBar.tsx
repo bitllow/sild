@@ -92,9 +92,11 @@ export function ComposerBar({
         </div>
       )}
       <div className="sild-composer__row">
-        <button type="button" className="sild-composer__icon" aria-label="Attach file" onClick={onAttach}>
-          <Paperclip />
-        </button>
+        {onAttach && (
+          <button type="button" className="sild-composer__icon" aria-label="Attach file" onClick={onAttach}>
+            <Paperclip />
+          </button>
+        )}
         <textarea
           ref={ref}
           className="sild-composer__input"

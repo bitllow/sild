@@ -4,11 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/bitllow/sild/backend/internal/apiutil"
+	"github.com/bitllow/sild/backend/internal/domain"
 	"github.com/bitllow/sild/backend/internal/httpx"
 	"github.com/bitllow/sild/backend/internal/middleware"
 	"github.com/bitllow/sild/backend/internal/policy"
@@ -79,6 +81,11 @@ func (h *Handler) adminPasswordLogin(c *gin.Context) {
 		return
 	}
 	raw, exp, err := h.svc.CreateSessionWithPassword(c.Request.Context(), req.Email, req.Password)
+	var refused *domain.ForbiddenError
+	if errors.As(err, &refused) {
+		apiutil.Fail(c, err)
+		return
+	}
 	if err != nil {
 		httpx.Unauthorized(c, "invalid credentials")
 		return
@@ -137,6 +144,7 @@ func (h *Handler) adminLogout(c *gin.Context) {
 	if raw, err := c.Cookie(middleware.AdminCookieName); err == nil {
 		_ = h.svc.Logout(c.Request.Context(), raw)
 	}
+	h.endEmbeddedSession(c)
 	c.SetCookie(middleware.AdminCookieName, "", -1, "/", "", h.cfg.Env == "production", true)
 	c.Status(http.StatusNoContent)
 }
@@ -149,7 +157,7 @@ func (h *Handler) realtimeToken(c *gin.Context) {
 		return
 	}
 	p := middleware.Get(c)
-	tok, exp, err := h.km.MintAgent(c.Request.Context(), p.AdminID, p.TenantID, time.Hour)
+	tok, exp, err := h.km.MintAgent(c.Request.Context(), p.AdminID, p.TenantID, time.Hour, p.Expires)
 	if err != nil {
 		apiutil.Fail(c, err)
 		return
@@ -189,7 +197,7 @@ func (h *Handler) listAPIKeys(c *gin.Context) {
 	out := make([]map[string]any, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, map[string]any{
-			"id": k.ID, "label": k.Label, "prefix": k.Prefix,
+			"id": k.ID, "label": k.Label, "prefix": k.Prefix, "actor_id": k.ActorID,
 			"created_at": k.CreatedAt, "revoked_at": k.RevokedAt,
 		})
 	}
@@ -305,9 +313,9 @@ func (h *Handler) listTeam(c *gin.Context) {
 			held = []map[string]any{}
 		}
 		out = append(out, map[string]any{
-			"id": a.ID, "email": a.Email, "assignments": held,
+			"id": a.ID, "kind": a.Kind, "email": a.Email, "assignments": held,
 			"first_name": a.FirstName, "last_name": a.LastName,
-			"has_password": a.PasswordHash != nil, "created_at": a.CreatedAt,
+			"has_password": a.PasswordHash != nil, "external_sub": a.ExternalSub, "created_at": a.CreatedAt,
 		})
 	}
 	apiutil.RespondPage(c, resourceTeam, store.SlicePage(descByID(out), page, mapID))
@@ -479,4 +487,104 @@ func mapID(m *map[string]any) string {
 func descByID(rows []map[string]any) []map[string]any {
 	sort.Slice(rows, func(i, j int) bool { return mapID(&rows[i]) > mapID(&rows[j]) })
 	return rows
+}
+
+// ── Queues and service accounts ─────────────────────────────────────────────
+
+func queueView(q *models.Queue) map[string]any {
+	return map[string]any{
+		"id": q.Key, "key": q.Key, "label": q.Label,
+		"requeue_on_reply": q.RequeueOnReply, "webhooks": q.Webhooks, "built_in": q.Key == models.QueueSupport,
+	}
+}
+
+// listQueues: GET /v1/queues — the built-in support queue first, then the
+// tenant's own. Also the options of every role's queues dimension.
+func (h *Handler) listQueues(c *gin.Context) {
+	page, ok := apiutil.PageParams(c, settingsPageDefaults(resourceQueues))
+	if !ok {
+		return
+	}
+	ctx, tenant := c.Request.Context(), apiutil.Tenant(c)
+	defined, err := h.svc.ListQueues(ctx, tenant)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	support, _ := h.svc.QueueSettings(ctx, tenant, models.QueueSupport)
+	out := []map[string]any{queueView(support)}
+	for i := range defined {
+		out = append(out, queueView(&defined[i]))
+	}
+	apiutil.RespondPage(c, resourceQueues, store.SlicePage(out, page, mapID))
+}
+
+// putQueue: PUT /v1/queues/:key — create a queue or change its settings.
+func (h *Handler) putQueue(c *gin.Context) {
+	var req struct {
+		Label          string `json:"label"`
+		RequeueOnReply bool   `json:"requeue_on_reply"`
+		Webhooks       *bool  `json:"webhooks"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	q := &models.Queue{TenantID: apiutil.Tenant(c), Key: c.Param("key"), Label: req.Label,
+		RequeueOnReply: req.RequeueOnReply, Webhooks: req.Webhooks == nil || *req.Webhooks}
+	if err := h.svc.SetQueue(c.Request.Context(), q); err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, queueView(q))
+}
+
+// createServiceAccount: POST /v1/service-accounts — a no-login member holding
+// one role, for an automated actor such as an assistant.
+func (h *Handler) createServiceAccount(c *gin.Context) {
+	var req struct {
+		Name        string              `json:"name"`
+		DisplayName string              `json:"display_name"`
+		Role        models.PlatformRole `json:"role"`
+		Scope       json.RawMessage     `json:"scope"`
+	}
+	if !httpx.DecodeJSON(c, &req) {
+		return
+	}
+	if req.Role == "" {
+		req.Role = models.PlatformAgent
+	}
+	scope, ok := scopeDocument(c, req.Role, req.Scope)
+	if !ok {
+		return
+	}
+	if !h.guardOwnerMutation(c, "", &req.Role) || !h.guardScopeGrant(c, scope) {
+		return
+	}
+	a, err := h.svc.CreateServiceAccount(c.Request.Context(), apiutil.Tenant(c), req.Name, req.DisplayName, req.Role, scope)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "kind": a.Kind, "email": a.Email, "first_name": a.FirstName,
+		"assignments": []map[string]any{roleAssignmentView(models.RoleAssignment{Role: req.Role, Scope: scope})}})
+}
+
+// createServiceKey: POST /v1/service-accounts/:id/keys — the key is shown once.
+func (h *Handler) createServiceKey(c *gin.Context) {
+	var req struct {
+		Label string `json:"label"`
+	}
+	if !httpx.DecodeJSONOptional(c, &req) {
+		return
+	}
+	// A key acts with the account's roles, so issuing one is a change to its record.
+	if !h.guardOwnerMutation(c, c.Param("id"), nil) {
+		return
+	}
+	full, rec, err := h.svc.CreateServiceKey(c.Request.Context(), apiutil.Tenant(c), c.Param("id"), req.Label)
+	if err != nil {
+		apiutil.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"id": rec.ID, "key": full, "label": rec.Label, "prefix": rec.Prefix, "actor_id": rec.ActorID})
 }

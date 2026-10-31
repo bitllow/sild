@@ -71,6 +71,9 @@ func channelsFor(t Target) []string {
 	if t.Tenant != "" {
 		channels = append(channels, AgentsChannel(t.Tenant))
 	}
+	if t.Queue.Key != "" {
+		channels = append(channels, QueueChannel(t.Queue.Tenant, t.Queue.Key))
+	}
 	if t.Peer != "" {
 		channels = append(channels, PeerChannel(t.Peer))
 	}

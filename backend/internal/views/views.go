@@ -5,6 +5,7 @@ package views
 
 import (
 	"encoding/json"
+	"maps"
 
 	"github.com/bitllow/sild/backend/internal/store/models"
 )
@@ -29,8 +30,19 @@ func participantID(m map[string]any, ext, internal *string) {
 	}
 }
 
-// Message renders a message (§5.3 message.created payload).
+// Message renders a message (§5.3 message.created payload) without the
+// internal step fields, for any reader who may not see internal notes.
 func Message(m *models.Message, urlFn URLFunc) map[string]any {
+	return message(m, urlFn, false)
+}
+
+// MessageFull renders a message with its internal step fields, for operators
+// and the message's author.
+func MessageFull(m *models.Message, urlFn URLFunc) map[string]any {
+	return message(m, urlFn, true)
+}
+
+func message(m *models.Message, urlFn URLFunc, full bool) map[string]any {
 	out := map[string]any{
 		"id":              m.ID,
 		"conversation_id": m.ConversationID,
@@ -49,7 +61,91 @@ func Message(m *models.Message, urlFn URLFunc) map[string]any {
 		atts = append(atts, Attachment(&m.Attachments[i], urlFn))
 	}
 	out["attachments"] = atts
+	if len(m.Parts) > 0 {
+		var parts []map[string]any
+		if json.Unmarshal(m.Parts, &parts) == nil {
+			if !full {
+				parts, _ = stripParts(parts)
+			}
+			out["parts"] = parts
+		}
+	}
+	if m.UpdatedAt != nil {
+		out["updated_at"] = *m.UpdatedAt
+	}
 	return out
+}
+
+// WithoutInternalParts returns a rendered message without internal step fields,
+// and whether any were removed. The input is never modified.
+func WithoutInternalParts(msg map[string]any) (map[string]any, bool) {
+	parts, stripped := stripParts(partList(msg["parts"]))
+	if !stripped {
+		return msg, false
+	}
+	out := maps.Clone(msg)
+	out["parts"] = parts
+	return out, true
+}
+
+// Part fields whose items may carry an internal field.
+var internalLists = []string{"steps", "evidence"}
+
+// stripParts returns a copy of parts without the internal fields of their items.
+func stripParts(parts []map[string]any) ([]map[string]any, bool) {
+	out := make([]map[string]any, 0, len(parts))
+	stripped := false
+	for _, p := range parts {
+		cp := p
+		for _, key := range internalLists {
+			items, ok := p[key].([]any)
+			if !ok {
+				continue
+			}
+			clean, removed := withoutInternal(items)
+			if !removed {
+				continue
+			}
+			stripped = true
+			cp = maps.Clone(cp)
+			cp[key] = clean
+		}
+		out = append(out, cp)
+	}
+	return out, stripped
+}
+
+func withoutInternal(items []any) ([]any, bool) {
+	clean := make([]any, 0, len(items))
+	removed := false
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			if _, has := m["internal"]; has {
+				m = maps.Clone(m)
+				delete(m, "internal")
+				it, removed = m, true
+			}
+		}
+		clean = append(clean, it)
+	}
+	return clean, removed
+}
+
+// partList reads parts as rendered here or as decoded back from an archive.
+func partList(v any) []map[string]any {
+	switch ps := v.(type) {
+	case []map[string]any:
+		return ps
+	case []any:
+		out := make([]map[string]any, 0, len(ps))
+		for _, p := range ps {
+			if m, ok := p.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // Attachment renders an attachment with an optional signed URL (§11).
@@ -77,6 +173,9 @@ type Profiles struct {
 	Contacts map[string][]byte
 	Names    map[string]string
 	Agents   map[string]string
+	// ExternalSubs maps a staff member to their identity at the tenant's
+	// integrator, so a data provider can authorize the person, not the assistant.
+	ExternalSubs map[string]string
 }
 
 // Contact renders a contact's stored profile. An absent profile omits the field
@@ -104,6 +203,12 @@ func Member(m *models.ConversationMember, p Profiles) map[string]any {
 		out["name"] = name
 	}
 	participantID(out, m.ExternalUserID, m.InternalActorID)
+	// Only a requester's: an operator's integrator identity is no member's business.
+	if m.InternalActorID != nil && m.ConvRole == models.RoleClient {
+		if sub, ok := p.ExternalSubs[*m.InternalActorID]; ok {
+			out["external_sub"] = sub
+		}
+	}
 	return out
 }
 
@@ -144,6 +249,10 @@ func Conversation(c *models.Conversation, members []models.ConversationMember, a
 		"reference":  c.Reference,
 		"metadata":   rawJSON(c.Metadata),
 		"created_at": c.CreatedAt,
+		"queue":      c.Queue,
+	}
+	if c.CloseReason != nil {
+		out["close_reason"] = *c.CloseReason
 	}
 	ms := make([]map[string]any, 0, len(members))
 	for i := range members {

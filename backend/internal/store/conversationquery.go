@@ -18,6 +18,8 @@ type ConversationQuery struct {
 
 	// Kind narrows to one conversation kind. nil = every kind the scope allows.
 	Kind *models.ConversationKind
+	// Queue narrows non-peer conversations to one queue; "" means no filter.
+	Queue string
 	// Status filters the CONVERSATION lifecycle (open|closed) — the inbox's
 	// notion of "closed".
 	Status *models.ConversationStatus

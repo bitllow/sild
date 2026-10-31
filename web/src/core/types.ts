@@ -1,27 +1,6 @@
-// BrandConfig is the messenger look the admin configures in Settings →
-// Appearance and both the web widget and native SDKs render. Mirrors
-// domain.BrandConfig on the Go side; the active brand's config is served at
-// GET /v1/me/brand. logo/iconImg are data URLs (or asset URLs in production).
-export interface BrandConfig {
-  /** Bucket object key (or legacy data:/http URL) — prefer logoUrl to render. */
-  logo: string;
-  /** Resolved signed URL for the logo asset (read-only, from the server). */
-  logoUrl?: string;
-  brand: string;
-  theme: "light" | "dark" | "auto";
-  font: "system" | "sild" | "inter" | "figtree" | "dmsans";
-  radius: "sharp" | "default" | "rounded" | "pillowy";
-  launcherIcon: "chat" | "message" | "help" | "sparkle" | "custom";
-  iconImg: string;
-  iconImgUrl?: string;
-  launcherPos: "left" | "right";
-  launcherSize: "sm" | "md" | "lg";
-  heading: string;
-  sub: string;
-  topics: string;
-  showTeam: boolean;
-  poweredBy: boolean;
-}
+import type { BrandConfig, Disposition } from "@sild/client";
+
+export type { BrandConfig, Disposition, TranslationBundle, TranslationManifest } from "@sild/client";
 
 // DEFAULT_BRAND is the fallback look, used until the server config loads (and if
 // the fetch fails). Kept in sync with domain.DefaultBrandConfig.
@@ -41,27 +20,6 @@ export const DEFAULT_BRAND: BrandConfig = {
   showTeam: false,
   poweredBy: true,
 };
-
-/** The active brand as returned by GET /v1/me/brand. */
-export interface BrandResponse {
-  name: string;
-  config: Partial<BrandConfig>;
-}
-
-/** GET /v1/translations/manifest — each locale's current published version. */
-export interface TranslationManifest {
-  project: string;
-  fallback_locale: string;
-  locales: Record<string, number>;
-}
-
-/** GET /v1/translations/bundle — every key resolved for one locale. */
-export interface TranslationBundle {
-  project: string;
-  locale: string;
-  version: number;
-  strings: Record<string, string>;
-}
 
 // Public configuration for the drop-in (spec §9).
 export interface SildConfig {
@@ -98,8 +56,6 @@ export interface SildConfig {
 }
 
 export type Direction = "in" | "out";
-
-export type Disposition = "inline" | "attachment";
 
 export interface WidgetAttachment {
   /** Signed GET URL for rendering/download (per-request, may be absent). */
@@ -167,11 +123,4 @@ export interface WidgetState {
    *  messages — shown in the thread header + on incoming bubbles instead of the
    *  generic "Support". */
   agentName?: string;
-}
-
-/** The list envelope every collection endpoint returns. */
-export interface ApiPage<T> {
-  items: T[];
-  next_cursor: string | null;
-  has_more: boolean;
 }

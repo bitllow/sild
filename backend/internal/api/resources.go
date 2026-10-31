@@ -8,6 +8,7 @@ const (
 	resourceContacts      = "contacts"
 	resourceTeam          = "team"
 	resourceAPIKeys       = "api_keys"
+	resourceQueues        = "queues"
 	resourceWebhooks      = "webhooks"
 	resourceDeliveries    = "webhook_deliveries"
 

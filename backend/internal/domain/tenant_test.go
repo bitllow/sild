@@ -27,7 +27,7 @@ func TestCreateTenantSetsTheAttachmentCap(t *testing.T) {
 		t.Fatalf("name = %q, want trimmed", tenant.Name)
 	}
 	// Zero here would reject every upload as over the limit (§11).
-	if tenant.MaxAttachmentBytes != 10<<20 {
+	if tenant.MaxAttachmentBytes != 25<<20 {
 		t.Fatalf("MaxAttachmentBytes = %d", tenant.MaxAttachmentBytes)
 	}
 }

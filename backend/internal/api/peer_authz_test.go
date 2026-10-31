@@ -363,7 +363,7 @@ func TestClosedPeerConversationIsReadOnly(t *testing.T) {
 		t.Fatalf("send while open: %d %s, want 201", w.Code, w.Body)
 	}
 
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID, ""); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 

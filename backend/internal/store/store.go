@@ -17,6 +17,7 @@ type Store interface {
 	Tenants() TenantRepo
 	APIKeys() APIKeyRepo
 	Admins() AdminRepo
+	Identity() IdentityRepo
 	RoleAssignments() RoleAssignmentRepo
 	SigningKeys() SigningKeyRepo
 	Conversations() ConversationRepo
@@ -26,6 +27,7 @@ type Store interface {
 	Messages() MessageRepo
 	Receipts() ReceiptRepo
 	Uploads() UploadRepo
+	RequesterAssertions() RequesterAssertionRepo
 	PushTokens() PushTokenRepo
 	PushConfigs() PushConfigRepo
 	PushOutbox() PushOutboxRepo
@@ -34,6 +36,7 @@ type Store interface {
 	Email() EmailRepo
 	Archives() ArchiveRepo
 	Brands() BrandRepo
+	Queues() QueueRepo
 	Leases() LeaseRepo
 	Translations() TranslationRepo
 }

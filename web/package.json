@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sild/client": "file:../packages/client",
     "centrifuge": "^5.7.0",
     "preact": "^10.25.4"
   },

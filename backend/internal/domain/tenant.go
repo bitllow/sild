@@ -9,7 +9,7 @@ import (
 
 // defaultMaxAttachmentBytes is the per-file upload cap a new tenant starts with
 // (§11). Set here so the value holds on every dialect, not just via the DDL.
-const defaultMaxAttachmentBytes = 10 << 20
+const defaultMaxAttachmentBytes = 25 << 20
 
 // CreateTenant registers a new tenant (§8).
 func (s *Service) CreateTenant(ctx context.Context, name string) (*models.Tenant, error) {
@@ -33,14 +33,6 @@ func (s *Service) ListTenants(ctx context.Context) ([]models.Tenant, error) {
 // FindAdminByEmail resolves an admin within one tenant, so the CLI can address an
 // operator by email rather than by generated id.
 func (s *Service) FindAdminByEmail(ctx context.Context, tenantID, email string) (*models.AdminUser, error) {
-	admins, err := s.store.Admins().FindByEmail(ctx, email)
-	if err != nil {
-		return nil, mapStoreErr(err)
-	}
-	for i := range admins {
-		if admins[i].TenantID == tenantID {
-			return &admins[i], nil
-		}
-	}
-	return nil, ErrNotFound
+	a, err := s.store.Admins().GetByEmail(ctx, tenantID, email)
+	return a, mapStoreErr(err)
 }

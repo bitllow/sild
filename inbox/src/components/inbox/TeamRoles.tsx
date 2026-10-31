@@ -1,63 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useStore } from "@/store/StoreProvider";
-import { Avatar, Button, Dialog, Input, Switch } from "@/components/ds";
-import type { PlatformRole, RoleDefinition, RoleDimension, RoleScope } from "@/store/types";
-import { rowBorder } from "./styles";
-
-const SCOPE_ALL = "all";
-
-/** The chip's caption: what this assignment reaches, in the role's own words. */
-function scopeLabel(def: RoleDefinition | undefined, scope: RoleScope): string {
-  const dims = def?.dimensions ?? [];
-  if (dims.length === 0) return "tenant-wide";
-  const parts = dims.map((d) => dimensionLabel(d, scope)).filter(Boolean);
-  return parts.length ? parts.join(" · ") : `no ${dims[0].label.toLowerCase()}`;
-}
-
-function dimensionLabel(d: RoleDimension, scope: RoleScope): string {
-  if (d.kind === "toggle") return scope[d.key] ? d.label.toLowerCase() : "";
-  const set = (scope[d.key] as string[] | undefined) ?? [];
-  if (set.includes(SCOPE_ALL)) return `all ${d.label.toLowerCase()}`;
-  if (set.length === 0) return `no ${d.label.toLowerCase()}`;
-  return set.join(", ");
-}
-
-// A selectable pill: role picker in the invite, option chips in a scope.
-const pill = (selected: boolean) => ({
-  border: `1px solid ${selected ? "var(--brand)" : "var(--border-default)"}`,
-  background: selected ? "var(--brand-subtle)" : "var(--white)",
-  color: selected ? "var(--brand)" : "var(--text-secondary)",
-  borderRadius: 999,
-  padding: "5px 11px",
-  cursor: "pointer",
-  fontFamily: "var(--font-sans)",
-  fontSize: 13,
-  fontWeight: 600,
-});
-
-const chip = (dashed: boolean) => ({
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  maxWidth: "100%",
-  border: `1px ${dashed ? "dashed" : "solid"} var(--border-default)`,
-  borderRadius: 999,
-  background: dashed ? "transparent" : "var(--white)",
-  padding: "5px 12px",
-  cursor: "pointer",
-  fontFamily: "var(--font-sans)",
-  fontSize: 13,
-  color: dashed ? "var(--text-tertiary)" : "var(--text-primary)",
-});
+import { Avatar, Badge, Button, Dialog, Input, KeyIcon } from "@/components/ds";
+import type { PlatformRole, TeamMember } from "@/store/types";
+import { rowBorder, segStyle } from "./styles";
+import { chip, pill, ScopeEditor, scopeLabel } from "./ScopeEditor";
+import { AddServiceAccountDialog, IssueKeyDialog, ServiceKeys } from "./ServiceAccounts";
 
 export const TeamRoles = observer(function TeamRoles() {
   const store = useStore();
   const [editing, setEditing] = useState<{ memberId: string; role: PlatformRole } | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
+  const [segment, setSegment] = useState<"people" | "service">("people");
+  const [addingService, setAddingService] = useState(false);
+  const [issuingFor, setIssuingFor] = useState<TeamMember | null>(null);
+  const [linking, setLinking] = useState<TeamMember | null>(null);
+  const canLink = store.can("team.manage");
+
+  const people = store.team.filter((t) => t.kind !== "service");
+  const services = store.team.filter((t) => t.kind === "service");
+  const rows = segment === "service" ? services : people;
 
   return (
     <>
@@ -74,53 +39,112 @@ export const TeamRoles = observer(function TeamRoles() {
             </div>
           )}
         </div>
-        <Button data-testid="invite-member" onClick={() => setInviting(true)}>
-          Invite
-        </Button>
+        {segment === "service" ? (
+          <Button data-testid="add-service-account" onClick={() => setAddingService(true)}>
+            Add service account
+          </Button>
+        ) : (
+          <Button data-testid="invite-member" onClick={() => setInviting(true)}>
+            Invite
+          </Button>
+        )}
+      </div>
+
+      <div style={{ padding: "11px 18px", borderBottom: rowBorder, display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 9, background: "var(--surface-sunken)", border: "1px solid var(--border-subtle)" }}>
+          <button type="button" data-testid="team-seg-people" onClick={() => setSegment("people")} style={segStyle(segment === "people")}>
+            People {people.length}
+          </button>
+          <button type="button" data-testid="team-seg-service" onClick={() => setSegment("service")} style={segStyle(segment === "service")}>
+            Service accounts {services.length}
+          </button>
+        </div>
+        {segment === "service" && (
+          <span style={{ fontSize: 12.5, color: "var(--text-tertiary)" }}>Automated actors. Same roles, no login — they sign in with a key.</span>
+        )}
       </div>
 
       <div style={{ padding: "8px 18px", display: "flex", gap: 12, borderBottom: rowBorder, fontSize: 11, fontWeight: 600, letterSpacing: ".03em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
-        <div style={{ width: 220, flex: "none" }}>Member</div>
+        <div style={{ width: 220, flex: "none" }}>{segment === "service" ? "Service account" : "Member"}</div>
         <div style={{ flex: 1 }}>Role assignments</div>
       </div>
 
-      {store.team.map((t) => (
-        <div key={t.id} style={{ padding: "13px 18px", display: "flex", alignItems: "flex-start", gap: 12, borderBottom: rowBorder }} data-testid="team-row">
+      {segment === "service" && services.length === 0 && (
+        <div style={{ padding: "18px", fontSize: 13, color: "var(--text-tertiary)" }}>
+          No service accounts yet. Add one for an assistant or another automated actor.
+        </div>
+      )}
+
+      {rows.map((t) => (
+        <div
+          key={t.id}
+          style={{ padding: "13px 18px", display: "flex", alignItems: "flex-start", gap: 12, borderBottom: rowBorder }}
+          data-testid={t.kind === "service" ? "service-row" : "team-row"}
+        >
           <div style={{ width: 220, flex: "none", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            <Avatar name={t.name} size={36} />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>
-                {t.name}
-                {t.id === store.meId && (
-                  <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>· You</span>
-                )}
+            {t.kind === "service" ? (
+              <div style={{ width: 36, height: 36, flex: "none", borderRadius: 9, background: "var(--surface-sunken)", border: "1px solid var(--border-default)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-tertiary)" }}>
+                <KeyIcon size={17} />
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            ) : (
+              <Avatar name={t.name} size={36} />
+            )}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
+                {t.id === store.meId && (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>· You</span>
+                )}
+                {t.kind === "service" && <Badge data-testid="service-badge">Service account</Badge>}
+              </div>
+              <div
+                style={{
+                  fontSize: t.kind === "service" ? 11.5 : 12,
+                  fontFamily: t.kind === "service" ? "var(--font-mono)" : undefined,
+                  color: "var(--text-tertiary)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {t.email}
               </div>
             </div>
           </div>
 
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {t.assignments.map((a) => (
-              <button
-                key={a.role}
-                data-testid={`assignment-${a.role}`}
-                onClick={() => setEditing({ memberId: t.id, role: a.role })}
-                style={chip(false)}
-              >
-                <span style={{ fontWeight: 600 }}>{a.role}</span>
-                <span style={{ fontSize: 12.5, color: "var(--text-tertiary)" }}>
-                  {scopeLabel(store.roleDef(a.role), a.scope)}
-                </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {t.assignments.map((a) => (
+                <button
+                  key={a.role}
+                  data-testid={`assignment-${a.role}`}
+                  onClick={() => setEditing({ memberId: t.id, role: a.role })}
+                  style={chip(false)}
+                >
+                  <span style={{ fontWeight: 600 }}>{a.role}</span>
+                  <span style={{ fontSize: 12.5, color: "var(--text-tertiary)" }}>
+                    {scopeLabel(store.roleDef(a.role), a.scope, store.scopeOptionLabel)}
+                  </span>
+                </button>
+              ))}
+              <button data-testid="add-role" onClick={() => setAdding(t.id)} style={chip(true)}>
+                + Add role
               </button>
-            ))}
-            <button data-testid="add-role" onClick={() => setAdding(t.id)} style={chip(true)}>
-              + Add role
-            </button>
+            </div>
+            {t.kind === "service" ? (
+              <ServiceKeys member={t} onIssue={() => setIssuingFor(t)} />
+            ) : (
+              <IntegratorIdentity member={t} onEdit={canLink ? () => setLinking(t) : undefined} />
+            )}
           </div>
         </div>
       ))}
+
+      {addingService && <AddServiceAccountDialog onClose={() => setAddingService(false)} />}
+
+      {issuingFor && <IssueKeyDialog member={issuingFor} onClose={() => setIssuingFor(null)} />}
+
+      {linking && <LinkIdentityDialog member={linking} onClose={() => setLinking(null)} />}
 
       {inviting && (
         <InviteDialog
@@ -171,6 +195,76 @@ export const TeamRoles = observer(function TeamRoles() {
         </Dialog>
       )}
     </>
+  );
+});
+
+/** Who the member is at the integrator, which embedded sign-in matches on. */
+function IntegratorIdentity({ member, onEdit }: { member: TeamMember; onEdit?: () => void }) {
+  return (
+    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-tertiary)" }} data-testid="integrator-identity">
+      <span>Integrator identity</span>
+      {member.externalSub ? (
+        <code data-testid="integrator-identity-value" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-primary)", overflowWrap: "anywhere" }}>
+          {member.externalSub}
+        </code>
+      ) : (
+        <span data-testid="integrator-identity-value">Not linked</span>
+      )}
+      {onEdit && (
+        <button type="button" data-testid="integrator-identity-edit" onClick={onEdit} style={chip(true)}>
+          {member.externalSub ? "Edit" : "+ Link"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const LinkIdentityDialog = observer(function LinkIdentityDialog({ member, onClose }: { member: TeamMember; onClose: () => void }) {
+  const store = useStore();
+  const [sub, setSub] = useState(member.externalSub);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (value: string) => {
+    setBusy(true);
+    const err = await store.setExternalSub(member.id, value);
+    setBusy(false);
+    if (err) setError(err);
+    else onClose();
+  };
+
+  return (
+    <Dialog
+      title={`Integrator identity — ${member.name}`}
+      subtitle="The sub your validator returns for this person. A token for it signs in as them."
+      onClose={onClose}
+    >
+      <Input
+        label="Identity (sub)"
+        data-testid="integrator-identity-input"
+        placeholder="e.g. fleetline.7"
+        value={sub}
+        error={error ?? undefined}
+        onChange={(e) => {
+          setSub(e.target.value);
+          setError(null);
+        }}
+      />
+      <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 10 }}>
+        {member.externalSub && (
+          <Button variant="secondary" data-testid="integrator-identity-unlink" onClick={() => void submit("")} disabled={busy}>
+            Unlink
+          </Button>
+        )}
+        <div style={{ flex: 1 }} />
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button data-testid="integrator-identity-save" onClick={() => void submit(sub)} disabled={busy || !sub.trim()}>
+          Save
+        </Button>
+      </div>
+    </Dialog>
   );
 });
 
@@ -241,8 +335,7 @@ const InviteDialog = observer(function InviteDialog({
   );
 });
 
-// ScopeDialog renders the dimensions the role declares — a switch for a toggle,
-// chips for a set.
+// ScopeDialog edits one held assignment; every change is written as it is made.
 const ScopeDialog = observer(function ScopeDialog({
   memberId,
   role,
@@ -254,66 +347,13 @@ const ScopeDialog = observer(function ScopeDialog({
 }) {
   const store = useStore();
   const def = store.roleDef(role);
-  // Only a set dimension needs the tenant's projects and languages, so the
-  // fetch waits until one is about to render. Idempotent.
-  useEffect(() => {
-    if ((def?.dimensions ?? []).some((d) => d.kind === "set")) void store.translations.load();
-  }, [store, def]);
   const assignment = store.assignmentOf(memberId, role);
   if (!assignment) return null;
-  const scope = assignment.scope;
   const name = store.memberName(memberId);
-
-  const write = (next: RoleScope) => void store.setRoleScope(memberId, role, next);
-
-  const toggleMember = (d: RoleDimension, value: string) => {
-    const set = (scope[d.key] as string[] | undefined) ?? [];
-    const next = set.includes(value) ? set.filter((v) => v !== value) : [...set, value];
-    write({ ...scope, [d.key]: value === SCOPE_ALL && !set.includes(SCOPE_ALL) ? [SCOPE_ALL] : next });
-  };
 
   return (
     <Dialog title={`${role} — ${name}`} subtitle={def?.description} onClose={onClose}>
-      {(def?.dimensions ?? []).map((d) => (
-        <div key={d.key} style={{ marginBottom: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{d.label}</div>
-              <div style={{ fontSize: 12.5, color: "var(--text-tertiary)", marginTop: 2, lineHeight: 1.5 }}>{d.help}</div>
-            </div>
-            <div style={{ flex: 1 }} />
-            {d.kind === "toggle" && (
-              <Switch
-                checked={!!scope[d.key]}
-                onChange={(v) => write({ ...scope, [d.key]: v })}
-              />
-            )}
-          </div>
-          {d.kind === "set" && (
-            <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-              {[SCOPE_ALL, ...store.scopeOptions(d.source)].map((option) => {
-                const set = (scope[d.key] as string[] | undefined) ?? [];
-                const on = set.includes(option);
-                return (
-                  <button
-                    key={option}
-                    data-testid={`scope-${d.key}-${option}`}
-                    onClick={() => toggleMember(d, option)}
-                    style={pill(on)}
-                  >
-                    {option}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ))}
-      {def && (def.dimensions ?? []).length === 0 && (
-        <p style={{ fontSize: 13, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
-          This role is tenant-wide. It defines no scope of its own.
-        </p>
-      )}
+      <ScopeEditor def={def} scope={assignment.scope} onChange={(next) => void store.setRoleScope(memberId, role, next)} />
       <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 10 }}>
         <Button
           variant="secondary"
@@ -325,7 +365,15 @@ const ScopeDialog = observer(function ScopeDialog({
           Remove role
         </Button>
         <div style={{ flex: 1 }} />
-        <Button onClick={onClose}>Done</Button>
+        {/* Closing first would let a reload abort the last scope write. */}
+        <Button
+          onClick={async () => {
+            await store.scopeSaved(memberId, role);
+            onClose();
+          }}
+        >
+          Done
+        </Button>
       </div>
     </Dialog>
   );

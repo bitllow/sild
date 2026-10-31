@@ -45,3 +45,6 @@ yarn-error.log*
 /.build/
 /Package.resolved
 /.swiftpm/
+
+# Local triage demo state (scripts/triage-local.sh)
+.triage-local/

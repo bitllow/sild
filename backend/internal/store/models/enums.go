@@ -111,6 +111,12 @@ const (
 	DispositionAttachment Disposition = "attachment"
 )
 
+// Close reasons.
+const (
+	CloseResolved = "resolved"
+	CloseClosed   = "closed"
+)
+
 // ── Platform roles (admin_users) ───────────────────────────────────────────
 
 // PlatformRole guards API/inbox access (§7).
@@ -123,12 +129,16 @@ const (
 	// PlatformTranslator works translations and nothing else — no conversation,
 	// contact or message capability.
 	PlatformTranslator PlatformRole = "translator"
+	// PlatformRequester opens conversations for themselves in its queues and
+	// reaches only the conversations they are a member of.
+	PlatformRequester PlatformRole = "requester"
 )
 
 // Valid reports a recognised platform role, so an unknown one is refused at the
 // edge rather than stored and silently carrying no capability.
 func (r PlatformRole) Valid() bool {
-	return r == PlatformOwner || r == PlatformAdmin || r == PlatformAgent || r == PlatformTranslator
+	return r == PlatformOwner || r == PlatformAdmin || r == PlatformAgent || r == PlatformTranslator ||
+		r == PlatformRequester
 }
 
 // ── Push / upload / archive ────────────────────────────────────────────────

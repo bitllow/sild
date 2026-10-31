@@ -1,0 +1,4 @@
+node_modules/
+.spike-work/
+.secrets/
+spike.log

@@ -87,6 +87,14 @@ func (r *contactRepo) contactBase(ctx context.Context, tenantID string, scope po
 	if pt, ok := scope.Participant(); ok {
 		q = q.Where("m.external_user_id = ?", pt)
 	}
+	// A contact is reachable only through a conversation in a queue the caller works.
+	if queues := scope.AllowedQueues(); len(queues) > 0 {
+		q = q.Where("c.kind = ? OR c.queue IN ?", models.KindPeer, queues)
+	}
+	if actor, ok := scope.MemberActor(); ok {
+		q = q.Where(`EXISTS (SELECT 1 FROM conversation_members am
+			WHERE am.conversation_id = c.id AND am.left_at IS NULL AND am.internal_actor_id = ?)`, actor)
+	}
 	if scope.RequiresAssignment() {
 		// Archived support is exempt, or archived-only contacts vanish for agents.
 		q = q.Where("c.kind <> ? OR a.id IS NOT NULL OR c.archived_at IS NOT NULL", models.KindSupport)

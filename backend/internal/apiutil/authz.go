@@ -19,11 +19,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// IsAgent reports whether the caller is privileged (API key or admin) — i.e. may
-// see internal notes and set visibility=internal (§4.2, §5.6). Users are not.
-func IsAgent(c *gin.Context) bool {
-	p := middleware.Get(c)
-	return p != nil && p.Kind != principal.KindUser
+// Can probes a capability without authorizing the route, for a handler that
+// decides what to show or accept (internal notes and fields).
+func Can(c *gin.Context, a policy.Action) bool {
+	return policy.Holds(middleware.Get(c), a)
 }
 
 // Subject returns the user-JWT subject ("" for non-user principals).
@@ -141,6 +140,20 @@ func AuthorizeConversation(c *gin.Context, svc *domain.Service, a policy.Action,
 	return true
 }
 
+// InternalOn reports whether the caller may read or write (a) internal notes in
+// this conversation, which takes operating it, not only being its requester.
+func InternalOn(c *gin.Context, svc *domain.Service, a policy.Action, convID string) bool {
+	p := middleware.Get(c)
+	return p != nil && policy.Internal(p, a, conversationAttrs(c, svc, p, convID))
+}
+
+// InternalInLists reports whether lists and search may include internal notes.
+// A member who is also a requester sees their own requests there, so not them.
+func InternalInLists(c *gin.Context) bool {
+	p := middleware.Get(c)
+	return Can(c, policy.NotesRead) && (p == nil || !p.HasRole(models.PlatformRequester))
+}
+
 // TranslationNarrowing is the scope a collection filters by, and whether it
 // filters at all. The scope rides on the session, so this costs no query.
 func TranslationNarrowing(c *gin.Context, a policy.Action) (models.RoleScope, bool) {
@@ -183,7 +196,10 @@ func conversationAttrs(c *gin.Context, svc *domain.Service, p *principal.Princip
 
 	case principal.KindAdmin:
 		access := svc.ClassifyAgentAccess(ctx, tenant, convID, !p.Privileged())
-		attrs := policy.ResourceAttrs{SupportReachable: access.SupportOK}
+		attrs := policy.ResourceAttrs{SupportReachable: access.SupportOK, Queue: access.Queue}
+		if p.HasRole(models.PlatformRequester) {
+			attrs.IsMember = svc.IsActorMember(ctx, tenant, convID, p.AdminID)
+		}
 		if access.Peer {
 			attrs.Kind = models.KindPeer
 		} else {

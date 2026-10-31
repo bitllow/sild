@@ -65,6 +65,7 @@ func TestRawBodyRoutesDeclareTheirOwnCap(t *testing.T) {
 func TestRateClassesArePinnedToTheRoutesThatNeedThem(t *testing.T) {
 	want := map[string]rateClass{
 		"POST /v1/admin/auth/password":     rateAuth,
+		"POST /v1/admin/auth/embedded":     rateAuth,
 		"POST /v1/tokens":                  rateAuth,
 		"POST /v1/email/inbound":           rateIngress,
 		"PUT /v1/uploads/local/*objectKey": rateIngress,

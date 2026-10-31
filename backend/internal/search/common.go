@@ -39,6 +39,17 @@ func buildFilters(db *gorm.DB, tenantID string, q Query, dialect config.Driver) 
 			WHERE pm.conversation_id = c.id AND pm.left_at IS NULL
 			  AND pm.external_user_id = ?)`, q.Participant)
 	}
+	if q.MemberActor != "" {
+		b = b.Where(`EXISTS (SELECT 1 FROM conversation_members am
+			WHERE am.conversation_id = c.id AND am.left_at IS NULL
+			  AND am.internal_actor_id = ?)`, q.MemberActor)
+	}
+	if len(q.Queues) > 0 {
+		b = b.Where("c.kind = 'peer' OR c.queue IN ?", q.Queues)
+	}
+	if q.Queue != "" {
+		b = b.Where("c.kind = 'peer' OR c.queue = ?", q.Queue)
+	}
 	if q.RequiresAssignment {
 		b = b.Where(`c.kind <> 'support' OR c.archived_at IS NOT NULL
 			OR EXISTS (SELECT 1 FROM assignments ra WHERE ra.conversation_id = c.id)`)

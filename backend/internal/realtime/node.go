@@ -8,10 +8,8 @@ import (
 
 	"github.com/bitllow/sild/backend/internal/auth"
 	"github.com/bitllow/sild/backend/internal/config"
-	"github.com/bitllow/sild/backend/internal/policy"
 	"github.com/bitllow/sild/backend/internal/principal"
 	"github.com/bitllow/sild/backend/internal/store"
-	"github.com/bitllow/sild/backend/internal/store/models"
 	"github.com/centrifugal/centrifuge"
 	"github.com/gin-gonic/gin"
 )
@@ -121,17 +119,8 @@ func NewNode(cfg *config.Config, km *auth.KeyManager, st store.Store) (*Node, er
 	return &Node{Node: n, cfg: cfg.Realtime}, nil
 }
 
-// agentSubscriptions computes the server-side channel set for an inbox agent
-// connection (§5.2): the agent's user channel, the tenant agents channel, and the
-// tenant peer channel for operators whose scope admits peer conversations. The
+// agentSubscriptions loads an inbox agent's channel set at connect (§5.2). The
 // agent must be a real admin in the tenant.
-//
-// The set is fixed per connection — it does not grow with the queue, so a
-// conversation created after connect needs no re-subscription.
-//
-// Visibility is decided by policy.Scope, not re-derived here. REST and the socket
-// therefore cannot disagree about what an operator may see — two implementations
-// of one policy is how a socket leaks what an endpoint refuses.
 func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID string) (map[string]centrifuge.SubscribeOptions, error) {
 	admin, err := st.Admins().Get(ctx, tenantID, adminID)
 	if err != nil {
@@ -141,18 +130,18 @@ func agentSubscriptions(ctx context.Context, st store.Store, tenantID, adminID s
 	if err != nil {
 		return nil, err
 	}
-	scope := policy.Scope(principal.ForAdmin(admin, roles), policy.ConversationsList)
-	if scope.DenyAll() {
+	p := principal.ForAdmin(admin, roles)
+	in, err := LoadChannelInputs(ctx, st, tenantID, adminID, p)
+	if err != nil {
+		return nil, err
+	}
+	chans := AgentChannels(p, in)
+	if chans == nil {
 		return nil, errNoScope
 	}
-	subs := map[string]centrifuge.SubscribeOptions{
-		UserChannel(adminID):    {},
-		AgentsChannel(tenantID): {},
-	}
-	// Operators whose scope admits peer conversations observe the whole peer
-	// surface on the single tenant peer channel.
-	if scope.AllowsKind(models.KindPeer) {
-		subs[PeerChannel(tenantID)] = centrifuge.SubscribeOptions{}
+	subs := make(map[string]centrifuge.SubscribeOptions, len(chans))
+	for ch := range chans {
+		subs[ch] = centrifuge.SubscribeOptions{}
 	}
 	return subs, nil
 }

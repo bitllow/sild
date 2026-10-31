@@ -12,14 +12,20 @@ import (
 // any conversation carrying an Assignment.
 type Conversation struct {
 	ID        string             `gorm:"primaryKey;size:40"`
-	TenantID  string             `gorm:"size:40;not null;index:idx_conv_tenant_status,priority:1;index:idx_conv_tenant_kind,priority:1"`
+	TenantID  string             `gorm:"size:40;not null;index:idx_conv_tenant_status,priority:1;index:idx_conv_tenant_kind,priority:1;index:idx_conv_tenant_queue,priority:1"`
 	Reference string             `gorm:"size:255;index:idx_conv_reference"` // host object id (trip_id, order_id)
 	Metadata  datatypes.JSON     `gorm:"type:json"`                         // host-defined, opaque
 	Status    ConversationStatus `gorm:"size:16;not null;default:'open';index:idx_conv_tenant_status,priority:2"`
 	// Kind is set once at creation (support when an assignment is opened, peer
 	// otherwise) and is the authoritative classifier every surface reads.
-	Kind      ConversationKind `gorm:"size:16;not null;default:'support';index:idx_conv_tenant_kind,priority:2"`
-	CreatedAt time.Time
+	Kind ConversationKind `gorm:"size:16;not null;default:'support';index:idx_conv_tenant_kind,priority:2"`
+	// Queue is set once at creation and decides which operators reach the
+	// conversation. Peer conversations keep the default and never consult it.
+	Queue string `gorm:"size:32;not null;default:'support';index:idx_conv_tenant_queue,priority:2"`
+	// CloseReason records how a conversation ended: resolved (the client confirmed
+	// a fix) or closed. Nil while open, and for closes that predate it.
+	CloseReason *string `gorm:"size:16"`
+	CreatedAt   time.Time
 
 	// Denormalized last participant-visible activity, maintained on each message
 	// (domain.SendMessage → TouchLastMessage). Lets the inbox queue sort/keyset on
@@ -53,11 +59,11 @@ func (c *Conversation) BeforeCreate(*gorm.DB) error {
 // InternalActorID is set (§3 identity namespaces). LeftAt!=nil = removed.
 type ConversationMember struct {
 	ID              string     `gorm:"primaryKey;size:40"`
-	TenantID        string     `gorm:"size:40;not null;index:idx_member_tenant"`
+	TenantID        string     `gorm:"size:40;not null;index:idx_member_tenant;index:idx_member_tenant_actor,priority:1"`
 	ConversationID  string     `gorm:"size:40;not null;index:idx_member_conv"`
 	MemberKind      MemberKind `gorm:"size:16;not null"`
-	ExternalUserID  *string    `gorm:"size:255;index:idx_member_external"` // host namespace (incl. guests, email address)
-	InternalActorID *string    `gorm:"size:40"`                            // our namespace (admin_users.id)
+	ExternalUserID  *string    `gorm:"size:255;index:idx_member_external"`               // host namespace (incl. guests, email address)
+	InternalActorID *string    `gorm:"size:40;index:idx_member_tenant_actor,priority:2"` // our namespace (admin_users.id)
 	// The participant's profile is not here: it lives on the Contact row, one per
 	// person per tenant, and is joined outward on read.
 	ConvRole ConvRole `gorm:"size:16"`

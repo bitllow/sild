@@ -21,9 +21,9 @@ import (
 // SHA-256 (not argon2id) is correct here: the secret is high-entropy, so a fast
 // hash is safe and lets us authenticate every server→server request cheaply.
 const (
-	apiKeyEnvPrefix = "sild_live_"
-	prefixBytes     = 6  // 12 hex chars
-	secretBytes     = 24 // 32 base64url chars
+	APIKeyPrefix = "sild_live_"
+	prefixBytes  = 6  // 12 hex chars
+	secretBytes  = 24 // 32 base64url chars
 )
 
 // ErrMalformedKey is returned when a key string doesn't parse.
@@ -49,7 +49,7 @@ func GenerateAPIKey() (GeneratedKey, error) {
 	prefix := hex.EncodeToString(pb)
 	secret := base64.RawURLEncoding.EncodeToString(sb)
 	return GeneratedKey{
-		Full:   apiKeyEnvPrefix + prefix + "_" + secret,
+		Full:   APIKeyPrefix + prefix + "_" + secret,
 		Prefix: prefix,
 		Hash:   hashSecret(secret),
 	}, nil
@@ -57,7 +57,7 @@ func GenerateAPIKey() (GeneratedKey, error) {
 
 // ParseAPIKey splits a key string into (prefix, secret).
 func ParseAPIKey(full string) (prefix, secret string, err error) {
-	rest, ok := strings.CutPrefix(full, apiKeyEnvPrefix)
+	rest, ok := strings.CutPrefix(full, APIKeyPrefix)
 	if !ok {
 		return "", "", ErrMalformedKey
 	}

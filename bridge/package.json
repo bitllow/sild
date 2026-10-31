@@ -1,0 +1,28 @@
+{
+  "name": "@sild/bridge",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test 'src/**/*.test.ts' '../packages/client/src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "spike": "node spike/spike.ts",
+    "start": "node src/main.ts",
+    "fake-adapter": "node fake-adapter/server.ts",
+    "conformance": "node --test 'adapter/conformance/*.test.ts'"
+  },
+  "dependencies": {
+    "@sild/client": "file:../packages/client",
+    "@anthropic-ai/claude-agent-sdk": "0.3.296",
+    "@anthropic-ai/sdk": "0.133.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "centrifuge": "5.7.4",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}

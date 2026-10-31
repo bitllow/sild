@@ -55,7 +55,13 @@ type APIKeyRepo interface {
 type AdminRepo interface {
 	Create(ctx context.Context, a *models.AdminUser) error
 	Get(ctx context.Context, tenantID, id string) (*models.AdminUser, error)
+	// ListByIDs returns the tenant's members among ids; unknown ids are skipped.
+	ListByIDs(ctx context.Context, tenantID string, ids []string) ([]models.AdminUser, error)
+	// FindByEmail returns the people with this email in every tenant; never a
+	// service account, which no one signs in as.
 	FindByEmail(ctx context.Context, email string) ([]models.AdminUser, error)
+	// GetByEmail resolves one member of a tenant by email, service accounts included.
+	GetByEmail(ctx context.Context, tenantID, email string) (*models.AdminUser, error)
 	List(ctx context.Context, tenantID string) ([]models.AdminUser, error)
 	SetPassword(ctx context.Context, tenantID, id, passwordHash string) error
 	CreateSession(ctx context.Context, s *models.AdminSession) error
@@ -84,12 +90,15 @@ type SigningKeyRepo interface {
 }
 
 type ConversationRepo interface {
+	// CountOpenForActor counts open conversations in a queue this admin id is a member of.
+	CountOpenForActor(ctx context.Context, tenantID, actorID, queue string) (int64, error)
 	Create(ctx context.Context, c *models.Conversation) error
 	// List is the single conversation list, replacing ListQueue/ListPeers/
 	// ListForUser. scope is the policy ceiling; q can only narrow it.
 	List(ctx context.Context, scope policy.ResourceScope, q ConversationQuery) (Page[ConversationItem], error)
 	Get(ctx context.Context, tenantID, id string) (*models.Conversation, error)
-	UpdateStatus(ctx context.Context, tenantID, id string, status models.ConversationStatus) error
+	// Close sets status closed with a reason; false when it was already closed.
+	Close(ctx context.Context, tenantID, id, reason string) (bool, error)
 	ListForUser(ctx context.Context, tenantID, externalUserID string) ([]models.Conversation, error)
 	ListArchivable(ctx context.Context, tenantID string, idleBeforeMsgID string, limit int) ([]models.Conversation, error)
 	// ListPeers returns one keyset-paginated page of the tenant's peer
@@ -108,6 +117,13 @@ type ConversationRepo interface {
 	CountOpenSupport(ctx context.Context, tenantID string) (int64, error)
 }
 
+// ActorConversation is a conversation an admin id is an active member of.
+type ActorConversation struct {
+	ConversationID string
+	Queue          string
+	Kind           models.ConversationKind
+}
+
 type MemberRepo interface {
 	Add(ctx context.Context, m *models.ConversationMember) error
 	// AddIfAbsent inserts a member idempotently, doing nothing when a row with the
@@ -120,6 +136,12 @@ type MemberRepo interface {
 	IsActiveMember(ctx context.Context, tenantID, convID, externalUserID string) (bool, error)
 	ListActive(ctx context.Context, tenantID, convID string) ([]models.ConversationMember, error)
 	ListActiveForUser(ctx context.Context, tenantID, externalUserID string) ([]models.ConversationMember, error)
+	// IsActiveActorMember is the admin-id twin of IsActiveMember, for staff who
+	// are members of their own conversations.
+	IsActiveActorMember(ctx context.Context, tenantID, convID, actorID string) (bool, error)
+	// ListActiveConversationsForActor returns the conversations an admin id is an
+	// active member of, with what channel derivation needs from each.
+	ListActiveConversationsForActor(ctx context.Context, tenantID, actorID string) ([]ActorConversation, error)
 	CountActive(ctx context.Context, tenantID, convID string) (int, error)
 	Remap(ctx context.Context, tenantID, convID, fromExternalID, toExternalID string) error
 }
@@ -253,6 +275,8 @@ type PeerPage struct {
 type MessageRepo interface {
 	Create(ctx context.Context, m *models.Message) error
 	Get(ctx context.Context, tenantID, id string) (*models.Message, error)
+	// UpdateParts replaces a message's parts and stamps UpdatedAt.
+	UpdateParts(ctx context.Context, tenantID, id string, parts []byte, at time.Time) error
 	FindByClientMsgID(ctx context.Context, tenantID, convID, clientMsgID string) (*models.Message, error)
 	ListBefore(ctx context.Context, tenantID, convID, before string, limit int, includeInternal bool) (*MessagePage, error)
 	ListAfter(ctx context.Context, tenantID, convID, after string, limit int, includeInternal bool) ([]models.Message, error)
@@ -272,6 +296,11 @@ type UploadRepo interface {
 	Create(ctx context.Context, u *models.Upload) error
 	GetByObjectKey(ctx context.Context, tenantID, objectKey string) (*models.Upload, error)
 	MarkCompleted(ctx context.Context, tenantID, objectKey string) error
+}
+
+type RequesterAssertionRepo interface {
+	Create(ctx context.Context, a *models.RequesterAssertion) error
+	CountByConversation(ctx context.Context, tenantID, convID string) (int64, error)
 }
 
 type PushTokenRepo interface {
@@ -379,6 +408,15 @@ type BrandRepo interface {
 	// (delete-all + insert). Positions and the single Active flag are taken from
 	// the passed rows as-is; the domain layer normalizes them first.
 	Replace(ctx context.Context, tenantID string, brands []models.Brand) error
+}
+
+type QueueRepo interface {
+	// Get returns one tenant-defined queue, or ErrNotFound. The built-in support
+	// queue has no row.
+	Get(ctx context.Context, tenantID, key string) (*models.Queue, error)
+	List(ctx context.Context, tenantID string) ([]models.Queue, error)
+	// Upsert creates the queue or replaces its settings.
+	Upsert(ctx context.Context, q *models.Queue) error
 }
 
 type ArchiveRepo interface {

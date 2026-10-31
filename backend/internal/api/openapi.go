@@ -41,7 +41,7 @@ func openAPISecuritySchemes() map[string]any {
 		},
 		"adminSession": map[string]any{
 			"type": "apiKey", "in": "cookie", "name": "sild_admin",
-			"description": "Operator session cookie set by the admin login routes.",
+			"description": "Operator session cookie set by the admin login routes. The same routes accept an embedded-inbox bearer (`sild_emb_…`, POST /v1/admin/auth/embedded) or a service account's key.",
 		},
 		"urlSignature": map[string]any{
 			"type": "apiKey", "in": "query", "name": "sig",

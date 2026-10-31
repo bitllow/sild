@@ -25,7 +25,7 @@ func (s *Service) CreateSession(ctx context.Context, email string) (raw string, 
 		return "", time.Time{}, err
 	}
 	if len(admins) == 0 {
-		return "", time.Time{}, ErrForbidden // not an admin in any tenant
+		return "", time.Time{}, ErrForbidden // not a person in any tenant
 	}
 	return s.mintSession(ctx, &admins[0])
 }
@@ -33,6 +33,15 @@ func (s *Service) CreateSession(ctx context.Context, email string) (raw string, 
 // mintSession creates a server-side session for an admin and returns the raw
 // cookie value.
 func (s *Service) mintSession(ctx context.Context, admin *models.AdminUser) (string, time.Time, error) {
+	if admin.ExternalSub != nil {
+		p, err := s.store.Identity().GetProvider(ctx, admin.TenantID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return "", time.Time{}, err
+		}
+		if p != nil && p.EmbeddedOnly {
+			return "", time.Time{}, forbidden(CodeEmbeddedOnly, "sign in through your company's app")
+		}
+	}
 	tok, err := auth.NewSessionToken()
 	if err != nil {
 		return "", time.Time{}, err
@@ -115,6 +124,14 @@ func (s *Service) checkScope(ctx context.Context, tenantID string, role models.P
 	}
 	if role == models.PlatformTranslator {
 		return s.validateTranslatorScope(ctx, tenantID, scope)
+	}
+	for _, q := range scope.Queues {
+		if q == models.ScopeAll {
+			continue
+		}
+		if _, err := s.QueueSettings(ctx, tenantID, q); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -244,22 +261,46 @@ func (s *Service) reconcileSubscriptions(ctx context.Context, tenantID, adminID 
 	if after == nil {
 		return
 	}
-	if now := after.PeerAccess(); now != before.PeerAccess() {
-		moveSubscription(sub, adminID, realtime.PeerChannel(tenantID), now)
+	in, err := realtime.LoadChannelInputs(ctx, s.store, tenantID, adminID, before, after)
+	if err != nil {
+		return
 	}
-	// The tenant support channel follows whether any role reaches a conversation.
-	was := !policy.Scope(before, policy.ConversationsList).DenyAll()
-	if now := !policy.Scope(after, policy.ConversationsList).DenyAll(); now != was {
-		moveSubscription(sub, adminID, realtime.AgentsChannel(tenantID), now)
+	was, now := realtime.AgentChannels(before, in), realtime.AgentChannels(after, in)
+	for ch := range now {
+		if !was[ch] {
+			_ = sub.Subscribe(adminID, ch)
+		}
+	}
+	for ch := range was {
+		if !now[ch] {
+			_ = sub.Unsubscribe(adminID, ch)
+		}
 	}
 }
 
-func moveSubscription(sub realtime.Subscriber, adminID, channel string, on bool) {
-	if on {
-		_ = sub.Subscribe(adminID, channel)
+// subscribeQueueOperators adds a queue to the open sockets of members who reach
+// every queue: their channel set listed the tenant's queues when they connected.
+func (s *Service) subscribeQueueOperators(ctx context.Context, q *models.Queue) {
+	sub, ok := s.pub.(realtime.Subscriber)
+	if !ok {
 		return
 	}
-	_ = sub.Unsubscribe(adminID, channel)
+	rows, err := s.store.RoleAssignments().ListByTenant(ctx, q.TenantID)
+	if err != nil {
+		return
+	}
+	byAdmin := map[string][]models.RoleAssignment{}
+	for _, r := range rows {
+		byAdmin[r.AdminUserID] = append(byAdmin[r.AdminUserID], r)
+	}
+	ch := realtime.QueueChannel(q.TenantID, q.Key)
+	in := realtime.ChannelInputs{Queues: []string{q.Key}}
+	for id, held := range byAdmin {
+		p := principal.ForAdmin(&models.AdminUser{ID: id, TenantID: q.TenantID}, held)
+		if _, all := p.Queues(); all && realtime.AgentChannels(p, in)[ch] {
+			_ = sub.Subscribe(id, ch)
+		}
+	}
 }
 
 // RoleAssignments lists what one member holds.
@@ -304,25 +345,30 @@ func (s *Service) InviteAgent(ctx context.Context, tenantID, email, first, last 
 	if role == "" {
 		role = models.PlatformAgent
 	}
-	if err := s.checkScope(ctx, tenantID, role, &scope); err != nil {
+	a := &models.AdminUser{TenantID: tenantID, Email: email, FirstName: first, LastName: last, CreatedAt: s.now()}
+	if err := s.createMember(ctx, a, role, scope); err != nil {
 		return nil, err
 	}
-	a := &models.AdminUser{TenantID: tenantID, Email: email, FirstName: first, LastName: last, CreatedAt: s.now()}
-	// One transaction: a member stored without their assignment holds nothing, and
-	// the invite that was supposed to give them a role has already reported failure.
+	return a, nil
+}
+
+// createMember stores a member together with their one role. One transaction: a
+// member stored without their assignment holds nothing, and the call that was
+// supposed to give them a role has already reported failure.
+func (s *Service) createMember(ctx context.Context, a *models.AdminUser, role models.PlatformRole, scope models.RoleScope) error {
+	if err := s.checkScope(ctx, a.TenantID, role, &scope); err != nil {
+		return err
+	}
 	err := s.store.Tx(ctx, func(tx store.Store) error {
 		if err := tx.Admins().Create(ctx, a); err != nil {
 			return err
 		}
 		return tx.RoleAssignments().Create(ctx, &models.RoleAssignment{
-			TenantID: tenantID, AdminUserID: a.ID, Role: role, Scope: scope,
+			TenantID: a.TenantID, AdminUserID: a.ID, Role: role, Scope: scope,
 			CreatedAt: s.now(), UpdatedAt: s.now(),
 		})
 	})
-	if err != nil {
-		return nil, mapStoreErr(err)
-	}
-	return a, nil
+	return mapStoreErr(err)
 }
 
 // AgentDisplayName resolves an agent actor id to a short display name for
@@ -343,18 +389,48 @@ func (s *Service) ListAdmins(ctx context.Context, tenantID string) ([]models.Adm
 
 // CreateAPIKey mints a tenant API key; the secret is returned exactly once (§4.3).
 func (s *Service) CreateAPIKey(ctx context.Context, tenantID, label string) (full string, rec *models.APIKey, err error) {
+	return s.issueKey(ctx, tenantID, label, nil)
+}
+
+// issueKey mints an API key, acting as actorID when set.
+func (s *Service) issueKey(ctx context.Context, tenantID, label string, actorID *string) (string, *models.APIKey, error) {
 	gen, err := auth.GenerateAPIKey()
 	if err != nil {
 		return "", nil, err
 	}
-	rec = &models.APIKey{
-		TenantID: tenantID, Prefix: gen.Prefix, Hash: gen.Hash,
+	rec := &models.APIKey{
+		TenantID: tenantID, Prefix: gen.Prefix, Hash: gen.Hash, ActorID: actorID,
 		Label: label, CreatedAt: s.now(),
 	}
 	if err := s.store.APIKeys().Create(ctx, rec); err != nil {
 		return "", nil, err
 	}
 	return gen.Full, rec, nil
+}
+
+// CreateServiceAccount adds a no-login account holding one role, for an
+// automated actor such as the triage assistant.
+func (s *Service) CreateServiceAccount(ctx context.Context, tenantID, name, displayName string, role models.PlatformRole, scope models.RoleScope) (*models.AdminUser, error) {
+	if name == "" {
+		return nil, invalid("name is required")
+	}
+	a := &models.AdminUser{TenantID: tenantID, Kind: models.AdminService, Email: name, FirstName: displayName, CreatedAt: s.now()}
+	if err := s.createMember(ctx, a, role, scope); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// CreateServiceKey issues an API key that authenticates as a service account.
+func (s *Service) CreateServiceKey(ctx context.Context, tenantID, actorID, label string) (string, *models.APIKey, error) {
+	admin, err := s.store.Admins().Get(ctx, tenantID, actorID)
+	if err != nil {
+		return "", nil, mapStoreErr(err)
+	}
+	if admin.Kind != models.AdminService {
+		return "", nil, invalid("only a service account can hold an actor key")
+	}
+	return s.issueKey(ctx, tenantID, label, &admin.ID)
 }
 
 func (s *Service) ListAPIKeys(ctx context.Context, tenantID string) ([]models.APIKey, error) {

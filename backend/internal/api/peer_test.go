@@ -354,7 +354,7 @@ func TestPeerSendRejectedOnClosedConversation(t *testing.T) {
 	ctx := context.Background()
 	peer := mkPeer(t, h, tenant.ID, "trip_1")
 
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID, ""); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	_, err := h.Svc.PeerAgentSend(ctx, tenant.ID, peer.ID, admin.ID, "stepping in", nil, "")
@@ -373,7 +373,7 @@ func TestPeerSendDoesNotCompleteUploadsWhenRejected(t *testing.T) {
 	admin := h.SeedAdmin(tenant.ID, "owner@test", models.PlatformOwner)
 	ctx := context.Background()
 	peer := mkPeer(t, h, tenant.ID, "trip_1")
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID, ""); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -485,7 +485,7 @@ func TestClosedPeerConversationStaysOutOfSupportSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create peer: %v", err)
 	}
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, peer.ID, ""); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 

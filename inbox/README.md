@@ -31,7 +31,7 @@ mixed-token admin search (§4.3).
 ### Realtime (§5)
 
 The browser opens a Centrifuge connection straight to the node
-(`NEXT_PUBLIC_SILD_WS_URL`, default `ws://localhost:8080/v1/ws`) — a cross-origin
+(`NEXT_PUBLIC_SILD_WS_URL`, default port 8080 on the page's host) — a cross-origin
 WebSocket the cookie can't ride, so it authenticates with a short-lived **agent
 token** minted at `GET /v1/admin/realtime/token` (cookie-authed). Channels are
 attached server-side: an agent connection subscribes to `user:<admin>` and

@@ -31,7 +31,7 @@ func TestArchiveWriteThenDelete(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, conv.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, conv.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 /** @type {import('next').NextConfig} */
 
 // The inbox talks to the Go backend (default :8080). We proxy /v1/* through Next
@@ -14,6 +16,16 @@ const nextConfig = {
   // Emit a self-contained server bundle (server.js + trimmed node_modules) so
   // the Docker runtime image stays small — see deploy/inbox.Dockerfile.
   output: "standalone",
+  // Pinned so a lockfile above the repo cannot move the standalone layout the
+  // Dockerfile copies from; @sild/client is compiled into the bundle, not traced.
+  outputFileTracingRoot: fileURLToPath(new URL(".", import.meta.url)),
+  // @sild/client ships TypeScript source through a symlink (file:../packages/client).
+  transpilePackages: ["@sild/client"],
+  // Middleware reads it at runtime, where the image has no such variable.
+  env: { SILD_API_URL: API },
+  // Rewrites proxy a clone of the body that Next cuts at this size (default 10MB);
+  // match the backend's upload route (BodyLimitUpload).
+  experimental: { middlewareClientMaxBodySize: "50mb" },
   async rewrites() {
     return [
       { source: "/v1/:path*", destination: `${API}/v1/:path*` },

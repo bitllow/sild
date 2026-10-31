@@ -2,6 +2,8 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
+	"gorm.io/datatypes"
 
 	"github.com/bitllow/sild/backend/internal/id"
 	"github.com/bitllow/sild/backend/internal/realtime"
@@ -30,6 +32,8 @@ type SendInput struct {
 	// AllowInternal is true when the caller is an agent (admin/ingress); only
 	// then may Visibility be internal (§4.2, §5.6).
 	AllowInternal bool
+	// Parts are structured blocks; partsBySender says which a sender may attach.
+	Parts json.RawMessage
 	// Conv, when set, is the caller's already-read conversation, so SendMessage can
 	// apply the peer rules without reading the row again. Nil = read it here.
 	Conv *models.Conversation
@@ -60,6 +64,13 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	if in.Visibility == models.VisibilityInternal && !in.AllowInternal {
 		return nil, ErrForbidden // only agents may post internal notes
 	}
+	var parts json.RawMessage
+	if len(in.Parts) > 0 {
+		var err error
+		if parts, err = validateParts(in.Parts, in.SenderKind); err != nil {
+			return nil, err
+		}
+	}
 
 	// Resolved once and reused below: a closed peer conversation is read-only, and a
 	// peer conversation also fans out to the tenant peer channel.
@@ -86,7 +97,7 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		SenderKind: in.SenderKind, Visibility: in.Visibility, Channel: in.Channel,
 		ExternalUserID: in.External, InternalActorID: in.Internal,
 		Body: in.Body, ClientMsgID: in.ClientMsgID, CreatedAt: s.now(),
-		Attachments: atts,
+		Attachments: atts, Parts: datatypes.JSON(parts),
 	}
 	// internal notes go ONLY to agent channels (§5.6) — never webhooked/pushed/emailed.
 	internal := in.Visibility == models.VisibilityInternal
@@ -95,13 +106,19 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 	// can be a network round-trip, and holding the message row's lock across it
 	// would put a bucket's latency inside every send.
 	msg.ID = id.New(id.Message)
-	data := views.Message(msg, s.attachmentURLFunc())
+	data := views.MessageFull(msg, s.attachmentURLFunc())
 	// Surface the agent's display name so end-user surfaces (the web widget)
 	// render the operator's first name instead of a generic "Support".
 	if msg.InternalActorID != nil {
 		if name := s.AgentDisplayName(ctx, tenantID, *msg.InternalActorID); name != "" {
 			data["author_name"] = name
 		}
+	}
+
+	// Read once for the webhook gate and requeueOnReply.
+	var queue *models.Queue
+	if !internal && conv != nil {
+		queue = convQueue(ctx, s.store, conv)
 	}
 
 	// The message and everything queued off it commit together: a crash between
@@ -118,7 +135,11 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		if err := s.enqueuePush(ctx, tx, msg); err != nil {
 			return err
 		}
-		return s.enqueueWebhook(ctx, tx, tenantID, convID, "message.created", data)
+		if !sendsWebhooks(queue) {
+			return nil
+		}
+		member, _ := views.WithoutInternalParts(data)
+		return s.writeWebhook(ctx, tx, tenantID, convID, "message.created", member)
 	})
 	if err != nil {
 		// A concurrent retry of the same client_msg_id lost the race to the unique
@@ -129,9 +150,9 @@ func (s *Service) SendMessage(ctx context.Context, tenantID, convID string, in S
 		return nil, err
 	}
 
-	s.emitObserved(ctx, realtime.Target{Conversation: convID, Internal: internal},
-		tenantID, conv, realtime.EventMessageCreated, data)
+	s.emitMessage(ctx, tenantID, convID, conv, internal, realtime.EventMessageCreated, data)
 	if !internal {
+		s.requeueOnReply(ctx, tenantID, conv, queue, msg)
 		s.maybeSendOutboundEmail(ctx, tenantID, convID, msg) // §6.2 outbound
 	}
 	return msg, nil
@@ -234,4 +255,86 @@ func (s *Service) CatchUpMessages(ctx context.Context, tenantID, convID, since s
 		return msgs[:limit], true, nil
 	}
 	return msgs, false, nil
+}
+
+// emitMessage publishes a message event rendered in full. Internal step fields
+// never reach a conversation channel: members get a stripped copy, operators the full one.
+func (s *Service) emitMessage(ctx context.Context, tenantID, convID string, conv *models.Conversation, internal bool, eventType string, data map[string]any) {
+	member, stripped := views.WithoutInternalParts(data)
+	if internal || !stripped {
+		s.emitObserved(ctx, realtime.Target{Conversation: convID, Internal: internal}, tenantID, conv, eventType, data)
+		return
+	}
+	s.emit(ctx, realtime.Target{Conversation: convID}, eventType, convID, member)
+	s.emitObserved(ctx, realtime.Target{Conversation: convID, Internal: true}, tenantID, conv, eventType, data)
+}
+
+// UpdateMessageParts replaces the parts of a message its author sent, while
+// the conversation is open.
+func (s *Service) UpdateMessageParts(ctx context.Context, tenantID, convID, msgID, actorID string, raw json.RawMessage) (map[string]any, error) {
+	msg, err := s.store.Messages().Get(ctx, tenantID, msgID)
+	if err != nil || msg.ConversationID != convID {
+		return nil, ErrNotFound
+	}
+	if msg.SenderKind != models.SenderBot || msg.InternalActorID == nil || *msg.InternalActorID != actorID {
+		return nil, ErrForbidden
+	}
+	conv, err := s.store.Conversations().Get(ctx, tenantID, convID)
+	if err != nil {
+		return nil, mapStoreErr(err)
+	}
+	if conv.Status == models.ConversationClosed {
+		return nil, conflict(CodeConversationClosed, "the conversation is closed")
+	}
+	parts, err := validateParts(raw, models.SenderBot)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	if err := s.store.Messages().UpdateParts(ctx, tenantID, msgID, parts, now); err != nil {
+		return nil, mapStoreErr(err)
+	}
+	msg.Parts, msg.UpdatedAt = datatypes.JSON(parts), &now
+	data := views.MessageFull(msg, s.attachmentURLFunc())
+	if name := s.AgentDisplayName(ctx, tenantID, actorID); name != "" {
+		data["author_name"] = name
+	}
+	s.emitMessage(ctx, tenantID, convID, conv, msg.Visibility == models.VisibilityInternal, realtime.EventMessageUpdated, data)
+	return data, nil
+}
+
+// requeueOnReply re-queues a conversation whose assignment was closed when its
+// client writes again, in queues that ask for it. The support queue never does.
+func (s *Service) requeueOnReply(ctx context.Context, tenantID string, conv *models.Conversation, queue *models.Queue, msg *models.Message) {
+	if msg.SenderKind == models.SenderBot || (msg.SenderKind == models.SenderSystem && !hasApproval(msg.Parts)) {
+		return
+	}
+	if conv == nil || conv.Status != models.ConversationOpen || queue == nil || !queue.RequeueOnReply {
+		return
+	}
+	if !s.fromClient(ctx, tenantID, conv.ID, msg) {
+		return
+	}
+	if a, err := s.store.Assignments().GetByConversation(ctx, tenantID, conv.ID); err == nil && a.Status != models.AssignmentClosed {
+		return
+	}
+	_, _ = s.AddAssignment(ctx, tenantID, conv.ID)
+}
+
+// fromClient reports whether a message's sender is a member in the client role.
+func (s *Service) fromClient(ctx context.Context, tenantID, convID string, msg *models.Message) bool {
+	members, err := s.store.Members().ListActive(ctx, tenantID, convID)
+	if err != nil {
+		return false
+	}
+	for _, m := range members {
+		if m.ConvRole != models.RoleClient {
+			continue
+		}
+		if (msg.ExternalUserID != nil && m.ExternalUserID != nil && *m.ExternalUserID == *msg.ExternalUserID) ||
+			(msg.InternalActorID != nil && m.InternalActorID != nil && *m.InternalActorID == *msg.InternalActorID) {
+			return true
+		}
+	}
+	return false
 }

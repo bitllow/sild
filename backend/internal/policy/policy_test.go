@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/bitllow/sild/backend/internal/principal"
@@ -35,7 +36,7 @@ func owner(peer bool) *principal.Principal {
 // Conversation access across every principal × resource state.
 func TestAuthorizeConversation(t *testing.T) {
 	support := func(reachable bool) ResourceAttrs {
-		return ResourceAttrs{Kind: models.KindSupport, SupportReachable: reachable}
+		return ResourceAttrs{Kind: models.KindSupport, SupportReachable: reachable, Queue: models.QueueSupport}
 	}
 	peer := ResourceAttrs{Kind: models.KindPeer}
 
@@ -234,5 +235,42 @@ func TestGrantsCarryScope(t *testing.T) {
 
 	if find(Grants(user("u1")), TeamManage) != nil {
 		t.Fatal("user was granted team.manage")
+	}
+}
+
+func TestGrantsDescribeARequestersOwnRequests(t *testing.T) {
+	member := func(as ...principal.Assignment) *principal.Principal {
+		return &principal.Principal{TenantID: "t1", Kind: principal.KindAdmin, AdminID: "a4", Assignments: as}
+	}
+	requester := func(queues ...string) principal.Assignment {
+		return principal.Assignment{Role: models.PlatformRequester, Scope: models.RoleScope{Queues: queues}}
+	}
+	listScope := func(p *principal.Principal) GrantScope {
+		for _, g := range Grants(p) {
+			if g.Action == ConversationsList {
+				return *g.Scope
+			}
+		}
+		t.Fatal("conversations.list not granted")
+		return GrantScope{}
+	}
+	cases := []struct {
+		name       string
+		p          *principal.Principal
+		memberOnly bool
+		own        []string
+	}{
+		{"requester only", member(requester("triage")), true, []string{"triage"}},
+		{"requester in every queue", member(requester(models.ScopeAll)), true, []string{models.ScopeAll}},
+		{"agent who also requests", member(principal.Assignment{Role: models.PlatformAgent}, requester("triage")), false, []string{"triage"}},
+		{"agent", agent(false), false, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := listScope(tc.p)
+			if s.MemberOnly != tc.memberOnly || !slices.Equal(s.OwnQueues, tc.own) {
+				t.Fatalf("member_only=%v own_queues=%v, want %v %v", s.MemberOnly, s.OwnQueues, tc.memberOnly, tc.own)
+			}
+		})
 	}
 }

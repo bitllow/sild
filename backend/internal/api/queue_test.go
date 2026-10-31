@@ -32,7 +32,7 @@ func TestListAssignmentsSortAndOpenCount(t *testing.T) {
 	mk("a")
 	mk("b")
 	closed := mk("c")
-	if err := h.Svc.CloseConversation(ctx, tenant.ID, closed.ID); err != nil {
+	if err := h.Svc.CloseConversation(ctx, tenant.ID, closed.ID, ""); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 

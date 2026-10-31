@@ -18,6 +18,9 @@ const DB_DSN =
     ? path.join(os.tmpdir(), `sild-e2e-${Date.now()}-${process.pid}.db`)
     : "host=localhost port=5432 user=sild password=sild dbname=sild sslmode=disable");
 process.env.SILD_E2E_DB_DSN = DB_DSN;
+const TRIAGE_KEY_FILE =
+  process.env.SILD_E2E_TRIAGE_KEY_FILE || path.join(os.tmpdir(), `sild-e2e-assistant-${process.pid}.key`);
+process.env.SILD_E2E_TRIAGE_KEY_FILE = TRIAGE_KEY_FILE;
 process.env.SILD_E2E_DB_DRIVER = DB_DRIVER;
 
 const isCI = !!process.env.CI;
@@ -140,6 +143,10 @@ const devServers: NonNullable<import("@playwright/test").PlaywrightTestConfig["w
       SILD_ENV: "development",
       SILD_BROKER: "memory",
       STORAGE_BACKEND: "local",
+      // The triage demo seed: queue, requester marko@sild.local, and the
+      // assistant's key, which the triage spec uses to play the assistant.
+      SILD_DEV_TRIAGE: "1",
+      SILD_DEV_TRIAGE_KEY_FILE: TRIAGE_KEY_FILE,
       // Keep uploads out of the repo working tree.
       STORAGE_LOCAL_DIR: path.join(os.tmpdir(), `sild-e2e-uploads-${process.pid}`),
     },

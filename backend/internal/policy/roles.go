@@ -37,6 +37,7 @@ type RoleDef struct {
 // Scope dimension keys, so a validator and a wire projection cannot drift.
 const (
 	DimPeer     = "peer"
+	DimQueues   = "queues"
 	DimProjects = "projects"
 	DimLocales  = "locales"
 	DimPublish  = "publish"
@@ -58,6 +59,8 @@ var roleDefs = []RoleDef{
 		Role: models.PlatformAgent, Label: "agent", Dimensions: []Dimension{
 			{Key: DimPeer, Kind: DimensionToggle, Label: "Peer conversations",
 				Help: "Direct chats between parties with no assigned agent."},
+			{Key: DimQueues, Kind: DimensionSet, Label: "Queues", Source: "queues",
+				Help: "Queues this assignment works. Without one, the support queue only."},
 		},
 		Description: "Works the assignment queue.",
 	},
@@ -71,6 +74,13 @@ var roleDefs = []RoleDef{
 				Help: "Cut a release, rather than leaving edits as drafts."},
 		},
 		Description: "Edits strings only. Reaches no conversation, contact or message.",
+	},
+	{
+		Role: models.PlatformRequester, Label: "requester", Dimensions: []Dimension{
+			{Key: DimQueues, Kind: DimensionSet, Label: "Queues", Source: "queues",
+				Help: "Queues this person may open their own conversations in."},
+		},
+		Description: "Opens conversations for themselves in its queues and sees only those.",
 	},
 }
 

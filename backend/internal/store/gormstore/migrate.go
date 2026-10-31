@@ -267,7 +267,21 @@ func dropRetiredObjects(db *gorm.DB) error {
 		}
 	}
 	if m.HasTable("translator_scopes") {
-		return db.Exec("DROP TABLE translator_scopes").Error
+		if err := db.Exec("DROP TABLE translator_scopes").Error; err != nil {
+			return err
+		}
+	}
+	// Retired by the validator contract; method and identity_template are NOT NULL.
+	for _, col := range []string{
+		"method", "jwks_url", "public_key_pem", "introspection_url", "client_id", "secret_sealed",
+		"secret_key_id", "algorithms", "issuer", "audience", "identity_template", "role_claim", "allowed_roles",
+	} {
+		if !m.HasColumn("tenant_identity_providers", col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE tenant_identity_providers DROP COLUMN " + col).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }

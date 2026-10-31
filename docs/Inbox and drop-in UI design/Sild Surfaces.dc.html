@@ -47,6 +47,7 @@
 <div style="display:flex;flex-direction:column;height:100vh;width:100%;overflow:hidden;background:var(--surface-page)">
 
   <!-- ============ TOP SWITCHER ============ -->
+  <sc-if value="{{ showSwitcher }}" hint-placeholder-val="{{ true }}">
   <div style="flex:none;height:56px;display:flex;align-items:center;gap:16px;padding:0 18px;background:var(--surface-card);border-bottom:1px solid var(--border-default);z-index:5">
     <img src="assets/sild-logo.svg" alt="Sild" style="height:25px;width:auto" />
     <div style="width:1px;height:24px;background:var(--border-default)"></div>
@@ -58,6 +59,7 @@
     <div style="flex:1"></div>
     <span style="font-size:12px;color:var(--text-tertiary)">{{ surfaceCaption }}</span>
   </div>
+  </sc-if>
 
   <!-- ============ STAGE ============ -->
   <div style="flex:1;min-height:0;position:relative">
@@ -82,6 +84,24 @@
       </div>
       </sc-if>
 
+      <!-- Embedded: token valid but no grants -->
+      <sc-if value="{{ showDenied }}">
+      <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--surface-page)">
+        <div style="width:100%;max-width:460px;display:flex;flex-direction:column;gap:16px">
+          <img src="assets/sild-mark-tile.svg" width="40" alt="" style="border-radius:11px" />
+          <div>
+            <h1 style="font-size:22px;letter-spacing:-0.02em">You don't have access to support</h1>
+            <p style="font-size:14px;line-height:1.55;color:var(--text-secondary);margin-top:6px;text-wrap:pretty">Your sign-in is valid, but you have no grants in this tenant. Ask an admin to add you in Settings → Access.</p>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;padding:12px 14px;background:var(--white);border:1px solid var(--border-default);border-radius:10px;font-family:var(--font-mono);font-size:12px">
+            <span style="color:var(--text-tertiary)">status</span><span style="color:var(--red-600)">403 access_denied</span>
+            <span style="color:var(--text-tertiary)">reason</span><span>{{ deniedReason }}</span>
+            <span style="color:var(--text-tertiary)">sub</span><span>{{ deniedSub }}</span>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
       <!-- Signed in -->
       <sc-if value="{{ showInboxApp }}">
       <div style="height:100%;display:flex">
@@ -89,12 +109,19 @@
         <!-- Nav rail -->
         <div style="width:64px;flex:none;background:var(--surface-card);border-right:1px solid var(--border-default);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:6px">
           <img src="assets/sild-mark-tile.svg" width="34" alt="Sild" style="border-radius:10px;margin-bottom:8px" />
+          <sc-if value="{{ triageNavVisible }}">
+            <button onClick="{{ onGoTriage }}" aria-label="Tech support" title="Tech support" style="{{ navTriageStyle }}">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2M20 14h2M15 13v2M9 13v2"></path></svg>
+            </button>
+          </sc-if>
+          <sc-if value="{{ inboxNavVisible }}" hint-placeholder-val="{{ true }}">
           <div style="position:relative">
             <button onClick="{{ onGoInbox }}" aria-label="Inbox" style="{{ navInboxStyle }}">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg>
             </button>
             <sc-if value="{{ hasAttention }}"><span style="position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;background:var(--coral-500);color:#fff;font-family:var(--font-sans);font-size:11px;font-weight:700;line-height:1;border-radius:9px;border:2px solid var(--surface-card);pointer-events:none">{{ attentionCount }}</span></sc-if>
           </div>
+          </sc-if>
           <sc-if value="{{ peerNavVisible }}">
           <div style="position:relative">
             <button onClick="{{ onGoPeer }}" aria-label="Peer conversations" title="Peer conversations" style="{{ navPeerStyle }}">
@@ -103,12 +130,14 @@
             <sc-if value="{{ peerHasAttention }}"><span style="position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;background:var(--slate-500);color:#fff;font-family:var(--font-sans);font-size:11px;font-weight:700;line-height:1;border-radius:9px;border:2px solid var(--surface-card);pointer-events:none">{{ peerAttention }}</span></sc-if>
           </div>
           </sc-if>
+          <sc-if value="{{ settingsNavVisible }}" hint-placeholder-val="{{ true }}">
           <button onClick="{{ onGoSettings }}" aria-label="Settings" style="{{ navSettingsStyle }}">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           </button>
+          </sc-if>
           <div style="flex:1"></div>
           <button onClick="{{ onSignOut }}" aria-label="Sign out" style="border:0;background:transparent;cursor:pointer;padding:0;border-radius:50%">
-            <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="Liis Mägi" size="{{ av36 }}" hint-size="36px,36px"></x-import>
+            <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ meName }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
           </button>
         </div>
 
@@ -452,6 +481,13 @@
         </div>
         </sc-if>
 
+        <!-- Tech support (AI triage queue) -->
+        <sc-if value="{{ inboxIsTriage }}">
+        <div style="flex:1;min-width:0;display:flex">
+          <dc-import name="SildTechSupport" me-name="{{ meName }}" can-start="{{ triageCanStart }}" can-view-all="{{ triageViewAll }}" can-see-api="{{ triageApi }}" show-api-calls="{{ triageApiOpen }}" style="flex:1;min-width:0;height:100%" hint-size="100%,100%"></dc-import>
+        </div>
+        </sc-if>
+
         <!-- Settings -->
         <sc-if value="{{ inboxIsSettings }}">
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--surface-page)">
@@ -462,7 +498,7 @@
               <button onClick="{{ onTabAppearance }}" style="{{ tabAppearance }}">Appearance</button>
               <button onClick="{{ onTabKeys }}" style="{{ tabKeys }}">API keys</button>
               <button onClick="{{ onTabHooks }}" style="{{ tabHooks }}">Webhooks</button>
-              <button onClick="{{ onTabTeam }}" style="{{ tabTeam }}">Team</button>
+              <button onClick="{{ onTabTeam }}" style="{{ tabTeam }}">Access</button>
             </div>
           </div>
           <div style="flex:1;overflow-y:auto;padding:24px 28px">
@@ -845,6 +881,10 @@
                     <div style="flex:1;min-width:0">
                       <div style="font-size:14px;font-weight:600">{{ k.label }}</div>
                       <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-tertiary);margin-top:2px">{{ k.masked }}</div>
+                      <div style="display:flex;align-items:center;gap:7px;margin-top:6px">
+                        <span style="font-size:12.5px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ k.grantSummary }}</span>
+                        <button onClick="{{ k.onPerms }}" style="border:0;background:transparent;padding:0;cursor:pointer;font-family:var(--font-sans);font-size:12.5px;font-weight:600;color:var(--brand);white-space:nowrap">{{ k.permLabel }}</button>
+                      </div>
                     </div>
                     <span style="font-size:12px;color:var(--text-tertiary);white-space:nowrap">{{ k.created }}</span>
                     <x-import component-from-global-scope="SildDesignSystem_a95234.Button" size="sm" variant="danger" onClick="{{ k.onRevoke }}" hint-size="auto,32px">Revoke</x-import>
@@ -882,33 +922,91 @@
               <!-- Team -->
               <sc-if value="{{ isTeam }}">
               <div style="background:var(--white);border:1px solid var(--border-default);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden">
-                <div style="padding:16px 18px;border-bottom:1px solid var(--border-subtle)">
-                  <div style="font-size:15px;font-weight:700">Team</div>
-                  <div style="font-size:13px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">Access is a set of role assignments per member. A member may hold several. Each assignment carries the scope its role defines — an agent's teams and peer access, a translator's projects and languages — and anything outside that scope is default-deny.</div>
+                <div style="padding:16px 18px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:flex-start;gap:16px">
+                  <div style="min-width:0">
+                    <div style="font-size:15px;font-weight:700">Access</div>
+                    <div style="font-size:13px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">A grant is an ability plus the scope it applies to. A role is a named bundle of abilities granted together. Either can be assigned on its own, and anything outside a grant's scope is default-deny. Service accounts — API keys and the agent — are principals too and hold grants the same way.</div>
+                  </div>
+                  <div style="flex:1"></div>
+                  <x-import component-from-global-scope="SildDesignSystem_a95234.Button" onClick="{{ onOpenInvite }}" hint-size="auto,40px">Invite</x-import>
+                </div>
+                <div style="padding:11px 18px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:10px">
+                  <div style="display:inline-flex;gap:2px;padding:3px;border-radius:9px;background:var(--surface-sunken);border:1px solid var(--border-subtle)">
+                    <button onClick="{{ onTeamPeople }}" style="{{ teamSegPeople }}">People {{ peopleCount }}</button>
+                    <button onClick="{{ onTeamService }}" style="{{ teamSegService }}">Service accounts {{ serviceCount }}</button>
+                  </div>
+                  <span style="font-size:12.5px;color:var(--text-tertiary)">{{ teamTabHint }}</span>
                 </div>
                 <div style="padding:9px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border-subtle);background:var(--surface-sunken)">
                   <div style="width:36px;flex:none"></div>
-                  <div style="width:220px;flex:none;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Member</div>
-                  <div style="flex:1;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Role assignments</div>
+                  <div style="width:220px;flex:none;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Principal</div>
+                  <div style="flex:1;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Grants</div>
                 </div>
                 <sc-for list="{{ team }}" as="t" hint-placeholder-count="3">
                   <div style="padding:13px 18px;display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--border-subtle)">
-                    <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ t.name }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
+                    <sc-if value="{{ t.isUser }}" hint-placeholder-val="{{ true }}">
+                      <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ t.name }}" size="{{ av36 }}" hint-size="36px,36px"></x-import>
+                    </sc-if>
+                    <sc-if value="{{ t.isService }}">
+                      <div style="width:36px;height:36px;flex:none;border-radius:9px;background:var(--surface-sunken);border:1px solid var(--border-default);display:flex;align-items:center;justify-content:center;color:var(--text-tertiary)">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="7.5" cy="15.5" r="4.5"></circle><path d="M10.7 12.3 21 2"></path><path d="m18 5 3 3"></path></svg>
+                      </div>
+                    </sc-if>
                     <div style="width:220px;flex:none;min-width:0;padding-top:2px">
                       <div style="display:flex;align-items:center;gap:7px">
                         <span style="font-size:14px;font-weight:600">{{ t.name }}</span>
                         <sc-if value="{{ t.isMe }}"><span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:var(--brand-subtle);color:var(--brand);font-size:11px;font-weight:700">You</span></sc-if>
+                        <sc-if value="{{ t.isService }}"><span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:var(--border-subtle);color:var(--text-tertiary);font-size:11px;font-weight:700">Service</span></sc-if>
                       </div>
-                      <div style="font-size:12px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.email }}</div>
+                      <sc-if value="{{ t.isUser }}" hint-placeholder-val="{{ true }}">
+                        <div style="font-size:12px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.email }}</div>
+                      </sc-if>
+                      <sc-if value="{{ t.isService }}">
+                        <div style="display:flex;align-items:baseline;gap:7px;min-width:0">
+                          <span style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.email }}</span>
+                          <sc-if value="{{ t.hasKey }}">
+                            <button onClick="{{ t.onViewKey }}" style="flex:none;border:0;background:transparent;padding:0;cursor:pointer;font-family:var(--font-sans);font-size:11.5px;font-weight:600;color:var(--brand)">Key</button>
+                          </sc-if>
+                        </div>
+                      </sc-if>
                     </div>
-                    <div style="flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px">
-                      <sc-for list="{{ t.assignments }}" as="a" hint-placeholder-count="2">
-                        <button onClick="{{ a.onEdit }}" style="display:flex;align-items:center;gap:8px;max-width:100%;border:1px solid var(--border-default);border-radius:999px;background:var(--white);padding:5px 12px;cursor:pointer;font-family:var(--font-sans);text-align:left">
-                          <span style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ a.role }}</span>
-                          <span style="font-size:12.5px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.scopeLabel }}</span>
+                    <div style="flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+                      <sc-for list="{{ t.grants }}" as="g" hint-placeholder-count="2">
+                        <button onClick="{{ g.onEdit }}" style="{{ g.chipStyle }}">
+                          <span style="{{ g.kindStyle }}">{{ g.kind }}</span>
+                          <span style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ g.name }}</span>
+                          <span style="font-size:12.5px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ g.scopeLabel }}</span>
                         </button>
                       </sc-for>
-                      <button onClick="{{ t.onAddRole }}" style="border:1px dashed var(--border-default);border-radius:999px;background:transparent;padding:5px 12px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--brand)">+ Add role</button>
+                      <button onClick="{{ t.onAddGrant }}" style="border:1px dashed var(--border-default);border-radius:999px;background:transparent;padding:5px 12px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--brand)">+ Add grant</button>
+                      <div style="flex:1"></div>
+                      <button onClick="{{ t.onEffective }}" style="display:flex;align-items:center;gap:5px;border:0;background:transparent;padding:5px 4px;cursor:pointer;font-family:var(--font-sans);font-size:12.5px;font-weight:600;color:var(--text-tertiary);white-space:nowrap">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        Effective
+                      </button>
+                    </div>
+                  </div>
+                </sc-for>
+                <sc-for list="{{ invites }}" as="i" hint-placeholder-count="1">
+                  <div style="padding:13px 18px;display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--border-subtle);background:var(--surface-sunken)">
+                    <div style="width:36px;height:36px;flex:none;border-radius:999px;border:1px dashed var(--border-default)"></div>
+                    <div style="width:220px;flex:none;min-width:0;padding-top:2px">
+                      <div style="display:flex;align-items:center;gap:7px">
+                        <span style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ i.email }}</span>
+                        <span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:var(--border-subtle);color:var(--text-tertiary);font-size:11px;font-weight:700">Invited</span>
+                      </div>
+                      <div style="font-size:12px;color:var(--text-tertiary)">{{ i.sent }}</div>
+                    </div>
+                    <div style="flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+                      <sc-for list="{{ i.grants }}" as="g" hint-placeholder-count="1">
+                        <span style="{{ g.chipStyle }}">
+                          <span style="{{ g.kindStyle }}">{{ g.kind }}</span>
+                          <span style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ g.name }}</span>
+                          <span style="font-size:12.5px;color:var(--text-tertiary)">{{ g.scopeLabel }}</span>
+                        </span>
+                      </sc-for>
+                      <div style="flex:1"></div>
+                      <button onClick="{{ i.onRevoke }}" style="border:0;background:transparent;padding:4px 6px;cursor:pointer;font-family:var(--font-sans);font-size:12.5px;font-weight:600;color:var(--text-tertiary)">Revoke</button>
                     </div>
                   </div>
                 </sc-for>
@@ -924,56 +1022,146 @@
       </div>
       </sc-if>
 
-      <!-- Role assignment dialog -->
+      <!-- Grant dialog -->
       <sc-if value="{{ scopeOpen }}">
       <x-import component-from-global-scope="SildDesignSystem_a95234.Dialog" title="{{ scopeTitle }}" subtitle="{{ scopeSubtitle }}" onClose="{{ onCloseScope }}" hint-size="100%,100%">
+        <sc-if value="{{ scopeIsRole }}">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary)">Abilities in this role</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 18px">
+            <sc-for list="{{ scopeAbilities }}" as="a" hint-placeholder-count="3">
+              <span style="display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:6px;background:var(--surface-sunken);color:var(--text-secondary);font-family:var(--font-mono);font-size:11.5px">{{ a }}</span>
+            </sc-for>
+          </div>
+        </sc-if>
         <sc-for list="{{ scopeDims }}" as="d" hint-placeholder-count="2">
           <div style="margin-bottom:18px">
-            <div style="display:flex;align-items:center;gap:10px">
-              <div style="min-width:0">
-                <div style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ d.label }}</div>
-                <div style="font-size:12.5px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">{{ d.help }}</div>
-              </div>
-              <div style="flex:1"></div>
-              <sc-if value="{{ d.isToggle }}">
-                <x-import component-from-global-scope="SildDesignSystem_a95234.Switch" checked="{{ d.on }}" onChange="{{ d.onToggle }}" hint-size="46px,26px"></x-import>
-              </sc-if>
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ d.label }}</div>
+              <div style="font-size:12.5px;color:var(--text-tertiary);margin-top:2px;line-height:1.5">{{ d.help }}</div>
             </div>
-            <sc-if value="{{ d.isSet }}">
-              <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
-                <sc-for list="{{ d.chips }}" as="c" hint-placeholder-count="4">
-                  <button onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</button>
-                </sc-for>
-              </div>
-            </sc-if>
+            <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">
+              <sc-for list="{{ d.chips }}" as="c" hint-placeholder-count="4">
+                <button onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</button>
+              </sc-for>
+            </div>
           </div>
         </sc-for>
         <sc-if value="{{ scopeNoDims }}">
-          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.55">This role is tenant-wide. It defines no scope of its own.</p>
+          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.55">This grant takes no scope. It applies tenant-wide.</p>
         </sc-if>
-        <p style="font-size:12.5px;color:var(--text-tertiary);margin-top:4px;line-height:1.55">Scopes come from the role's definition. A role that gains a scope later shows up here on its own.</p>
         <div style="margin-top:18px;display:flex;align-items:center;gap:10px">
-          <button onClick="{{ onRemoveAssignment }}" style="border:1px solid var(--border-default);background:var(--white);border-radius:8px;padding:9px 13px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--danger, #C0341A)">Remove role</button>
+          <button onClick="{{ onRemoveAssignment }}" style="border:1px solid var(--border-default);background:var(--white);border-radius:8px;padding:9px 13px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--danger, #C0341A)">Remove grant</button>
           <div style="flex:1"></div>
           <x-import component-from-global-scope="SildDesignSystem_a95234.Button" onClick="{{ onCloseScope }}" hint-size="auto,40px">Done</x-import>
         </div>
       </x-import>
       </sc-if>
 
-      <!-- Add role dialog -->
-      <sc-if value="{{ addRoleOpen }}">
-      <x-import component-from-global-scope="SildDesignSystem_a95234.Dialog" title="Add role" subtitle="{{ addRoleSubtitle }}" onClose="{{ onCloseAddRole }}" hint-size="100%,100%">
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <sc-for list="{{ addRoleOptions }}" as="r" hint-placeholder-count="3">
-            <button onClick="{{ r.onClick }}" style="{{ r.style }}">
-              <span style="font-size:14px;font-weight:600;color:var(--text-primary)">{{ r.label }}</span>
-              <span style="font-size:12.5px;color:var(--text-tertiary);line-height:1.5">{{ r.desc }}</span>
-            </button>
+      <!-- Effective permissions dialog -->
+      <sc-if value="{{ effOpen }}">
+      <x-import component-from-global-scope="SildDesignSystem_a95234.Dialog" title="{{ effTitle }}" subtitle="{{ effSubtitle }}" onClose="{{ onCloseEff }}" hint-size="100%,100%">
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto">
+          <sc-for list="{{ effRows }}" as="r" hint-placeholder-count="3">
+            <div style="border:1px solid var(--border-default);border-radius:10px;padding:11px 13px;background:var(--white)">
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <span style="font-family:var(--font-mono);font-size:12.5px;font-weight:600;color:var(--text-primary)">{{ r.ability }}</span>
+                <div style="flex:1"></div>
+                <span style="font-size:12.5px;font-weight:600;color:var(--text-secondary);text-align:right">{{ r.scopeLabel }}</span>
+              </div>
+              <div style="font-size:12.5px;color:var(--text-tertiary);margin-top:3px;line-height:1.5">{{ r.desc }}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px">
+                <sc-for list="{{ r.sources }}" as="src" hint-placeholder-count="1">
+                  <span style="display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;background:var(--surface-sunken);border:1px solid var(--border-subtle);font-size:11.5px;color:var(--text-secondary)">{{ src.label }}</span>
+                </sc-for>
+              </div>
+            </div>
           </sc-for>
         </div>
-        <sc-if value="{{ addRoleNone }}">
-          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.55">This member already holds every role.</p>
+        <sc-if value="{{ effEmpty }}">
+          <p style="font-size:13px;color:var(--text-tertiary);line-height:1.55">No grants. This principal can do nothing until one is added.</p>
         </sc-if>
+        <div style="margin-top:16px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:12px;color:var(--text-tertiary);line-height:1.5">Scope shown is the union across grants. Anything not listed is denied.</span>
+          <div style="flex:1"></div>
+          <x-import component-from-global-scope="SildDesignSystem_a95234.Button" onClick="{{ onCloseEff }}" hint-size="auto,40px">Done</x-import>
+        </div>
+      </x-import>
+      </sc-if>
+
+      <!-- Add grant dialog -->
+      <sc-if value="{{ addRoleOpen }}">
+      <x-import component-from-global-scope="SildDesignSystem_a95234.Dialog" title="Add grant" subtitle="{{ addRoleSubtitle }}" onClose="{{ onCloseAddRole }}" hint-size="100%,100%">
+        <input value="{{ grantQuery }}" onChange="{{ onGrantQuery }}" placeholder="Search roles and abilities, e.g. translation" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--border-default);border-radius:9px;font-family:var(--font-sans);font-size:14px;color:var(--text-primary)" />
+        <div style="max-height:340px;overflow:auto;margin-top:10px">
+          <sc-for list="{{ grantResults }}" as="r" hint-placeholder-count="5">
+            <div style="{{ r.wrapStyle }}">
+              <sc-if value="{{ r.isHeader }}">
+                <div style="font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary);padding:12px 2px 6px">{{ r.label }}</div>
+              </sc-if>
+              <sc-if value="{{ r.isOption }}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{ r.onClick }}" style="{{ r.style }}">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="{{ r.kindStyle }}">{{ r.kind }}</span>
+                    <span style="{{ r.labelStyle }}">{{ r.label }}</span>
+                    <div style="flex:1"></div>
+                    <span style="font-size:11.5px;color:var(--text-tertiary);font-family:var(--font-mono)">{{ r.dimHint }}</span>
+                  </div>
+                  <span style="font-size:12.5px;color:var(--text-tertiary);line-height:1.5">{{ r.desc }}</span>
+                </button>
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{ grantNoResults }}">
+            <p style="font-size:13px;color:var(--text-tertiary);line-height:1.55;padding:16px 2px">{{ grantEmptyText }}</p>
+          </sc-if>
+        </div>
+      </x-import>
+      </sc-if>
+
+      <!-- Invite dialog -->
+      <sc-if value="{{ inviteOpen }}">
+      <x-import component-from-global-scope="SildDesignSystem_a95234.Dialog" title="Invite to this tenant" subtitle="They join with the grants you pick here. Grants can be changed at any time afterwards." onClose="{{ onCloseInvite }}" hint-size="100%,100%">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Email</div>
+        <input value="{{ inviteEmail }}" onChange="{{ onInviteEmail }}" placeholder="person@company.com" style="width:100%;height:38px;margin-top:6px;padding:0 12px;border:1px solid var(--border-default);border-radius:9px;font-family:var(--font-sans);font-size:14px" />
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-top:18px">Grants</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+          <sc-for list="{{ inviteGrants }}" as="g" hint-placeholder-count="1">
+            <button onClick="{{ g.onRemove }}" style="{{ g.chipStyle }}">
+              <span style="{{ g.kindStyle }}">{{ g.kind }}</span>
+              <span style="font-size:13px;font-weight:600;color:var(--text-primary)">{{ g.name }}</span>
+              <span style="font-size:12.5px;color:var(--text-tertiary)">remove</span>
+            </button>
+          </sc-for>
+          <sc-if value="{{ inviteNoGrants }}">
+            <span style="font-size:12.5px;color:var(--text-tertiary);line-height:1.55">No grants yet. Without one they can sign in and see nothing.</span>
+          </sc-if>
+        </div>
+        <input value="{{ inviteQuery }}" onChange="{{ onInviteQuery }}" placeholder="Search roles and abilities to add" style="width:100%;height:36px;margin-top:12px;padding:0 12px;border:1px solid var(--border-default);border-radius:9px;font-family:var(--font-sans);font-size:13.5px" />
+        <div style="max-height:220px;overflow:auto;margin-top:8px">
+          <sc-for list="{{ inviteResults }}" as="r" hint-placeholder-count="4">
+            <div>
+              <sc-if value="{{ r.isHeader }}">
+                <div style="font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-tertiary);padding:10px 2px 6px">{{ r.label }}</div>
+              </sc-if>
+              <sc-if value="{{ r.isOption }}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{ r.onClick }}" style="{{ r.style }}">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="{{ r.kindStyle }}">{{ r.kind }}</span>
+                    <span style="{{ r.labelStyle }}">{{ r.label }}</span>
+                    <div style="flex:1"></div>
+                    <span style="font-size:11.5px;color:var(--text-tertiary);font-family:var(--font-mono)">{{ r.dimHint }}</span>
+                  </div>
+                  <span style="font-size:12.5px;color:var(--text-tertiary);line-height:1.5">{{ r.desc }}</span>
+                </button>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:18px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:12.5px;color:var(--text-tertiary);line-height:1.5">{{ inviteSummary }}</span>
+          <div style="flex:1"></div>
+          <x-import component-from-global-scope="SildDesignSystem_a95234.Button" onClick="{{ onSendInvite }}" hint-size="auto,40px">Send invitation</x-import>
+        </div>
       </x-import>
       </sc-if>
 
@@ -1322,15 +1510,15 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:820}}">
 class Component extends DCLogic {
+  get _meId(){ return this.props.meId || 't1'; }   // signed-in member (default Liis Mägi)
   constructor(props){
     super(props);
     this._apSaved = this.seedProfiles();
-    this._meId = 't1';   // the signed-in agent (Liis Mägi)
     this.state = {
       surface: 'inbox',
       // inbox
-      signedIn: false,
-      inboxView: 'inbox',
+      signedIn: !!props.embedded,
+      inboxView: props.initialView || 'inbox',
       settingsTab: 'channels',
       channelSel: 'email',
       fwdCopied: false,
@@ -1361,7 +1549,9 @@ class Component extends DCLogic {
       keys: this.seedKeys(),
       webhooks: this.seedWebhooks(),
       team: this.seedTeam(),
-      assignEdit: null, addRoleFor: null,
+      assignEdit: null, addRoleFor: null, grantQuery: '', effFor: null, teamTab: 'people',
+      inviteOpen: false, inviteEmail: '', inviteQuery: '', inviteDraft: [],
+      invites: [{ id:'inv1', email:'agency@lingua.lt', sent:'Invited 2 days ago', grants:[{ id:'ig1', kind:'role', ref:'translator', scope:{ projects:['kuller'], locales:['lt'] } }] }],
       // appearance / widget branding
       apProfiles: this.cloneProfiles(this.seedProfiles()),
       apProfileId: 'p1', apMenuOpen: false, apDirty: false, apPreview: 'home',
@@ -1442,19 +1632,37 @@ class Component extends DCLogic {
   }
   seedTeam(){
     return [
-      { id:'t1', name:'Liis Mägi', email:'liis@sild.io', assignments:[{ id:'ra1', role:'agent', scope:{ teams:['support'], peer:true } }] },
-      { id:'t2', name:'Karl Sepp', email:'karl@sild.io', assignments:[{ id:'ra2', role:'admin', scope:{} }, { id:'ra3', role:'agent', scope:{ teams:['all'], peer:true } }] },
-      { id:'t3', name:'Anu Pärn', email:'anu@sild.io', assignments:[{ id:'ra4', role:'owner', scope:{} }] },
-      { id:'t4', name:'Mart Ojala', email:'mart@sild.io', assignments:[{ id:'ra5', role:'agent', scope:{ teams:['dispatch'], peer:false } }] },
-      { id:'t5', name:'Marta Ruiz', email:'marta@lingua.es', assignments:[{ id:'ra6', role:'translator', scope:{ projects:['kuller'], locales:['es'] } }] },
-      { id:'t6', name:'Jānis Ozols', email:'janis@lingua.lv', assignments:[{ id:'ra7', role:'translator', scope:{ projects:['all'], locales:['lv'] } }, { id:'ra8', role:'agent', scope:{ teams:['support'], peer:false } }] },
+      { id:'t1', name:'Liis Mägi', email:'liis@sild.io', grants:[
+        { id:'g1', kind:'role', ref:'agent', scope:{ teams:['support'] } },
+        { id:'g2', kind:'ability', ref:'conversation.peer', scope:{ teams:['all'] } } ] },
+      { id:'t2', name:'Karl Sepp', email:'karl@sild.io', grants:[
+        { id:'g3', kind:'role', ref:'admin', scope:{ teams:['all'] } },
+        { id:'g4', kind:'role', ref:'agent', scope:{ teams:['all'] } } ] },
+      { id:'t3', name:'Anu Pärn', email:'anu@sild.io', grants:[{ id:'g5', kind:'role', ref:'owner', scope:{ teams:['all'] } }] },
+      { id:'t4', name:'Mart Ojala', email:'mart@sild.io', grants:[{ id:'g6', kind:'role', ref:'agent', scope:{ teams:['dispatch'] } }] },
+      { id:'t5', name:'Marta Ruiz', email:'marta@lingua.es', grants:[{ id:'g7', kind:'role', ref:'translator', scope:{ projects:['kuller'], locales:['es'] } }] },
+      { id:'t7', name:'Marko Saar', email:'marko@fleetline.ee', grants:[{ id:'g14', kind:'role', ref:'tech_support', scope:{} }] },
+      { id:'t6', name:'Jānis Ozols', email:'janis@lingua.lv', grants:[
+        { id:'g8', kind:'role', ref:'translator', scope:{ projects:['all'], locales:['lv'] } },
+        { id:'g9', kind:'ability', ref:'translation.publish', scope:{ projects:['kuller'] } } ] },
+      { id:'s1', type:'service', name:'Production server', keyId:'k1', email:'sild_live_8f3a………d92c', grants:[
+        { id:'g10', kind:'ability', ref:'conversation.assign', scope:{ teams:['all'] } },
+        { id:'g11', kind:'ability', ref:'conversation.work', scope:{ teams:['all'] } } ] },
+      { id:'s3', type:'service', name:'Staging', keyId:'k2', email:'sild_live_2b71………45aa', grants:[
+        { id:'g13', kind:'role', ref:'agent', scope:{ teams:['support'] } } ] },
+      { id:'s2', type:'service', name:'Resolver agent', email:'agent.resolver', grants:[
+        { id:'g12', kind:'role', ref:'agent', scope:{ teams:['support'] } } ] },
     ];
+  }
+  myAbilities(){
+    const me = this.state.team.find(t => t.id===this._meId);
+    if (!me) return null;
+    const out = new Set(); me.grants.forEach(g => this.grantAbilities(g).forEach(a => out.add(a))); return out;
   }
   myPeerAccess(){
     const me = this.state.team.find(t => t.id===this._meId);
     if (!me) return true;
-    if (me.assignments.some(a => a.role==='owner' || a.role==='admin')) return true;
-    return me.assignments.some(a => a.role==='agent' && a.scope.peer === true);
+    return me.grants.some(g => { const ab = this.grantAbilities(g); return ab.indexOf('conversation.peer') >= 0 || ab.indexOf('tenant.own') >= 0; });
   }
   seedProfiles(){
     const base = { logo:null, brand:'#2563FD', theme:'light', font:'sild', radius:'default', launcherIcon:'chat', iconImg:null, launcherPos:'right', launcherSize:'md', heading:'Hi there.', sub:'How can we help? We typically reply in a few minutes.', topics:'Track my order\nChange pickup address\nBilling question', showTeam:true, poweredBy:true };
@@ -1555,10 +1763,13 @@ class Component extends DCLogic {
       return { ...c, joined:true, participants, messages:msgs, preview:'You: '+t };
     }), peerComposer:'' }));
   };
-  setPeerAccess = (id, v) => this.setState(s => {
-    const team = s.team.map(t => t.id!==id ? t : ({ ...t, assignments: t.assignments.map(a => a.role==='agent' ? { ...a, scope:{ ...a.scope, peer:v } } : a) }));
-    return { team };
-  });
+  setPeerAccess = (id, v) => this.setState(s => ({ team: s.team.map(t => {
+    if (t.id !== id) return t;
+    const has = t.grants.some(g => g.kind === 'ability' && g.ref === 'conversation.peer');
+    if (v && !has) return { ...t, grants:[...t.grants, { id:'g' + Date.now(), kind:'ability', ref:'conversation.peer', scope:{ teams:['all'] } }] };
+    if (!v && has) return { ...t, grants:t.grants.filter(g => !(g.kind === 'ability' && g.ref === 'conversation.peer')) };
+    return t;
+  }) }));
   // widget peer thread
   wOpenPeer = () => this.setState({ wOpen:true, wView:'peer' });
   wPeerOnChange = (v) => this.setState({ wPeerText:v });
@@ -1611,67 +1822,167 @@ class Component extends DCLogic {
   openKeyDialog = () => {
     const r = () => Math.random().toString(36).slice(2);
     const k = 'sild_live_' + (r()+r()+r()).slice(0,30);
-    this.setState(s => ({ keyDialog:true, revealedKey:k, keys:[{ id:'k'+Date.now(), label:'New key', masked:k.slice(0,14)+'………'+k.slice(-4), created:'Just now' }, ...s.keys] }));
+    const kid = 'k'+Date.now(), masked = k.slice(0,14)+'………'+k.slice(-4);
+    this.setState(s => ({ keyDialog:true, revealedKey:k,
+      keys:[{ id:kid, label:'New key', masked, created:'Just now' }, ...s.keys],
+      team:[...s.team, { id:'s'+Date.now(), type:'service', name:'New key', keyId:kid, email:masked, grants:[] }] }));
   };
   closeKeyDialog = () => this.setState({ keyDialog:false, revealedKey:null });
   copyKey = () => { try { navigator.clipboard.writeText(this.state.revealedKey||''); } catch(e){} };
-  revokeKey = (id) => this.setState(s => ({ keys: s.keys.filter(k => k.id!==id) }));
+  revokeKey = (id) => this.setState(s => ({ keys: s.keys.filter(k => k.id!==id), team: s.team.filter(t => t.keyId!==id) }));
   toggleWebhook = (id, v) => this.setState(s => ({ webhooks: s.webhooks.map(w => w.id===id ? { ...w, active:v } : w) }));
   deleteWebhook = (id) => this.setState(s => ({ webhooks: s.webhooks.filter(w => w.id!==id) }));
-  // ---- IAM: role definitions drive the UI; a new role or a new scope needs no new column ----
-  ROLE_DEFS = {
-    owner: { label:'owner', desc:'Full control of the tenant, including billing and deletion.', dims:[] },
-    admin: { label:'admin', desc:'Manages settings, keys, webhooks and members.', dims:[] },
-    agent: { label:'agent', desc:'Works the assignment queue.', dims:[
-      { key:'teams', label:'Teams', type:'set', help:'Queues this assignment may work.', options:[{ id:'support', label:'Support' }, { id:'dispatch', label:'Dispatch' }, { id:'billing', label:'Billing' }] },
-      { key:'peer', label:'Peer conversations', type:'toggle', help:'Direct chats between parties with no assigned agent.' },
-    ] },
-    translator: { label:'translator', desc:'Edits strings only. Reaches no conversation, contact or message.', dims:[
-      { key:'projects', label:'Projects', type:'set', help:'Translation projects this assignment may write.', options:[{ id:'platform', label:'Sild platform' }, { id:'kuller', label:'Kuller app' }] },
-      { key:'locales', label:'Languages', type:'set', help:'Languages this assignment may write.', options:[{ id:'et', label:'Estonian' }, { id:'lv', label:'Latvian' }, { id:'lt', label:'Lithuanian' }, { id:'es', label:'Spanish' }] },
-    ] },
+  // ---- IAM: abilities are the primitives; a role is a named bundle of them. Both are granted with a scope. ----
+  ABILITIES = {
+    'conversation.work':   { label:'conversation.work', desc:'Read and reply on assigned conversations.', dims:['teams'] },
+    'conversation.peer':   { label:'conversation.peer', desc:'Direct chats between parties with no assigned agent.', dims:['teams'] },
+    'conversation.assign': { label:'conversation.assign', desc:'Move a conversation between agents and queues.', dims:['teams'] },
+    'translation.write':   { label:'translation.write', desc:'Edit strings. Reaches no conversation, contact or message.', dims:['projects','locales'] },
+    'translation.publish': { label:'translation.publish', desc:'Publish a translation release.', dims:['projects'] },
+    'triage.use':          { label:'triage.use', desc:'Chat with the tech support assistant about your own issues.', dims:[] },
+    'triage.view_all':     { label:'triage.view_all', desc:'See every tech support chat in the tenant.', dims:[] },
+    'triage.api_calls':    { label:'triage.api_calls', desc:'See the integrator API calls the assistant makes.', dims:[] },
+    'settings.manage':     { label:'settings.manage', desc:'Settings, API keys, webhooks and members.', dims:[] },
+    'tenant.own':          { label:'tenant.own', desc:'Billing and deletion of the tenant.', dims:[] },
   };
-  roleDims(role){ return (this.ROLE_DEFS[role] || {}).dims || []; }
-  dimLabel(dim, val){
-    if (dim.type === 'toggle') return val === true ? dim.label.toLowerCase() : '';
-    const arr = val || [];
+  DIMS = {
+    teams:    { label:'Teams', help:'Queues this grant applies to.', options:[{ id:'support', label:'Support' }, { id:'dispatch', label:'Dispatch' }, { id:'billing', label:'Billing' }] },
+    projects: { label:'Projects', help:'Translation projects this grant applies to.', options:[{ id:'platform', label:'Sild platform' }, { id:'kuller', label:'Kuller app' }] },
+    locales:  { label:'Languages', help:'Languages this grant applies to.', options:[{ id:'et', label:'Estonian' }, { id:'lv', label:'Latvian' }, { id:'lt', label:'Lithuanian' }, { id:'es', label:'Spanish' }] },
+  };
+  ROLE_DEFS = {
+    owner:      { label:'owner', desc:'Everything, including billing and deletion.', abilities:['tenant.own','settings.manage','conversation.work','conversation.assign','triage.use','triage.view_all','triage.api_calls'] },
+    admin:      { label:'admin', desc:'Settings, keys, webhooks and members.', abilities:['settings.manage','conversation.assign','triage.use','triage.view_all','triage.api_calls'] },
+    tech_support: { label:'tech support user', desc:'Talks to the triage assistant about their own issues.', abilities:['triage.use'] },
+    agent:      { label:'agent', desc:'Works the assignment queue.', abilities:['conversation.work'] },
+    translator: { label:'translator', desc:'Edits strings in a project and language scope.', abilities:['translation.write'] },
+  };
+  grantAbilities(g){ return g.kind === 'role' ? ((this.ROLE_DEFS[g.ref] || {}).abilities || []) : [g.ref]; }
+  grantName(g){ return g.kind === 'role' ? ((this.ROLE_DEFS[g.ref] || {}).label || g.ref) : ((this.ABILITIES[g.ref] || {}).label || g.ref); }
+  grantDesc(g){ return g.kind === 'role' ? (this.ROLE_DEFS[g.ref] || {}).desc : (this.ABILITIES[g.ref] || {}).desc; }
+  grantDims(g){
+    const seen = [];
+    this.grantAbilities(g).forEach(a => ((this.ABILITIES[a] || {}).dims || []).forEach(d => { if (seen.indexOf(d) < 0) seen.push(d); }));
+    return seen;
+  }
+  dimLabel(dimKey, val){
+    const dim = this.DIMS[dimKey], arr = val || [];
     if (arr.indexOf('all') >= 0) return 'all ' + dim.label.toLowerCase();
     if (!arr.length) return 'no ' + dim.label.toLowerCase();
     return arr.map(id => ((dim.options.find(o => o.id === id) || {}).label || id)).join(', ');
   }
-  assignmentLabel(a){
-    const parts = this.roleDims(a.role).map(d => this.dimLabel(d, a.scope[d.key])).filter(Boolean);
-    return parts.length ? parts.join(' · ') : 'tenant-wide';
+  assignmentLabel(g){
+    const parts = this.grantDims(g).map(d => this.dimLabel(d, g.scope[d]));
+    return parts.length ? parts.join(' \u00b7 ') : 'tenant-wide';
+  }
+  effectiveRows(member){
+    const map = {}, order = [];
+    member.grants.forEach(g => this.grantAbilities(g).forEach(a => {
+      if (!map[a]) { map[a] = []; order.push(a); }
+      map[a].push(g);
+    }));
+    return order.sort().map(a => {
+      const gs = map[a], dims = (this.ABILITIES[a] || {}).dims || [];
+      const merged = dims.map(d => {
+        const vals = [];
+        gs.forEach(g => (g.scope[d] || []).forEach(v => { if (vals.indexOf(v) < 0) vals.push(v); }));
+        return this.dimLabel(d, vals.indexOf('all') >= 0 ? ['all'] : vals);
+      });
+      return {
+        ability: a,
+        desc: (this.ABILITIES[a] || {}).desc || '',
+        scopeLabel: merged.length ? merged.join(' \u00b7 ') : 'tenant-wide',
+        sources: gs.map(g => ({ label: 'via ' + g.kind + ' ' + this.grantName(g) + (this.grantDims(g).length ? ' \u2014 ' + this.assignmentLabel(g) : '') })),
+      };
+    });
   }
   editing(){
     const e = this.state.assignEdit; if (!e) return null;
     const m = this.state.team.find(t => t.id === e.memberId); if (!m) return null;
-    const a = m.assignments.find(x => x.id === e.assignmentId); if (!a) return null;
-    return { member:m, assignment:a };
+    const g = m.grants.find(x => x.id === e.assignmentId); if (!g) return null;
+    return { member:m, grant:g };
   }
   patchAssignment = (fn) => this.setState(s => ({ team: s.team.map(m => m.id !== s.assignEdit.memberId ? m : ({ ...m,
-    assignments: m.assignments.map(a => a.id !== s.assignEdit.assignmentId ? a : fn(a)) }) ) }));
-  toggleScopeValue = (key, id) => this.patchAssignment(a => {
-    const arr = (a.scope[key] || []).filter(x => x !== 'all');
+    grants: m.grants.map(g => g.id !== s.assignEdit.assignmentId ? g : fn(g)) }) ) }));
+  toggleScopeValue = (key, id) => this.patchAssignment(g => {
+    const arr = (g.scope[key] || []).filter(x => x !== 'all');
     const i = arr.indexOf(id); if (i >= 0) arr.splice(i, 1); else arr.push(id);
-    return { ...a, scope:{ ...a.scope, [key]: arr } };
+    return { ...g, scope:{ ...g.scope, [key]: arr } };
   });
-  setScopeAll = (key) => this.patchAssignment(a => ({ ...a, scope:{ ...a.scope, [key]: (a.scope[key] || []).indexOf('all') >= 0 ? [] : ['all'] } }));
-  setScopeToggle = (key, v) => this.patchAssignment(a => ({ ...a, scope:{ ...a.scope, [key]: v } }));
+  setScopeAll = (key) => this.patchAssignment(g => ({ ...g, scope:{ ...g.scope, [key]: (g.scope[key] || []).indexOf('all') >= 0 ? [] : ['all'] } }));
   removeAssignment = () => this.setState(s => ({
-    team: s.team.map(m => m.id !== s.assignEdit.memberId ? m : ({ ...m, assignments: m.assignments.filter(a => a.id !== s.assignEdit.assignmentId) })),
+    team: s.team.map(m => m.id !== s.assignEdit.memberId ? m : ({ ...m, grants: m.grants.filter(g => g.id !== s.assignEdit.assignmentId) })),
     assignEdit: null,
   }));
-  addAssignment = (role) => this.setState(s => {
-    const id = 'ra' + Date.now();
+  addGrant = (kind, ref) => this.setState(s => {
+    const id = 'g' + Date.now();
     const scope = {};
-    this.roleDims(role).forEach(d => { scope[d.key] = d.type === 'toggle' ? false : []; });
+    this.grantDims({ kind, ref, scope:{} }).forEach(d => { scope[d] = []; });
     return {
-      team: s.team.map(m => m.id !== s.addRoleFor ? m : ({ ...m, assignments:[...m.assignments, { id, role, scope }] })),
-      addRoleFor: null,
-      assignEdit: this.roleDims(role).length ? { memberId:s.addRoleFor, assignmentId:id } : null,
+      team: s.team.map(m => m.id !== s.addRoleFor ? m : ({ ...m, grants:[...m.grants, { id, kind, ref, scope }] })),
+      addRoleFor: null, grantQuery: '',
+      assignEdit: { memberId:s.addRoleFor, assignmentId:id },
     };
   });
+  openInvite = () => this.setState({ inviteOpen:true, inviteEmail:'', inviteQuery:'', inviteDraft:[] });
+  closeInvite = () => this.setState({ inviteOpen:false });
+  addInviteGrant = (kind, ref) => this.setState(s => {
+    const scope = {};
+    this.grantDims({ kind, ref, scope:{} }).forEach(d => { scope[d] = ['all']; });
+    return { inviteDraft:[...s.inviteDraft, { id:'ig' + Date.now(), kind, ref, scope }], inviteQuery:'' };
+  });
+  removeInviteGrant = (id) => this.setState(s => ({ inviteDraft: s.inviteDraft.filter(g => g.id !== id) }));
+  sendInvite = () => this.setState(s => {
+    if (!s.inviteEmail.trim()) return { inviteOpen:false };
+    return {
+      invites:[...s.invites, { id:'inv' + Date.now(), email:s.inviteEmail.trim(), sent:'Invited just now', grants:s.inviteDraft }],
+      inviteOpen:false, inviteEmail:'', inviteDraft:[], inviteQuery:'',
+    };
+  });
+  revokeInvite = (id) => this.setState(s => ({ invites: s.invites.filter(i => i.id !== id) }));
+  grantChipStyles(g){
+    return {
+      chipStyle:'display:flex;align-items:center;gap:8px;max-width:100%;border:1px solid var(--border-default);border-radius:999px;background:' + (g.kind === 'role' ? 'var(--white)' : 'var(--surface-sunken)') + ';padding:5px 12px 5px 8px;cursor:pointer;font-family:var(--font-sans);text-align:left',
+      kindStyle:'display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;flex:none;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;background:' + (g.kind === 'role' ? 'var(--brand-subtle)' : 'var(--border-subtle)') + ';color:' + (g.kind === 'role' ? 'var(--brand)' : 'var(--text-tertiary)'),
+    };
+  }
+  grantSearchResults(member, opts){
+    const o = opts || {};
+    const held = o.held || member.grants;
+    const onPick = o.onPick || ((kind, ref) => this.addGrant(kind, ref));
+    const q = ((o.query !== undefined ? o.query : this.state.grantQuery) || '').trim().toLowerCase();
+    const match = (name, desc, abilities) => !q || (name + ' ' + desc + ' ' + (abilities || []).join(' ')).toLowerCase().indexOf(q) >= 0;
+    const optStyle = 'display:flex;flex-direction:column;gap:4px;text-align:left;width:100%;padding:10px 12px;border:1px solid var(--border-default);border-radius:10px;background:var(--white);cursor:pointer;font-family:var(--font-sans);margin-bottom:6px';
+    const kindStyle = (isRole) => 'display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;flex:none;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;background:' + (isRole ? 'var(--brand-subtle)' : 'var(--border-subtle)') + ';color:' + (isRole ? 'var(--brand)' : 'var(--text-tertiary)');
+    const dimHint = (dims) => dims.length ? dims.join(' · ') : 'tenant-wide';
+    const out = [];
+    const roles = Object.keys(this.ROLE_DEFS)
+      .filter(r => !held.some(g => g.kind === 'role' && g.ref === r))
+      .filter(r => match(this.ROLE_DEFS[r].label, this.ROLE_DEFS[r].desc, this.ROLE_DEFS[r].abilities));
+    if (roles.length) {
+      out.push({ isHeader:true, isOption:false, label:'Roles', wrapStyle:'' });
+      roles.forEach(r => out.push({ isHeader:false, isOption:true, wrapStyle:'',
+        kind:'role', kindStyle:kindStyle(true), label:this.ROLE_DEFS[r].label,
+        labelStyle:'font-size:14px;font-weight:600;color:var(--text-primary)',
+        desc:this.ROLE_DEFS[r].desc, dimHint:dimHint(this.grantDims({ kind:'role', ref:r })),
+        style:optStyle, onClick:() => onPick('role', r) }));
+    }
+    const abilities = Object.keys(this.ABILITIES)
+      .filter(x => !held.some(g => g.kind === 'ability' && g.ref === x))
+      .filter(x => match(this.ABILITIES[x].label, this.ABILITIES[x].desc));
+    if (abilities.length) {
+      out.push({ isHeader:true, isOption:false, label:'Abilities', wrapStyle:'' });
+      abilities.forEach(x => out.push({ isHeader:false, isOption:true, wrapStyle:'',
+        kind:'ability', kindStyle:kindStyle(false), label:this.ABILITIES[x].label,
+        labelStyle:'font-family:var(--font-mono);font-size:12.5px;font-weight:600;color:var(--text-primary)',
+        desc:this.ABILITIES[x].desc, dimHint:dimHint(this.ABILITIES[x].dims),
+        style:optStyle, onClick:() => onPick('ability', x) }));
+    }
+    return out;
+  }
+  teamSeg(on){
+    return 'height:28px;padding:0 12px;border:0;border-radius:7px;cursor:pointer;font-family:var(--font-sans);font-size:13px;font-weight:600;background:' + (on ? 'var(--white)' : 'transparent') + ';color:' + (on ? 'var(--text-primary)' : 'var(--text-secondary)') + ';box-shadow:' + (on ? 'var(--shadow-xs)' : 'none');
+  }
   scopeChipStyle(on){
     return 'height:30px;padding:0 11px;border:1px solid '+(on?'var(--brand)':'var(--border-default)')+';border-radius:999px;background:'+(on?'var(--brand-subtle)':'var(--white)')+';color:'+(on?'var(--brand)':'var(--text-secondary)')+';font-family:var(--font-sans);font-size:13px;font-weight:600;cursor:pointer';
   }
@@ -1951,19 +2262,38 @@ class Component extends DCLogic {
     }));
 
     // settings (per-row handlers)
-    const keys = s.keys.map(k => ({ ...k, onRevoke: () => this.revokeKey(k.id) }));
+    const keys = s.keys.map(k => {
+      const p = s.team.find(t => t.keyId === k.id);
+      const gs = p ? p.grants : [];
+      return { ...k, onRevoke: () => this.revokeKey(k.id),
+        grantSummary: gs.length ? gs.map(g => this.grantName(g) + ' \u00b7 ' + this.assignmentLabel(g)).join('  |  ') : 'No grants \u2014 this key can read and write nothing',
+        permLabel: gs.length ? 'Permissions' : 'Grant access',
+        onPerms: () => this.setState(gs.length
+          ? { settingsTab:'team', teamTab:'service', effFor:p.id }
+          : { settingsTab:'team', teamTab:'service', addRoleFor:p ? p.id : null, grantQuery:'' }) };
+    });
     const webhooks = s.webhooks.map(w => ({ ...w, onToggle: (v) => this.toggleWebhook(w.id, v), onDelete: () => this.deleteWebhook(w.id) }));
-    const team = s.team.map(t => ({ ...t,
+    const onServiceTab = s.teamTab === 'service';
+    const team = s.team.filter(t => (t.type === 'service') === onServiceTab).map(t => ({ ...t,
       isMe: t.id===this._meId,
-      assignments: t.assignments.map(a => ({
-        role: (this.ROLE_DEFS[a.role] || {}).label || a.role,
-        scopeLabel: this.assignmentLabel(a),
-        onEdit: () => this.setState({ assignEdit:{ memberId:t.id, assignmentId:a.id } }),
+      isService: t.type==='service',
+      isUser: t.type!=='service',
+      onEffective: () => this.setState({ effFor:t.id }),
+      hasKey: !!t.keyId,
+      onViewKey: () => this.setState({ settingsTab:'keys' }),
+      grants: t.grants.map(g => ({
+        kind: g.kind === 'role' ? 'role' : 'ability',
+        name: this.grantName(g),
+        scopeLabel: this.assignmentLabel(g),
+        chipStyle: 'display:flex;align-items:center;gap:8px;max-width:100%;border:1px solid var(--border-default);border-radius:999px;background:' + (g.kind === 'role' ? 'var(--white)' : 'var(--surface-sunken)') + ';padding:5px 12px 5px 8px;cursor:pointer;font-family:var(--font-sans);text-align:left',
+        kindStyle: 'display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;flex:none;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;background:' + (g.kind === 'role' ? 'var(--brand-subtle)' : 'var(--border-subtle)') + ';color:' + (g.kind === 'role' ? 'var(--brand)' : 'var(--text-tertiary)'),
+        onEdit: () => this.setState({ assignEdit:{ memberId:t.id, assignmentId:g.id } }),
       })),
-      onAddRole: () => this.setState({ addRoleFor:t.id }),
+      onAddGrant: () => this.setState({ addRoleFor:t.id, grantQuery:'' }),
     }));
     const ed = this.editing();
     const addFor = s.addRoleFor ? s.team.find(m => m.id === s.addRoleFor) : null;
+    const effM = s.effFor ? s.team.find(m => m.id === s.effFor) : null;
 
     // widget
     const wMsgs = s.wMsgs.map(m => ({ direction:m.dir, author:m.author, time:m.time, body:m.body, readReceipt:m.read }));
@@ -1987,11 +2317,30 @@ class Component extends DCLogic {
       tabInbox: this.segStyle(isInbox), tabWidget: this.segStyle(isWidget), tabApp: this.segStyle(isApp),
 
       // inbox
-      showLogin: !s.signedIn, showInboxApp: s.signedIn,
-      inboxIsList: s.inboxView==='inbox', inboxIsSettings: s.inboxView==='settings',
+      ...(() => {
+        const ab = this.myAbilities(), has = a => !ab || ab.has(a) || (ab.has('tenant.own'));
+        const denied = !!this.props.embedded && (!ab || ab.size===0);
+        const vis = { triage: !!ab && (ab.has('triage.use') || ab.has('triage.view_all')),
+          inbox: !ab || ['conversation.work','conversation.assign','tenant.own'].some(a => ab.has(a)),
+          settings: !ab || ab.has('settings.manage') || ab.has('tenant.own') };
+        const view = (s.inboxView==='peer' || vis[s.inboxView]) ? s.inboxView : (['triage','inbox','settings'].find(v => vis[v]) || 'inbox');
+        const me = s.team.find(t => t.id===this._meId);
+        return {
+          showSwitcher: !this.props.embedded,
+          showLogin: !s.signedIn && !this.props.embedded, showInboxApp: s.signedIn && !denied, showDenied: denied,
+          deniedReason: me ? 'no_grants' : 'user_not_provisioned', deniedSub: this.props.meSub || this._meId,
+          meName: me ? me.name : 'Liis Mägi',
+          triageNavVisible: vis.triage, inboxNavVisible: vis.inbox, settingsNavVisible: vis.settings,
+          inboxIsTriage: view==='triage', navTriageStyle: this.navStyle(view==='triage'), onGoTriage: () => this.setState({ inboxView:'triage' }),
+          triageCanStart: has('triage.use') && !!ab, triageViewAll: !!ab && (ab.has('triage.view_all') || ab.has('tenant.own')),
+          triageApi: !!ab && ab.has('triage.api_calls'),
+          triageApiOpen: !!this.props.showApiCalls,
+          inboxIsList: view==='inbox', inboxIsSettings: view==='settings',
+          navInboxStyle: this.navStyle(view==='inbox'), navSettingsStyle: this.navStyle(view==='settings'),
+        };
+      })(),
       inboxIsPeer: s.inboxView==='peer' && this.myPeerAccess(),
       ...this.peerVals(),
-      navInboxStyle: this.navStyle(s.inboxView==='inbox'), navSettingsStyle: this.navStyle(s.inboxView==='settings'),
       onSignIn: this.signIn, onSignOut: this.signOut, onGoInbox: this.goInbox, onGoSettings: this.goSettings,
       convRows, noConvs: filtered.length===0,
       filterYou: this.filterStyle(s.filter==='you'), filterUn: this.filterStyle(s.filter==='unassigned'), filterAll: this.filterStyle(s.filter==='all'),
@@ -2048,30 +2397,57 @@ class Component extends DCLogic {
       emailSpamFilter: s.emailSpamFilter, onEmailSpam: this.toggleEmailSpam,
       keys, webhooks, team,
       scopeOpen: !!ed,
-      scopeTitle: ed ? ed.assignment.role + ' — ' + ed.member.name : '',
-      scopeSubtitle: ed ? (this.ROLE_DEFS[ed.assignment.role] || {}).desc : '',
-      scopeNoDims: !!ed && this.roleDims(ed.assignment.role).length === 0,
-      scopeDims: ed ? this.roleDims(ed.assignment.role).map(d => {
-        const val = ed.assignment.scope[d.key];
-        const all = d.type === 'set' && (val || []).indexOf('all') >= 0;
+      scopeTitle: ed ? this.grantName(ed.grant) + ' \u2014 ' + ed.member.name : '',
+      scopeSubtitle: ed ? this.grantDesc(ed.grant) : '',
+      scopeIsRole: !!ed && ed.grant.kind === 'role',
+      scopeAbilities: ed ? this.grantAbilities(ed.grant) : [],
+      scopeNoDims: !!ed && this.grantDims(ed.grant).length === 0,
+      scopeJson: ed ? JSON.stringify({ kind:ed.grant.kind, ref:ed.grant.ref, scope:ed.grant.scope }, null, 2) : '',
+      scopeDims: ed ? this.grantDims(ed.grant).map(key => {
+        const dim = this.DIMS[key], val = ed.grant.scope[key];
+        const all = (val || []).indexOf('all') >= 0;
         return {
-          label:d.label, help:d.help, isSet:d.type === 'set', isToggle:d.type === 'toggle',
-          on: val === true, onToggle: (v) => this.setScopeToggle(d.key, v),
-          chips: d.type === 'set' ? [{ label:'All', style:this.scopeChipStyle(all), onClick:() => this.setScopeAll(d.key) }]
-            .concat(d.options.map(o => ({ label:o.label, style:this.scopeChipStyle(!all && (val || []).indexOf(o.id) >= 0), onClick:() => this.toggleScopeValue(d.key, o.id) }))) : [],
+          label:dim.label, help:dim.help,
+          chips: [{ label:'All', style:this.scopeChipStyle(all), onClick:() => this.setScopeAll(key) }]
+            .concat(dim.options.map(o => ({ label:o.label, style:this.scopeChipStyle(!all && (val || []).indexOf(o.id) >= 0), onClick:() => this.toggleScopeValue(key, o.id) }))),
         };
       }) : [],
       onCloseScope: () => this.setState({ assignEdit:null }),
       onRemoveAssignment: this.removeAssignment,
+      teamSegPeople: this.teamSeg(!onServiceTab),
+      teamSegService: this.teamSeg(onServiceTab),
+      peopleCount: s.team.filter(t => t.type !== 'service').length,
+      serviceCount: s.team.filter(t => t.type === 'service').length,
+      teamTabHint: onServiceTab ? 'API keys and the agent. Same grants, no login.' : '',
+      onTeamPeople: () => this.setState({ teamTab:'people' }),
+      onTeamService: () => this.setState({ teamTab:'service' }),
+      effOpen: !!effM,
+      effTitle: effM ? 'Effective permissions \u2014 ' + effM.name : '',
+      effSubtitle: 'Every ability this principal holds, the merged scope, and the grant that conferred it.',
+      effRows: effM ? this.effectiveRows(effM) : [],
+      effEmpty: !!effM && effM.grants.length === 0,
+      onCloseEff: () => this.setState({ effFor:null }),
       addRoleOpen: !!addFor,
-      addRoleSubtitle: addFor ? 'A second role adds capabilities to ' + addFor.name + '; it never takes any away.' : '',
-      addRoleOptions: addFor ? Object.keys(this.ROLE_DEFS).filter(r => !addFor.assignments.some(a => a.role === r)).map(r => ({
-        label:this.ROLE_DEFS[r].label, desc:this.ROLE_DEFS[r].desc,
-        style:'display:flex;flex-direction:column;gap:3px;text-align:left;width:100%;padding:11px 13px;border:1px solid var(--border-default);border-radius:10px;background:var(--white);cursor:pointer;font-family:var(--font-sans)',
-        onClick:() => this.addAssignment(r),
-      })) : [],
-      addRoleNone: !!addFor && Object.keys(this.ROLE_DEFS).every(r => addFor.assignments.some(a => a.role === r)),
-      onCloseAddRole: () => this.setState({ addRoleFor:null }),
+      addRoleSubtitle: addFor ? 'A grant only adds capabilities to ' + addFor.name + '; it never takes any away.' : '',
+      onOpenInvite: this.openInvite,
+      inviteOpen: s.inviteOpen,
+      onCloseInvite: this.closeInvite,
+      inviteEmail: s.inviteEmail,
+      onInviteEmail: (e) => this.setState({ inviteEmail:e.target.value }),
+      inviteQuery: s.inviteQuery,
+      onInviteQuery: (e) => this.setState({ inviteQuery:e.target.value }),
+      inviteNoGrants: s.inviteDraft.length === 0,
+      inviteGrants: s.inviteDraft.map(g => ({ kind:g.kind === 'role' ? 'role' : 'ability', name:this.grantName(g), ...this.grantChipStyles(g), onRemove:() => this.removeInviteGrant(g.id) })),
+      inviteResults: this.grantSearchResults({ grants:s.inviteDraft }, { held:s.inviteDraft, query:s.inviteQuery, onPick:(kind, ref) => this.addInviteGrant(kind, ref) }),
+      inviteSummary: s.inviteDraft.length ? 'They join with ' + s.inviteDraft.length + (s.inviteDraft.length === 1 ? ' grant. Scope it from the member row after they accept.' : ' grants. Scope them from the member row after they accept.') : 'Pick at least one grant.',
+      onSendInvite: this.sendInvite,
+      invites: (onServiceTab ? [] : s.invites).map(i => ({ email:i.email, sent:i.sent, onRevoke:() => this.revokeInvite(i.id),
+        grants:i.grants.map(g => ({ kind:g.kind === 'role' ? 'role' : 'ability', name:this.grantName(g), scopeLabel:this.assignmentLabel(g), ...this.grantChipStyles(g) })) })),
+      grantQuery: s.grantQuery,
+      onGrantQuery: (e) => this.setState({ grantQuery:e.target.value }),
+      grantResults: addFor ? this.grantSearchResults(addFor) : [],
+      grantNoResults: !!addFor && this.grantSearchResults(addFor).length === 0,
+      grantEmptyText: s.grantQuery ? 'Nothing matches “' + s.grantQuery + '”.' : 'This member already holds every role and ability.',
       onNewKey: this.openKeyDialog, keyDialog: s.keyDialog, revealedKey: s.revealedKey, onCloseKey: this.closeKeyDialog, onCopyKey: this.copyKey,
 
       // widget

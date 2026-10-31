@@ -8,6 +8,7 @@ import "context"
 // Event types (§5.3).
 const (
 	EventMessageCreated     = "message.created"
+	EventMessageUpdated     = "message.updated"
 	EventMessageRead        = "message.read"
 	EventMemberAdded        = "member.added"
 	EventMemberRemoved      = "member.removed"
@@ -31,12 +32,16 @@ func AgentsChannel(tenantID string) string { return "agents:" + tenantID }
 // PeerChannel carries every peer-conversation event (new-conversation nudges and
 // message.created / member.added / conversation.closed for peer conversations) to
 // operators who observe the peer surface. ONLY peer_access operators are ever
-// subscribed here (gated in agentSubscriptions + reconcilePeerSubscriptions), so
+// subscribed here (gated in AgentChannels), so
 // peer content reaching a non-peer operator is impossible as a subscription fact.
 // A single tenant channel — rather than one subscription per peer conversation —
 // means a peer conversation created after an operator connects is observed with
 // no per-connection bookkeeping (§5.1).
 func PeerChannel(tenantID string) string { return "peer:" + tenantID }
+
+// QueueChannel is AgentsChannel for one tenant-defined queue. The support queue
+// keeps AgentsChannel; only operators whose scope reaches the queue subscribe.
+func QueueChannel(tenantID, queue string) string { return "queue:" + tenantID + ":" + queue }
 
 // Envelope is the wire format pushed to clients (§5.3).
 type Envelope struct {
@@ -52,8 +57,12 @@ type Target struct {
 	Internal     bool     // agents-only: suppresses every client channel (§5.6)
 	Users        []string // also push to user:<id> channels
 	Tenant       string   // also push to agents:<tenant> (queue-wide agent fan-out)
+	Queue        QueueRef // also push to queue:<tenant>:<queue> (a non-support queue's operators)
 	Peer         string   // also push to peer:<tenant> (peer-access operator fan-out)
 }
+
+// QueueRef names one tenant-defined queue's operator channel.
+type QueueRef struct{ Tenant, Key string }
 
 // Publisher pushes envelopes to the broker. REST handlers call it AFTER the
 // Postgres commit; delivery is best-effort (reconnect catch-up is the
@@ -65,7 +74,7 @@ type Publisher interface {
 // Subscriber adjusts a connected user's server-side subscriptions live, so an
 // access change (e.g. peer_access granted/revoked) takes effect without waiting
 // for the connection to reconnect — subscriptions are otherwise only derived at
-// connect time (agentSubscriptions). Implemented by the Centrifuge publisher;
+// connect time (AgentChannels). Implemented by the Centrifuge publisher;
 // absent in tests/workers, so callers type-assert and no-op when unavailable.
 type Subscriber interface {
 	Subscribe(userID, channel string) error

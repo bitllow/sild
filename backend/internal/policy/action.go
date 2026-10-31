@@ -57,6 +57,10 @@ const (
 	// suppressing nudges or dropping their devices.
 	PushRecipientsManage Action = "push_recipients.manage"
 
+	// IdentityManage configures embedded sign-in, which decides who may act as a
+	// member: owner-only, like the push credential.
+	IdentityManage Action = "identity.manage"
+
 	// Separate from BrandsRead: reachable with no credential at all.
 	BrandsReadActive Action = "brands.read_active"
 	BrandsRead       Action = "brands.read"
@@ -78,6 +82,9 @@ const (
 	TranslationsPublish Action = "translations.publish"
 	// TranslationsManage covers the project's locales and translator scopes.
 	TranslationsManage Action = "translations.manage"
+
+	NotesRead  Action = "notes.read"
+	NotesWrite Action = "notes.write"
 )
 
 // grant lists which principals hold an action — the only place roles map to
@@ -90,25 +97,26 @@ type grant struct {
 	owner      bool // admin session, owner only
 	signed     bool // signed upload capability
 	translator bool // admin session, translator only
+	requester  bool // admin session, requester only
 }
 
 var capabilities = map[Action]grant{
-	ConversationsList:          {apiKey: true, user: true, admin: true},
-	ConversationsRead:          {apiKey: true, user: true, admin: true},
-	ConversationsCreateSupport: {apiKey: true, user: true, admin: true},
+	ConversationsList:          {apiKey: true, user: true, admin: true, requester: true},
+	ConversationsRead:          {apiKey: true, user: true, admin: true, requester: true},
+	ConversationsCreateSupport: {apiKey: true, user: true, admin: true, requester: true},
 	// Server-to-server only: a peer conversation is visible to every peer_access
 	// operator.
 	ConversationsCreatePeer: {apiKey: true},
-	ConversationsClose:      {apiKey: true, admin: true},
+	ConversationsClose:      {apiKey: true, admin: true, requester: true},
 
 	MembersManage: {apiKey: true},
 	MembersRemap:  {apiKey: true},
 
-	MessagesRead: {apiKey: true, user: true, admin: true},
-	MessagesSend: {apiKey: true, user: true, admin: true},
+	MessagesRead: {apiKey: true, user: true, admin: true, requester: true},
+	MessagesSend: {apiKey: true, user: true, admin: true, requester: true},
 
-	ReceiptsWrite: {apiKey: true, user: true, admin: true},
-	TypingWrite:   {apiKey: true, user: true, admin: true},
+	ReceiptsWrite: {apiKey: true, user: true, admin: true, requester: true},
+	TypingWrite:   {apiKey: true, user: true, admin: true, requester: true},
 
 	AssignmentsCreate: {apiKey: true, admin: true},
 	AssignmentsClaim:  {admin: true},
@@ -118,19 +126,20 @@ var capabilities = map[Action]grant{
 	ContactsRead:  {admin: true},
 	ContactsWrite: {apiKey: true, user: true},
 
-	UploadsIssue: {apiKey: true, user: true, admin: true},
+	UploadsIssue: {apiKey: true, user: true, admin: true, requester: true},
 	UploadsWrite: {signed: true},
 	UploadsRead:  {signed: true},
 
 	TokensMint:    {apiKey: true},
-	RealtimeToken: {admin: true},
-	PrincipalRead: {apiKey: true, user: true, admin: true, translator: true},
+	RealtimeToken: {admin: true, requester: true},
+	PrincipalRead: {apiKey: true, user: true, admin: true, translator: true, requester: true},
 
 	PushTokensManage:     {user: true},
 	PushConfigManage:     {owner: true},
 	PushRecipientsManage: {apiKey: true},
+	IdentityManage:       {owner: true},
 
-	BrandsReadActive: {apiKey: true, user: true, admin: true},
+	BrandsReadActive: {apiKey: true, user: true, admin: true, requester: true},
 	BrandsRead:       {adminPriv: true},
 	BrandsWrite:      {adminPriv: true},
 
@@ -142,11 +151,16 @@ var capabilities = map[Action]grant{
 	WebhooksReadDeliveries: {adminPriv: true},
 	TeamManage:             {adminPriv: true},
 
-	TranslationsFetch:   {apiKey: true, user: true, admin: true},
+	TranslationsFetch:   {apiKey: true, user: true, admin: true, requester: true},
 	TranslationsRead:    {admin: true, translator: true},
 	TranslationsWrite:   {adminPriv: true, translator: true},
 	TranslationsPublish: {adminPriv: true, translator: true},
 	TranslationsManage:  {adminPriv: true},
+
+	// Internal notes, and internal fields on message parts. Capability probes,
+	// not route actions: a handler asks before it shows or writes one.
+	NotesRead:  {apiKey: true, admin: true},
+	NotesWrite: {apiKey: true, admin: true},
 }
 
 // TranslatorActions is the translator role's whole capability set, so a test can
@@ -169,6 +183,7 @@ func Actions() []Action { return sortedActions() }
 // adminRoles is every platform role, narrowest first.
 var adminRoles = []models.PlatformRole{
 	models.PlatformOwner, models.PlatformAdmin, models.PlatformAgent, models.PlatformTranslator,
+	models.PlatformRequester,
 }
 
 // AdminRoles returns the platform roles carrying the action, so a route's role
@@ -204,6 +219,9 @@ func EveryAdminRole() []models.PlatformRole { return slices.Clone(adminRoles) }
 func roleHolds(g grant, r models.PlatformRole) bool {
 	if r == models.PlatformTranslator {
 		return g.translator
+	}
+	if r == models.PlatformRequester {
+		return g.requester
 	}
 	if g.owner {
 		return r == models.PlatformOwner

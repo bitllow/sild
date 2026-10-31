@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/radius.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/shadows.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/motion.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/tokens/base.css">
+  <link rel="stylesheet" href="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/styles.css">
+  <script src="_ds/sild-design-system-a952342a-77a7-4c7a-82fb-6c9b96d27841/_ds_bundle.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;height:100%}
+    body{font-family:var(--font-sans);background:var(--surface-page);color:var(--text-primary);-webkit-font-smoothing:antialiased}
+    h2{margin:0}
+    a{color:var(--brand);text-decoration:none}
+    a:hover{text-decoration:underline}
+  </style>
+</helmet>
+<div style="display:flex;flex-direction:column;height:100vh;width:100%;overflow:hidden">
+  <div style="flex:none;height:44px;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--slate-900);color:var(--slate-300);font-size:12px">
+    <span style="font-weight:600;color:var(--white)">Prototype</span>
+    <span>Signed into Fleetline as</span>
+    <div style="display:flex;gap:2px;background:rgba(255,255,255,.08);padding:3px;border-radius:8px">
+      <sc-for list="{{ roleOpts }}" as="r" hint-placeholder-count="4">
+        <button onClick="{{ r.onClick }}" style="{{ r.style }}">{{ r.label }}</button>
+      </sc-for>
+    </div>
+    <div style="flex:1"></div>
+    <span style="font-family:var(--font-mono);color:var(--slate-400)">{{ roleHint }}</span>
+  </div>
+
+  <div style="flex:1;min-height:0;display:flex">
+    <aside style="width:224px;flex:none;background:var(--white);border-right:1px solid var(--border-default);display:flex;flex-direction:column;padding:14px 10px">
+      <div style="display:flex;align-items:center;gap:10px;padding:4px 8px 18px">
+        <span style="width:28px;height:28px;border-radius:7px;background:var(--slate-800);color:var(--white);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px">F</span>
+        <span style="font-weight:700;font-size:15px">Fleetline</span>
+        <span style="font-size:11px;color:var(--text-tertiary);margin-left:auto">Admin</span>
+      </div>
+      <nav style="display:flex;flex-direction:column;gap:2px">
+        <sc-for list="{{ hostNav }}" as="n" hint-placeholder-count="7">
+          <a style="{{ n.style }}">{{ n.label }}</a>
+        </sc-for>
+      </nav>
+      <div style="flex:1"></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 8px;border-top:1px solid var(--border-subtle)">
+        <x-import component-from-global-scope="SildDesignSystem_a95234.Avatar" name="{{ meName }}" size="{{ av32 }}" hint-size="32px,32px"></x-import>
+        <div style="min-width:0">
+          <div style="font-size:13px;font-weight:600">{{ meName }}</div>
+          <div style="font-size:12px;color:var(--text-tertiary)">{{ meTitle }}</div>
+        </div>
+      </div>
+    </aside>
+
+    <main style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <sc-if value="{{ isChecking }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:24px">
+        <div style="width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px">
+          <h2 style="font-size:16px">Connecting to support</h2>
+          <div style="display:flex;flex-direction:column;gap:10px;background:var(--white);border:1px solid var(--border-default);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow-sm)">
+            <sc-for list="{{ authSteps }}" as="st" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:10px;min-height:22px">
+                <span style="width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center">
+                  <sc-if value="{{ st.done }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green-600)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
+                  <sc-if value="{{ st.running }}"><x-import component-from-global-scope="SildDesignSystem_a95234.Spinner" size="sm" hint-size="16px,16px"></x-import></sc-if>
+                  <sc-if value="{{ st.pending }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--slate-300)"></span></sc-if>
+                </span>
+                <span style="flex:1;font-size:14px">{{ st.label }}</span>
+                <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary)">{{ st.mono }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+      <div style="{{ frameStyle }}">
+        <dc-import name="Sild Surfaces" embedded="{{ yes }}" me-id="{{ meId }}" me-sub="{{ meSub }}" show-api-calls="{{ showApiCalls }}" style="height:100%;width:100%" hint-size="100%,100%"></dc-import>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;initialRole&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;admin&quot;,&quot;agent&quot;,&quot;user&quot;,&quot;none&quot;],&quot;default&quot;:&quot;admin&quot;,&quot;tsType&quot;:&quot;'admin'|'agent'|'user'|'none'&quot;},&quot;showApiCalls&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const IDENTITIES = {
+  admin: { label: 'Admin', name: 'Karl Sepp', title: 'Operations admin', id: 't2', sub: 'usr_1a07' },
+  agent: { label: 'Support agent', name: 'Liis Mägi', title: 'Support agent', id: 't1', sub: 'usr_3c52' },
+  user: { label: 'Standard user', name: 'Marko Saar', title: 'Dispatcher', id: 't7', sub: 'usr_8f21' },
+  none: { label: 'Not provisioned', name: 'Peeter Ots', title: 'Dispatcher', id: 'usr_9d40', sub: 'usr_9d40' }
+};
+class Component extends DCLogic {
+  state = { role: this.props.initialRole ?? 'admin', authStep: 0, ready: false };
+  timers = [];
+  componentDidMount() { this.auth(this.state.role); }
+  componentWillUnmount() { this.timers.forEach(clearTimeout); }
+  auth(role) {
+    this.timers.forEach(clearTimeout);
+    this.setState({ role, authStep: 0, ready: false });
+    this.timers = [
+      setTimeout(() => this.setState({ authStep: 1 }), 350),
+      setTimeout(() => this.setState({ authStep: 2 }), 700),
+      setTimeout(() => this.setState({ ready: true }), 1000)
+    ];
+  }
+  renderVals() {
+    const s = this.state, me = IDENTITIES[s.role];
+    const roleOpts = Object.entries(IDENTITIES).map(([id, v]) => ({ label: v.label, onClick: () => this.auth(id),
+      style: { height: 28, padding: '0 10px', border: 0, borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600, background: id === s.role ? 'var(--white)' : 'transparent', color: id === s.role ? 'var(--slate-900)' : 'var(--slate-300)' } }));
+    const hostNav = ['Dashboard', 'Dispatch', 'Drivers', 'Vehicles', 'Billing', 'Support', 'Settings'].map(label => {
+      const on = label === 'Support';
+      return { label, style: { display: 'flex', alignItems: 'center', height: 36, padding: '0 12px', borderRadius: 8, fontSize: 14, textDecoration: 'none', cursor: 'pointer', color: on ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: on ? 600 : 400, background: on ? 'var(--surface-active)' : 'transparent' } };
+    });
+    const steps = [['Reading Fleetline access token', 'Bearer eyJhbGci…'], ['Validating token with Fleetline', 'POST /oauth/introspect'], ['Loading your grants', 'sub=' + me.sub]];
+    return {
+      roleOpts, hostNav, meName: me.name, meTitle: me.title, meId: me.id, meSub: me.sub, av32: 32, yes: true,
+      roleHint: 'sub=' + me.sub + ' · grants resolved by Sild',
+      isChecking: !s.ready, frameStyle: { flex: 1, minHeight: 0, display: s.ready ? 'flex' : 'none', flexDirection: 'column' }, showApiCalls: !!this.props.showApiCalls,
+      authSteps: steps.map(([label, mono], n) => ({ label, mono, done: s.authStep > n, running: s.authStep === n, pending: s.authStep < n }))
+    };
+  }
+}
+</script>
+</body>
+</html>

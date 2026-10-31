@@ -1,141 +1,27 @@
-// Typed bindings for the Sild admin API (§4.3). Shapes mirror internal/views
-// and internal/api/admin.go on the Go side.
+// Typed bindings for the admin-only Sild API (§4.3). Shapes mirror
+// internal/api/admin.go on the Go side; the shared wire shapes and endpoints
+// come from @sild/client.
 
-import { api, collectAll } from "./client";
+import {
+  collectAll,
+  listConversations,
+  type Brand,
+  type Brands,
+  type ConversationQuery,
+  type ConversationRow,
+  type ExpandedContact,
+  type Page,
+  type PlatformRole,
+  type RoleAssignment,
+  type RoleScope,
+} from "@sild/client";
+import { http, WITH_PROFILES } from "./client";
 
-export type ApiAssignmentStatus = "queued" | "assigned" | "closed";
-export type ApiConvStatus = "open" | "closed";
-export type ApiSenderKind = "user" | "agent" | "bot" | "system";
-export type ApiVisibility = "participants" | "internal";
-export type ApiChannel = "app" | "email";
-export type ApiMemberKind = "user" | "agent" | "bot" | "email";
-// Conversation roles are tenant-defined free strings ("rider"/"driver"/"support"/
-// "client"/…). The UI derives all labels and colors from whatever roles appear.
-export type ApiConvRole = string;
-export type ApiPlatformRole = "owner" | "admin" | "agent" | "translator";
-
-export interface ApiAssignment {
-  id: string;
-  conversation_id: string;
-  status: ApiAssignmentStatus;
-  created_at: string;
-  assignee_actor_id?: string;
-  closed_at?: string | null;
-}
-
-export interface ApiMember {
-  member_kind: ApiMemberKind;
-  conv_role: ApiConvRole;
-  /** Display name, inline because every surface renders it. The rest of the
-   *  profile is the contacts resource — ask for it with expand=contacts.metadata. */
-  name?: string;
-  joined_at: string;
-  external_user_id?: string;
-  internal_actor_id?: string;
-}
-
-// One entry of the `contacts` expansion block. Distinct from ApiContact below,
-// which is the directory projection with its aggregates.
-export interface ApiExpandedContact {
-  external_user_id: string;
-  name?: string;
-  metadata?: Record<string, unknown> | null;
-}
-
-// profilesOf indexes an expansion block by person, so a member view can be
-// rendered with the profile the same response already carried.
-export function profilesOf(block?: ApiExpandedContact[] | null): Record<string, Record<string, unknown>> {
-  const out: Record<string, Record<string, unknown>> = {};
-  for (const c of block || []) {
-    if (c.metadata) out[c.external_user_id] = c.metadata;
-  }
-  return out;
-}
-
-export interface ApiConversation {
-  contacts?: ApiExpandedContact[];
-  id: string;
-  status: ApiConvStatus;
-  reference: string;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-  members: ApiMember[];
-  assignment?: ApiAssignment;
-  subject?: string; // email channel only — original email subject
-}
-
-export interface ApiAttachment {
-  object_key: string;
-  disposition: "inline" | "attachment";
-  mime_type: string;
-  size_bytes: number;
-  filename: string;
-  url?: string;
-}
-
-export interface ApiMessage {
-  id: string;
-  conversation_id: string;
-  sender_kind: ApiSenderKind;
-  visibility: ApiVisibility;
-  channel: ApiChannel;
-  body: string;
-  created_at: string;
-  external_user_id?: string;
-  internal_actor_id?: string;
-  client_msg_id?: string;
-  /** Agent's display name for agent/system-authored messages (from the server). */
-  author_name?: string;
-  attachments: ApiAttachment[];
-}
-
-export interface ApiUploadGrant {
-  object_key: string;
-  upload_url: string;
-  expires_at: string;
-}
-
-export interface AttachmentRef {
-  object_key: string;
-  disposition: "inline" | "attachment";
-}
-
-export interface ApiMessagesPage {
-  items: ApiMessage[];
-  next_cursor?: string | null;
-  has_more?: boolean;
-}
-
-// One inbox queue row: the conversation (members + last message preview + last
-// activity) WITHOUT history — opening it fetches the thread lazily (§4.3).
-// A row from GET /v1/conversations — the assignment is a nested field, so the
-// queue, peer list, contact history and search share one shape.
-export interface ApiQueueConversation extends ApiConversation {
-  last_activity: string;
-  last_message?: { body: string; created_at: string | null };
-  /** support (queued for an agent) or peer (direct chat, no assignment). */
-  kind?: "support" | "peer";
-  agent_name?: string;
-  unread_count?: number;
-  /** The matching fragment, present only on rows returned for a ?q= query. */
-  snippet?: string;
-}
-
-export interface ApiQueuePage extends ApiPage<ApiQueueConversation> {
-  contacts?: ApiExpandedContact[];
-  // Support queue only. closed counts closed CONVERSATIONS, not assignments.
-  counts?: {
-    open: number;
-    you: number;
-    unassigned: number;
-    closed: number;
-  };
-}
+const enc = encodeURIComponent;
 
 // last_activity (default), created = date started, waiting_since = queued-since.
-export type QueueSort = "last_activity" | "created" | "waiting_since";
-export type QueueOrder = "asc" | "desc";
-
+export type QueueSort = NonNullable<ConversationQuery["sort"]>;
+export type QueueOrder = NonNullable<ConversationQuery["order"]>;
 
 export interface ApiKeyRecord {
   id: string;
@@ -143,6 +29,8 @@ export interface ApiKeyRecord {
   prefix: string;
   created_at: string;
   revoked_at?: string | null;
+  /** The service account the key signs in as; null for a server key. */
+  actor_id?: string | null;
 }
 
 export interface ApiKeyCreated {
@@ -150,6 +38,7 @@ export interface ApiKeyCreated {
   key: string;
   label: string;
   prefix: string;
+  actor_id?: string | null;
 }
 
 export interface ApiWebhook {
@@ -160,102 +49,45 @@ export interface ApiWebhook {
   created_at: string;
 }
 
-
-/** The limits one assignment carries. Which of them a role has is the role's
- *  own declaration, served by /v1/roles. */
-export interface ApiRoleScope {
-  peer?: boolean;
-  projects?: string[];
-  locales?: string[];
-  publish?: boolean;
+export interface ApiQueue {
+  id: string;
+  key: string;
+  label: string;
+  requeue_on_reply: boolean;
+  webhooks: boolean;
+  /** The support queue: always present, not editable. */
+  built_in: boolean;
 }
 
-export interface ApiRoleAssignment {
-  role: ApiPlatformRole;
-  scope: ApiRoleScope;
-}
+export type QueueSettings = Pick<ApiQueue, "label" | "requeue_on_reply" | "webhooks">;
 
 export interface ApiTeamMember {
   id: string;
+  /** A service account has no login; its email field carries its name. */
+  kind?: "human" | "service";
   email: string;
   first_name?: string;
   last_name?: string;
   /** Every role this member holds, each with its scope. */
-  assignments: ApiRoleAssignment[];
+  assignments: RoleAssignment[];
   has_password: boolean;
+  /** The member's identity at the integrator, for embedded sign-in. */
+  external_sub?: string | null;
   created_at: string;
 }
 
 /** A role as the Team screen renders it: what it is for, and what it scopes. */
 export interface ApiRoleDefinition {
-  role: ApiPlatformRole;
+  role: PlatformRole;
   label: string;
   description: string;
   dimensions: {
-    key: keyof ApiRoleScope;
+    key: keyof RoleScope;
     kind: "set" | "toggle";
     label: string;
     help: string;
     source?: string;
   }[];
-}
-
-/**
- * The list envelope every collection endpoint returns. `next_cursor` is null
- * exactly when `has_more` is false, and is opaque — round-trip it verbatim.
- */
-export interface ApiPage<T> {
-  items: T[];
-  next_cursor: string | null;
-  has_more: boolean;
-}
-
-/** Filters for GET /v1/conversations — the one conversation list. */
-export interface ConversationParams {
-  kind?: "support" | "peer";
-  /** Conversation lifecycle — the inbox's notion of "closed". */
-  status?: "open" | "closed";
-  /** Assignment state machine (queued → assigned → closed). */
-  assignmentStatus?: "queued" | "assigned" | "closed";
-  assignee?: string;
-  participant?: string;
-  role?: string;
-  q?: string;
-  sort?: QueueSort;
-  order?: "asc" | "desc";
-  limit?: number;
-  cursor?: string | null;
-}
-
-/** One action the caller holds, with the scope it is held over. */
-export interface ApiGrant {
-  action: string;
-  scope?: {
-    kinds?: Array<"support" | "peer">;
-    requires_assignment?: boolean;
-    participant?: string;
-  };
-}
-
-/**
- * GET /v1/principal — who am I, for any credential.
- *
- * `grants` carry the SCOPE of each action, not just its name: two agents can both
- * hold conversations.list and only the scope tells them apart.
- */
-export interface ApiPrincipal {
-  kind: "admin" | "user" | "apikey";
-  tenant_id: string;
-  subject?: {
-    id: string;
-    /** The caller's own assignments, scope included — a translator is refused
-     *  /v1/team and has no other way to see what they were granted. */
-    assignments?: ApiRoleAssignment[];
-    email?: string;
-    first_name?: string;
-    last_name?: string;
-  };
-  grants: ApiGrant[];
 }
 
 /** A person the tenant has talked to, projected from membership rows. */
@@ -301,39 +133,6 @@ export interface PushSettingsPatch {
   include_sender: boolean;
   include_body: boolean;
   sender_source: "brand" | "agent";
-}
-
-// ── Appearance: web/SDK messenger branding (§8) ─────────────────────────────
-// One brand profile's config — the messenger look the widget + SDK render.
-// Mirrors domain.BrandConfig on the Go side.
-export interface ApiBrandConfig {
-  logo: string; // bucket object key (or legacy data:/http URL)
-  logoUrl?: string; // resolved signed URL for display (read-only, from server)
-  brand: string;
-  theme: "light" | "dark" | "auto";
-  font: "system" | "sild" | "inter" | "figtree" | "dmsans";
-  radius: "sharp" | "default" | "rounded" | "pillowy";
-  launcherIcon: "chat" | "message" | "help" | "sparkle" | "custom";
-  iconImg: string;
-  iconImgUrl?: string;
-  launcherPos: "left" | "right";
-  launcherSize: "sm" | "md" | "lg";
-  heading: string;
-  sub: string;
-  topics: string;
-  showTeam: boolean;
-  poweredBy: boolean;
-}
-
-export interface ApiBrand {
-  id: string;
-  name: string;
-  config: ApiBrandConfig;
-}
-
-export interface ApiBrands {
-  brands: ApiBrand[];
-  active_brand_id: string;
 }
 
 // ── Translations ───────────────────────────────────────────────────────────
@@ -398,200 +197,172 @@ export interface ApiTranslationPublished {
   locales: string[];
 }
 
+// Embedded sign-in config. The validator token is write-only: a read only says
+// whether one is stored.
+export interface ApiIdentityProvider {
+  embed_key: string;
+  validator_url: string;
+  has_validator_token: boolean;
+  allowed_origins: string[];
+  embedded_only: boolean;
+  updated_at: string;
+}
+
+export interface IdentityProviderInput {
+  validator_url: string;
+  /** Omit to keep the stored token; only allowed while the URL is unchanged. */
+  validator_token?: string;
+  allowed_origins: string[];
+  embedded_only: boolean;
+}
+
+export interface ApiEmbeddedSession {
+  token: string;
+  expires_at: string;
+  external_sub: string;
+  admin_id: string;
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 export const adminApi = {
   loginPassword: (email: string, password: string) =>
-    api.post<{ status: string; expires_at: string }>("/admin/auth/password", { email, password }),
-  logout: () => api.post<void>("/admin/auth/logout"),
+    http.post<{ status: string; expires_at: string }>("/v1/admin/auth/password", { email, password }),
+  logout: () => http.post<void>("/v1/admin/auth/logout", {}),
   googleLoginUrl: () => "/v1/admin/auth/google",
+  // The embedded inbox trades the host's user token for a session bearer; no
+  // cookie rides either call.
+  exchangeEmbedded: (embedKey: string, token: string) =>
+    http.post<ApiEmbeddedSession>("/v1/admin/auth/embedded", { embed_key: embedKey, token }, { anonymous: true }),
+  embedOrigins: (embedKey: string) =>
+    http.get<{ allowed_origins: string[] }>(`/v1/admin/auth/embedded/${enc(embedKey)}`, { anonymous: true }),
+  // Names the bearer explicitly: it may no longer be the client's credential,
+  // and keepalive lets the call outlive an unloading frame.
+  endEmbedded: (token: string) =>
+    http.post<void>("/v1/admin/auth/logout", {}, {
+      anonymous: true,
+      headers: { authorization: `Bearer ${token}` },
+      keepalive: true,
+    }),
 
   // ── Conversations ─────────────────────────────────────────────────────
-  // One endpoint backs the queue, the peer inbox, contact history and search.
   // Drains the cursor: the Details-panel history and the contact filter render a
   // whole list, with no scroll affordance to continue from.
-  listAllConversations: async (params?: ConversationParams) => {
+  listAllConversations: async (query: ConversationQuery) => {
     // collectAll keeps only the items, so the per-page contacts blocks are
     // re-read here and merged into one lookup for the whole drained list.
-    const pages: ApiExpandedContact[] = [];
-    const items = await collectAll<ApiQueueConversation>(async (cursor) => {
-      const page = await adminApi.listConversations({ ...params, cursor });
-      pages.push(...(page.contacts || []));
+    const contacts: ExpandedContact[] = [];
+    const items = await collectAll<ConversationRow>(async (cursor) => {
+      const page = await listConversations(http, { ...query, expand: WITH_PROFILES, cursor });
+      contacts.push(...(page.contacts || []));
       return page;
     });
-    return { items, contacts: pages };
+    return { items, contacts };
   },
-  listConversations: (params?: ConversationParams) => {
-    const q = new URLSearchParams();
-    if (params?.kind) q.set("kind", params.kind);
-    if (params?.status) q.set("status", params.status);
-    if (params?.assignmentStatus) q.set("assignment_status", params.assignmentStatus);
-    if (params?.assignee) q.set("assignee", params.assignee);
-    if (params?.participant) q.set("participant", params.participant);
-    if (params?.role) q.set("role", params.role);
-    if (params?.q) q.set("q", params.q);
-    if (params?.sort) q.set("sort", params.sort);
-    if (params?.order) q.set("order", params.order);
-    if (params?.limit) q.set("limit", String(params.limit));
-    if (params?.cursor) q.set("cursor", params.cursor);
-    // The panels render whole profiles, so the blob is asked for by name; the
-    // page carries one block instead of a fetch per row.
-    q.set("expand", "contacts.metadata");
-    const qs = q.toString();
-    return api.get<ApiQueuePage>(`/conversations${qs ? `?${qs}` : ""}`);
-  },
-  getConversation: (id: string) =>
-    api.get<ApiConversation>(`/conversations/${id}?expand=contacts.metadata`),
-  // cursor pages BACKWARD (older); ?since= below is the opposite direction.
-  listMessages: (id: string, cursor?: string) =>
-    api.get<ApiMessagesPage>(
-      `/conversations/${id}/messages?limit=100` +
-        (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "")
-    ),
-  // ?since= is a sync read, not a page: oldest-first, next_cursor always null, and
-  // continuation is `since=<last id received>` while has_more holds.
-  catchUpMessages: (id: string, since: string, limit = 100) =>
-    api.get<ApiMessagesPage>(
-      `/conversations/${id}/messages?since=${encodeURIComponent(since)}&limit=${limit}`
-    ),
-  postMessage: (
-    id: string,
-    body: string,
-    visibility: ApiVisibility = "participants",
-    attachments: AttachmentRef[] = []
-  ) => api.post<ApiMessage>(`/conversations/${id}/messages`, { body, visibility, attachments }),
-  // Issue a signed direct-to-bucket PUT URL for an attachment (§11).
-  issueUpload: (mimeType: string, sizeBytes: number, filename: string) =>
-    api.post<ApiUploadGrant>("/uploads", { mime_type: mimeType, size_bytes: sizeBytes, filename }),
-  // "me" is the only accepted assignee, so this cannot become reassignment.
-  claimAssignment: (id: string) =>
-    api.patch<ApiAssignment>(`/assignments/${id}`, { assignee_actor_id: "me" }),
-  closeAssignment: (id: string) =>
-    api.patch<ApiAssignment>(`/assignments/${id}`, { status: "closed" }),
-  closeConversation: (id: string) => api.post<{ status: string }>(`/conversations/${id}/close`),
 
   // ── Contacts (people, not threads) ────────────────────────────────────
-  listContacts: (q?: string) =>
-    api.get<ApiPage<ApiContact>>(`/contacts${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  listContacts: (q?: string) => http.get<Page<ApiContact>>("/v1/contacts", { query: { q } }),
 
   // ── Settings: API keys ────────────────────────────────────────────────
   // Settings screens render a whole collection, so they drain the cursor.
-  listApiKeys: () =>
-    collectAll<ApiKeyRecord>((cursor) =>
-      api.get<ApiPage<ApiKeyRecord>>(`/api-keys${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
-    ),
-  createApiKey: (label: string) => api.post<ApiKeyCreated>("/api-keys", { label }),
-  revokeApiKey: (id: string) => api.del<void>(`/api-keys/${id}`),
+  listApiKeys: () => collectAll<ApiKeyRecord>((cursor) => http.get("/v1/api-keys", { query: { cursor } })),
+  createApiKey: (label: string) => http.post<ApiKeyCreated>("/v1/api-keys", { label }),
+  revokeApiKey: (id: string) => http.del<void>(`/v1/api-keys/${id}`),
 
   // ── Settings: webhooks ────────────────────────────────────────────────
-  listWebhooks: () =>
-    collectAll<ApiWebhook>((cursor) =>
-      api.get<ApiPage<ApiWebhook>>(`/webhooks${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
-    ),
-  setWebhookActive: (id: string, active: boolean) =>
-    api.patch<void>(`/webhooks/${id}`, { active }),
-  deleteWebhook: (id: string) => api.del<void>(`/webhooks/${id}`),
-
-  // ── Signed-in principal ───────────────────────────────────────────────
-  // Grants carry each action's scope, so the peer surface renders from the
-  // decision the backend enforces.
-  me: () => api.get<ApiPrincipal>("/principal"),
+  listWebhooks: () => collectAll<ApiWebhook>((cursor) => http.get("/v1/webhooks", { query: { cursor } })),
+  setWebhookActive: (id: string, active: boolean) => http.patch<void>(`/v1/webhooks/${id}`, { active }),
+  deleteWebhook: (id: string) => http.del<void>(`/v1/webhooks/${id}`),
 
   // ── Settings: team ────────────────────────────────────────────────────
-  listTeam: () =>
-    collectAll<ApiTeamMember>((cursor) =>
-      api.get<ApiPage<ApiTeamMember>>(`/team${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)
-    ),
-  listRoles: () => api.get<{ roles: ApiRoleDefinition[] }>("/roles"),
+  listTeam: () => collectAll<ApiTeamMember>((cursor) => http.get("/v1/team", { query: { cursor } })),
+  listRoles: () => http.get<{ roles: ApiRoleDefinition[] }>("/v1/roles"),
   inviteMember: (member: {
     email: string;
     first_name: string;
     last_name: string;
-    role: ApiPlatformRole;
-    scope: ApiRoleScope;
-  }) => api.post<ApiTeamMember>("/team", member),
-  assignRole: (id: string, role: ApiPlatformRole, scope: ApiRoleScope) =>
-    api.post<void>(`/team/${id}/roles`, { role, scope }),
-  setRoleScope: (id: string, role: ApiPlatformRole, scope: ApiRoleScope) =>
-    api.put<void>(`/team/${id}/roles/${role}`, { scope }),
-  removeRole: (id: string, role: ApiPlatformRole) => api.del<void>(`/team/${id}/roles/${role}`),
+    role: PlatformRole;
+    scope: RoleScope;
+  }) => http.post<ApiTeamMember>("/v1/team", member),
+  assignRole: (id: string, role: PlatformRole, scope: RoleScope) =>
+    http.post<void>(`/v1/team/${id}/roles`, { role, scope }),
+  setRoleScope: (id: string, role: PlatformRole, scope: RoleScope) =>
+    http.put<void>(`/v1/team/${id}/roles/${role}`, { scope }),
+  removeRole: (id: string, role: PlatformRole) => http.del<void>(`/v1/team/${id}/roles/${role}`),
+  // Empty unlinks. 409 external_sub_taken when another member holds it.
+  setExternalSub: (id: string, externalSub: string) =>
+    http.put<void>(`/v1/team/${id}/external-sub`, { external_sub: externalSub }),
+
+  // ── Settings: embedded sign-in ────────────────────────────────────────
+  getIdentityProvider: () => http.get<ApiIdentityProvider>("/v1/identity-provider"),
+  putIdentityProvider: (input: IdentityProviderInput) => http.put<ApiIdentityProvider>("/v1/identity-provider", input),
+  deleteIdentityProvider: () => http.del<void>("/v1/identity-provider"),
+
+  // ── Settings: service accounts and queues ─────────────────────────────
+  createServiceAccount: (account: {
+    name: string;
+    display_name: string;
+    role: PlatformRole;
+    scope: RoleScope;
+  }) => http.post<ApiTeamMember>("/v1/service-accounts", account),
+  createServiceKey: (id: string, label: string) =>
+    http.post<ApiKeyCreated>(`/v1/service-accounts/${id}/keys`, { label }),
+  listQueues: () => collectAll<ApiQueue>((cursor) => http.get("/v1/queues", { query: { cursor } })),
+  // Creates the queue when the key is new; replaces its settings otherwise.
+  putQueue: (key: string, settings: QueueSettings) => http.put<ApiQueue>(`/v1/queues/${enc(key)}`, settings),
 
   // ── Settings: channels (§6.2) ─────────────────────────────────────────
   // Read returns the version; the write quotes it back, so a concurrent edit
   // fails loudly (412) instead of being overwritten.
-  getEmailChannel: () => api.getVersioned<ApiEmailChannel>("/channels/email"),
+  getEmailChannel: () => http.exchange<ApiEmailChannel>("GET", "/v1/channels/email"),
   updateEmailChannel: (patch: EmailChannelPatch, etag: string) =>
-    api.patchIfMatch<ApiEmailChannel>("/channels/email", patch as Record<string, unknown>, etag),
+    http.exchange<ApiEmailChannel>("PATCH", "/v1/channels/email", { body: patch, headers: { "if-match": etag } }),
 
   // ── Settings: push (§5.5) ─────────────────────────────────────────────
-  getPushChannel: () => api.get<ApiPushChannel>("/channels/push"),
-  updatePushSettings: (patch: PushSettingsPatch) =>
-    api.patch<void>("/channels/push", patch as unknown as Record<string, unknown>),
+  getPushChannel: () => http.get<ApiPushChannel>("/v1/channels/push"),
+  updatePushSettings: (patch: PushSettingsPatch) => http.patch<void>("/v1/channels/push", patch),
   // The credential is checked against the provider before it is stored, so a
   // rejection here means the credential, not the network.
-  setPushCredential: (credential: unknown) =>
-    api.put<void>("/channels/push/credential", { credential }),
-  deletePushCredential: () => api.del<void>("/channels/push/credential"),
-  testPushSend: (token: string) => api.post<void>("/channels/push/test", { token }),
+  setPushCredential: (credential: unknown) => http.put<void>("/v1/channels/push/credential", { credential }),
+  deletePushCredential: () => http.del<void>("/v1/channels/push/credential"),
+  testPushSend: (token: string) => http.post<void>("/v1/channels/push/test", { token }),
 
   // ── Translations ──────────────────────────────────────────────────────
   listTranslationProjects: () =>
-    collectAll<ApiTranslationProject>((cursor) =>
-      api.get<ApiPage<ApiTranslationProject>>(
-        `/translations/projects${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
-      )
-    ),
+    collectAll<ApiTranslationProject>((cursor) => http.get("/v1/translations/projects", { query: { cursor } })),
   createTranslationProject: (id: string, name: string) =>
-    api.post<ApiTranslationProject>("/translations/projects", { id, name }),
-  deleteTranslationProject: (project: string) =>
-    api.del<void>(`/translations/projects/${encodeURIComponent(project)}`),
+    http.post<ApiTranslationProject>("/v1/translations/projects", { id, name }),
+  deleteTranslationProject: (project: string) => http.del<void>(`/v1/translations/projects/${enc(project)}`),
 
   // A key is the tenant's declaration; the values under it are its translations.
   declareTranslationKey: (project: string, key: string, source: string) =>
-    api.post<void>(`/translations/projects/${encodeURIComponent(project)}/declarations`, { key, source }),
+    http.post<void>(`/v1/translations/projects/${enc(project)}/declarations`, { key, source }),
   undeclareTranslationKey: (project: string, key: string) =>
-    api.del<void>(
-      `/translations/projects/${encodeURIComponent(project)}/declarations/${encodeURIComponent(key)}`
-    ),
+    http.del<void>(`/v1/translations/projects/${enc(project)}/declarations/${enc(key)}`),
 
   // Replaces the project's settings whole, so every field is sent every time.
   saveTranslationProject: (project: string, settings: TranslationProjectSettings) =>
-    api.put<void>(`/translations/projects/${encodeURIComponent(project)}`, settings as unknown as Record<string, unknown>),
+    http.put<void>(`/v1/translations/projects/${enc(project)}`, settings),
 
   // Filtering and search are server-side, on the same cursor as every other list.
-  listTranslationKeys: (project: string, params: TranslationKeyParams) => {
-    const q = new URLSearchParams({ locale: params.locale });
-    if (params.state) q.set("state", params.state);
-    if (params.namespace) q.set("namespace", params.namespace);
-    if (params.q) q.set("q", params.q);
-    if (params.limit) q.set("limit", String(params.limit));
-    if (params.cursor) q.set("cursor", params.cursor);
-    return api.get<ApiPage<ApiTranslationKey>>(
-      `/translations/projects/${encodeURIComponent(project)}/keys?${q.toString()}`
-    );
-  },
+  listTranslationKeys: (project: string, params: TranslationKeyParams) =>
+    http.get<Page<ApiTranslationKey>>(`/v1/translations/projects/${enc(project)}/keys`, { query: { ...params } }),
   setTranslationValue: (project: string, key: string, locale: string, value: string) =>
-    api.put<void>(
-      `/translations/projects/${encodeURIComponent(project)}/keys/${encodeURIComponent(key)}`,
-      { locale, value }
-    ),
+    http.put<void>(`/v1/translations/projects/${enc(project)}/keys/${enc(key)}`, { locale, value }),
   resetTranslationValue: (project: string, key: string, locale: string) =>
-    api.del<void>(
-      `/translations/projects/${encodeURIComponent(project)}/keys/${encodeURIComponent(key)}?locale=${encodeURIComponent(locale)}`
-    ),
+    http.del<void>(`/v1/translations/projects/${enc(project)}/keys/${enc(key)}`, undefined, { query: { locale } }),
 
   publishTranslationRelease: (project: string) =>
-    api.post<ApiTranslationPublished>(`/translations/projects/${encodeURIComponent(project)}/releases`),
+    http.post<ApiTranslationPublished>(`/v1/translations/projects/${enc(project)}/releases`, {}),
   listTranslationReleases: (project: string, cursor?: string | null) =>
-    api.get<ApiPage<ApiTranslationRelease>>(
-      `/translations/projects/${encodeURIComponent(project)}/releases${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
-    ),
+    http.get<Page<ApiTranslationRelease>>(`/v1/translations/projects/${enc(project)}/releases`, { query: { cursor } }),
   rollbackTranslationRelease: (project: string, version: number) =>
-    api.post<ApiTranslationPublished>(
-      `/translations/projects/${encodeURIComponent(project)}/releases/${version}/rollback`
-    ),
+    http.post<ApiTranslationPublished>(`/v1/translations/projects/${enc(project)}/releases/${version}/rollback`, {}),
 
   // ── Settings: appearance (§8) — brands saved as one staged set ─────────
-  getBrands: () => api.getVersioned<ApiBrands>("/brands"),
-  saveBrands: (brands: ApiBrand[], activeBrandId: string, etag: string) =>
-    api.putIfMatch<ApiBrands>("/brands", { brands, active_brand_id: activeBrandId }, etag),
+  getBrands: () => http.exchange<Brands>("GET", "/v1/brands"),
+  saveBrands: (brands: Brand[], activeBrandId: string, etag: string) =>
+    http.exchange<Brands>("PUT", "/v1/brands", {
+      body: { brands, active_brand_id: activeBrandId },
+      headers: { "if-match": etag },
+    }),
 };

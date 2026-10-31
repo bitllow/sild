@@ -1,20 +1,20 @@
-import type {
-  ApiConversation,
-  ApiEmailChannel,
-  ApiKeyRecord,
-  ApiMember,
-  ApiMessage,
-  ApiTeamMember,
-  ApiWebhook,
-} from "@/api/admin";
-import type { ApiMessagesPage, ApiQueueConversation } from "@/api/admin";
-import type { ApiAssignment } from "@/api/admin";
-import { profilesOf } from "@/api/admin";
+import type * as wire from "@sild/client";
+import type { ApiEmailChannel, ApiKeyRecord, ApiTeamMember, ApiWebhook } from "@/api/admin";
 import type { MessageAttachment } from "@/components/ds";
 import type { Channel, Conversation, EmailChannel, Member, Message, ApiKey, TeamMember, Webhook, UiStatus } from "./types";
 
 /** Profile blobs by external_user_id, from a response's contacts block. */
 export type Profiles = Record<string, Record<string, unknown>>;
+
+// Indexes an expansion block by person, so a member view can be rendered with
+// the profile the same response already carried.
+export function profilesOf(block?: wire.ExpandedContact[] | null): Profiles {
+  const out: Profiles = {};
+  for (const c of block || []) {
+    if (c.metadata) out[c.external_user_id] = c.metadata;
+  }
+  return out;
+}
 
 export function clockTime(iso: string): string {
   const d = new Date(iso);
@@ -48,13 +48,13 @@ export function shortDate(iso: string): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-function memberDisplayName(m: ApiMember): string {
+function memberDisplayName(m: wire.Member): string {
   return m.name || m.external_user_id || m.internal_actor_id || "Member";
 }
 
 // profile is the person's blob from the response's contacts block; a member view
 // carries only the name.
-export function mapMember(m: ApiMember, profile?: Record<string, unknown>): Member {
+export function mapMember(m: wire.Member, profile?: Record<string, unknown>): Member {
   const meta: Record<string, string> = {};
   for (const [k, v] of Object.entries(profile || {})) {
     if (k === "name") continue; // shown as the title
@@ -63,11 +63,11 @@ export function mapMember(m: ApiMember, profile?: Record<string, unknown>): Memb
   return { name: memberDisplayName(m), role: m.conv_role, meta, extId: m.external_user_id };
 }
 
-/** Map a realtime message envelope payload (same shape as ApiMessage) using the
+/** Map a realtime message envelope payload (same shape as wire.Message) using the
  *  already-loaded UI conversation to resolve the author. */
 // mapAttachments converts the API attachment shape to the UI render shape,
 // deriving kind (image → inline render) from the mime type.
-export function mapAttachments(m: ApiMessage): MessageAttachment[] {
+export function mapAttachments(m: wire.Message): MessageAttachment[] {
   return (m.attachments || []).map((a) => ({
     disposition: a.disposition,
     kind: a.mime_type?.startsWith("image/") ? "image" : "file",
@@ -76,7 +76,7 @@ export function mapAttachments(m: ApiMessage): MessageAttachment[] {
   }));
 }
 
-export function mapRealtimeMessage(m: ApiMessage, conv: Conversation): Message {
+export function mapRealtimeMessage(m: wire.Message, conv: Conversation): Message {
   const isAgent = m.sender_kind === "agent" || m.sender_kind === "bot" || !!m.internal_actor_id;
   const system = m.sender_kind === "system";
   let author: string | undefined;
@@ -98,7 +98,7 @@ export function mapRealtimeMessage(m: ApiMessage, conv: Conversation): Message {
   };
 }
 
-export function mapMessage(m: ApiMessage, conv: ApiConversation): Message {
+export function mapMessage(m: wire.Message, conv: wire.Conversation): Message {
   const isAgent = m.sender_kind === "agent" || m.sender_kind === "bot" || !!m.internal_actor_id;
   const system = m.sender_kind === "system";
   let author: string | undefined;
@@ -123,7 +123,7 @@ export function mapMessage(m: ApiMessage, conv: ApiConversation): Message {
   };
 }
 
-function deriveStatus(conv: ApiConversation, a?: ApiAssignment): UiStatus {
+function deriveStatus(conv: wire.Conversation, a?: wire.Assignment): UiStatus {
   if (conv.status === "closed") return "closed";
   return (a?.status as UiStatus) || "queued";
 }
@@ -131,7 +131,7 @@ function deriveStatus(conv: ApiConversation, a?: ApiAssignment): UiStatus {
 // conversationShell derives the row fields shared by the queue list and the full
 // fetch (identity, name, channel, status, members). Each builder fills in the
 // parts that differ: history, preview, and last-activity timestamp.
-function conversationShell(conv: ApiConversation, a: ApiAssignment | undefined, profiles: Profiles) {
+function conversationShell(conv: wire.Conversation, a: wire.Assignment | undefined, profiles: Profiles) {
   const client = conv.members.find((m) => m.conv_role === "client") || conv.members[0];
   const name = client ? memberDisplayName(client) : conv.reference || "Conversation";
   const channel = conv.members.some((m) => m.member_kind === "email") ? "email" : "app";
@@ -153,9 +153,9 @@ function conversationShell(conv: ApiConversation, a: ApiAssignment | undefined, 
 }
 
 export function buildConversation(
-  conv: ApiConversation,
-  page: ApiMessagesPage,
-  assignment?: ApiAssignment,
+  conv: wire.Conversation,
+  page: wire.Page<wire.Message>,
+  assignment?: wire.Assignment,
   profiles: Profiles = profilesOf(conv.contacts)
 ): Conversation {
   const a = assignment || conv.assignment;
@@ -179,7 +179,7 @@ export function buildConversation(
 
 /** Build a queue row from the paginated list endpoint: members + last-message
  *  preview + last activity, but NO history (messages load on open). */
-export function buildQueueRow(conv: ApiQueueConversation, profiles: Profiles = {}): Conversation {
+export function buildQueueRow(conv: wire.ConversationRow, profiles: Profiles = {}): Conversation {
   const lastTs = conv.last_activity;
   // Preview the matching fragment, or an old-message hit looks unrelated.
   const preview =
@@ -199,6 +199,7 @@ export function mapApiKey(k: ApiKeyRecord): ApiKey {
     label: k.label || "API key",
     masked: `${k.prefix}………`,
     created: shortDate(k.created_at),
+    actorId: k.actor_id ?? undefined,
   };
 }
 
@@ -209,11 +210,14 @@ export function mapWebhook(w: ApiWebhook): Webhook {
 export function mapTeamMember(t: ApiTeamMember): TeamMember {
   const local = t.email.split("@")[0].replace(/[._-]+/g, " ");
   const name = local.replace(/\b\w/g, (c) => c.toUpperCase());
+  const service = t.kind === "service";
   return {
     id: t.id,
-    name: name || t.email,
+    kind: service ? "service" : "human",
+    name: (service && t.first_name) || name || t.email,
     email: t.email,
     assignments: (t.assignments || []).map((a) => ({ role: a.role, scope: a.scope || {} })),
+    externalSub: t.external_sub ?? "",
   };
 }
 

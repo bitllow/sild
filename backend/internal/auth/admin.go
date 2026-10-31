@@ -52,12 +52,14 @@ type SessionToken struct {
 }
 
 // NewSessionToken mints a random admin session token.
-func NewSessionToken() (SessionToken, error) {
+func NewSessionToken() (SessionToken, error) { return newSessionToken("") }
+
+func newSessionToken(prefix string) (SessionToken, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return SessionToken{}, err
 	}
-	raw := hex.EncodeToString(b)
+	raw := prefix + hex.EncodeToString(b)
 	return SessionToken{Raw: raw, Hash: HashSessionToken(raw)}, nil
 }
 
